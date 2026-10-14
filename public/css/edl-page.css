@@ -1,0 +1,26 @@
+.room table.elements {table-layout:fixed}
+.room table.elements th:first-child {width:20%!important}
+.room table.elements th:nth-child(2) {width:25%!important}
+.room table.elements th:last-child {width:25%}
+.room table.elements td input[type=text] {width:100%;min-width:0;box-sizing:border-box}
+.edl-element-photo .edl-photos {padding:0!important;gap:8px!important}
+.edl-photos .photo-add {font-size:13px;margin:0;white-space:normal}
+.edl-photo {display:flex;flex-direction:column;gap:6px}
+.edl-photo button {border:1px solid #d7dce1;border-radius:6px;background:white;padding:4px 8px;color:#8b3030}
+.edl-photo-heading {width:100%;color:#59636f;font-weight:600}
+.edl-photo-empty {color:#68727e;font-size:13px}
+@media(max-width:767px){
+.room table.elements,.room table.elements tbody,.room table.elements tr,.room table.elements td {display:block;width:100%;box-sizing:border-box}
+.room table.elements thead {display:none}
+.room table.elements tr {padding:12px;border-bottom:1px solid #d7dce1}
+.room table.elements td {border:0!important;padding:6px 0!important}
+.room table.elements td::before {display:block;margin-bottom:6px;color:#59636f;font-weight:600;font-size:13px}
+.room table.elements td:nth-child(1)::before {content:'Élément'}
+.room table.elements td:nth-child(2)::before {content:'État'}
+.room table.elements td:nth-child(3)::before {content:'Observations'}
+.room table.elements td:nth-child(4)::before {content:'Photo facultative'}
+.edl-element-photo .edl-photo-heading {display:none}
+.room .etat-select {display:flex;flex-wrap:wrap;gap:6px}
+.room .room-head {flex-wrap:wrap;gap:8px}
+}
+@media print {.edl-photos .photo-add,.edl-photo button {display:none}}

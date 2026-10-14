@@ -1,0 +1,41 @@
+/* Typographie commune aux pages de l'application.
+ * 15 px = 11,25 pt ; les valeurs en rem respectent le zoom du navigateur.
+ */
+:root {
+    --app-font-family: Arial, Helvetica, sans-serif;
+    --app-font-min: max(15px, 0.9375rem);
+    --app-font-body: max(16px, 1rem);
+}
+@media screen {
+    html { font-size: 100%; }
+    body {
+        font-family: var(--app-font-family) !important;
+        font-size: var(--app-font-body) !important;
+        line-height: 1.5;
+    }
+    /* Ne pas remplacer les polices des icones, du code ou des graphiques SVG. */
+    body :is(h1, h2, h3, h4, h5, h6, p, div, span, a, li, dt, dd,
+        label, legend, input, textarea, select, option, button, table, th, td,
+        small, strong, em, b, blockquote, figcaption, summary):not(
+        [class*="fa-"], [class*="icon-"], [class*="ti-"], [class*="icofont"],
+        [class*="ion-"], [class*="typcn"], [class*="wi-"], [class*="glyphicon"],
+        .fa, .fas, .far, .fab, .fal, .fad, .feather, .material-icons,
+        .material-symbols-outlined, pre *, code *, svg *) {
+        font-family: var(--app-font-family) !important;
+    }
+    input, select, textarea, button { font-size: inherit; }
+    small, sub, sup, .small, .text-xs, .text-sm,
+    .badge, .btn, .btn-sm, .form-control, .form-control-sm, .form-select, .form-text,
+    .help-block, .invalid-feedback, .valid-feedback,
+    .select2-container, .dropdown-menu, .tooltip-inner, .popover,
+    .dataTables_info, .dataTables_length, .dataTables_filter,
+    .pagination, .pcoded-mtext, .pcoded-mcaption {
+        font-size: var(--app-font-min) !important;
+    }
+    p, label, td, th, .form-text { line-height: 1.5; }
+    .badge { white-space: normal; }
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]),
+    select, textarea {
+        font-size: var(--app-font-body) !important;
+    }
+}

@@ -1,0 +1,857 @@
+/*
+ * Barre latérale et barre du haut des pages admin Blade, alignées sur le
+ * layout React (resources/js/components/layout/*, composant Sidebar shadcn).
+ * Fichier statique (pas de Vite) : toutes les règles sont préfixées par
+ * .admin-shell pour ne pas toucher au contenu des pages (Bootstrap, thème).
+ */
+
+@font-face {
+    font-family: 'DM Sans Shell';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 1000;
+    src: url('../fonts/dm-sans/dm-sans-latin-ext-wght-normal.woff2') format('woff2-variations');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: 'DM Sans Shell';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 1000;
+    src: url('../fonts/dm-sans/dm-sans-latin-wght-normal.woff2') format('woff2-variations');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+.admin-shell {
+    --shell-primary: #006400;
+    --shell-secondary: #86bb46;
+    --shell-surface: #f4f6f1;
+    --shell-soft: #ebf8de;
+    --shell-muted: #54595f;
+    --shell-text: #1f2328;
+    --shell-border: #e6e9e2;
+    --shell-accent: #faab04;
+    --shell-width: 16rem;
+    --shell-width-icon: calc(3.5rem + 1px);
+    --shell-width-mobile: 18rem;
+    --shell-font: 'DM Sans Shell', 'Segoe UI', system-ui, sans-serif;
+
+    min-height: 100vh;
+    background: var(--shell-surface);
+}
+
+.admin-shell svg {
+    flex-shrink: 0;
+}
+
+.admin-shell .as-sidebar,
+.admin-shell .as-topbar,
+.admin-shell .as-dropdown,
+.as-tooltip {
+    font-family: var(--shell-font);
+    font-size: 14px;
+    line-height: 1.43;
+    -webkit-font-smoothing: antialiased;
+}
+
+.admin-shell .as-sidebar a,
+.admin-shell .as-topbar a,
+.admin-shell .as-sidebar a:hover,
+.admin-shell .as-topbar a:hover {
+    text-decoration: none;
+    font-size: 14px;
+}
+
+.admin-shell button.as-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+}
+
+.admin-shell .as-btn:focus-visible,
+.admin-shell .as-menu-button:focus-visible,
+.admin-shell .as-brand:focus-visible,
+.admin-shell .as-dropdown-item:focus-visible {
+    outline: 2px solid var(--shell-secondary);
+    outline-offset: 0;
+}
+
+/* --- Barre latérale ------------------------------------------------------ */
+
+.admin-shell .as-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    width: var(--shell-width);
+    height: 100vh;
+    background: #fff;
+    color: var(--shell-muted);
+    border-right: 1px solid var(--shell-border);
+    transition: width 0.2s linear, transform 0.2s ease-out;
+}
+
+.admin-shell .as-sidebar-header {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 1rem 0.5rem;
+    border-bottom: 1px solid var(--shell-border);
+}
+
+.admin-shell .as-brand-row {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.admin-shell .as-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 100%;
+    min-width: 0;
+    padding: 0 0.25rem;
+    border-radius: 8px;
+}
+
+.admin-shell .as-brand img {
+    width: 4rem;
+    height: 4rem;
+    flex-shrink: 0;
+    border-radius: 8px;
+    object-fit: contain;
+}
+
+.admin-shell .as-brand-name {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--shell-primary);
+}
+
+.admin-shell .as-trigger {
+    width: 1.75rem;
+    height: 1.75rem;
+    flex-shrink: 0;
+    border-radius: 8px;
+    color: var(--shell-muted);
+}
+
+.admin-shell .as-trigger:hover {
+    background: var(--shell-soft);
+    color: var(--shell-primary);
+}
+
+.admin-shell .as-content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.5rem;
+}
+
+.admin-shell .as-group-label {
+    display: flex;
+    align-items: center;
+    height: 2rem;
+    padding: 0 0.5rem;
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(84, 89, 95, 0.7);
+    white-space: nowrap;
+    transition: margin 0.2s linear, opacity 0.2s linear;
+}
+
+.admin-shell .as-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.admin-shell .as-menu-button {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    height: 2.5rem;
+    padding: 0.5rem;
+    overflow: hidden;
+    border-right: 3px solid transparent;
+    border-radius: 0;
+    color: var(--shell-muted);
+    transition: width 0.2s, height 0.2s, padding 0.2s;
+}
+
+.admin-shell .as-menu-button span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.admin-shell .as-menu-button:hover,
+.admin-shell .as-menu-button:focus,
+.admin-shell .as-menu-button[data-active='true'] {
+    background: var(--shell-soft);
+    color: var(--shell-primary);
+}
+
+.admin-shell .as-menu-button[data-active='true'] {
+    border-right-color: var(--shell-primary);
+    font-weight: 500;
+}
+
+/* --- Sous-menu (config/admin_menu.php `children`) ------------------------ */
+
+.admin-shell .as-menu-item {
+    position: relative;
+}
+
+.admin-shell .as-menu-item[data-has-sub] > .as-menu-button {
+    padding-right: 2.25rem;
+}
+
+/* Rubrique dépliée dont un module est actif : c'est le module qui porte la mise en évidence. */
+.admin-shell .as-menu-item[data-active-child='true'] > .as-menu-button[data-active='true']:not(:hover):not(:focus-visible) {
+    background: transparent;
+    border-right-color: transparent;
+}
+
+.admin-shell .as-sub-toggle {
+    position: absolute;
+    top: 0.375rem;
+    right: 0.375rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 6px;
+    color: var(--shell-muted);
+}
+
+.admin-shell .as-sub-toggle:hover {
+    background: #fff;
+    color: var(--shell-primary);
+}
+
+.admin-shell .as-menu-item[data-open='true'] > .as-sub-toggle svg {
+    transform: rotate(180deg);
+}
+
+.admin-shell .as-sub-toggle svg {
+    transition: transform 0.25s ease;
+}
+
+/*
+ * Ouverture/fermeture fluide : la ligne de grille passe de 0fr à 1fr (hauteur
+ * réelle du contenu, sans max-height arbitraire) avec un fondu. `visibility`
+ * bascule après l'animation à la fermeture pour retirer les liens du parcours clavier.
+ */
+.admin-shell .as-sub-wrap {
+    display: grid;
+    grid-template-rows: 0fr;
+    margin: 0;
+    opacity: 0;
+    visibility: hidden;
+    transition: grid-template-rows 0.25s ease, margin 0.25s ease, opacity 0.2s ease, visibility 0s linear 0.25s;
+}
+
+.admin-shell .as-menu-item[data-open='true'] > .as-sub-wrap {
+    grid-template-rows: 1fr;
+    margin: 0.125rem 0 0.375rem;
+    opacity: 1;
+    visibility: visible;
+    transition: grid-template-rows 0.25s ease, margin 0.25s ease, opacity 0.2s ease 0.05s, visibility 0s;
+}
+
+.admin-shell .as-sub {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    margin: 0 0 0 1.0625rem;
+    padding: 0 0 0 0.5rem;
+    overflow: hidden;
+    border-left: 1px solid var(--shell-border);
+    list-style: none;
+}
+
+.admin-shell .as-sub-title {
+    display: none;
+}
+
+.admin-shell .as-sub-button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    height: 2rem;
+    padding: 0 0.5rem;
+    border-radius: 6px;
+    color: var(--shell-muted);
+}
+
+.admin-shell .as-sidebar .as-sub-button {
+    font-size: 13.5px;
+}
+
+.admin-shell .as-sub-button span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.admin-shell .as-sub-button:hover,
+.admin-shell .as-sub-button:focus-visible,
+.admin-shell .as-sub-button[data-active='true'] {
+    background: var(--shell-soft);
+    color: var(--shell-primary);
+}
+
+.admin-shell .as-sub-button[data-active='true'] {
+    font-weight: 500;
+}
+
+.admin-shell .as-sub-button:focus-visible,
+.admin-shell .as-sub-toggle:focus-visible {
+    outline: 2px solid var(--shell-secondary);
+    outline-offset: 0;
+}
+
+/* Le sous-menu coupe ce qui dépasse (animation) : contour de focus vers l'intérieur. */
+.admin-shell .as-sub-button:focus-visible {
+    outline-offset: -2px;
+}
+
+/* --- Zone principale ----------------------------------------------------- */
+
+.admin-shell .as-inset {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 100vh;
+    margin-left: var(--shell-width);
+    /*
+     * Le thème (style.css) met `overflow-x: hidden` sur body : un contenu un peu
+     * trop large (.row Bootstrap, tableau…) rendait la page défilable sans barre
+     * (focus, pavé tactile) et la barre du haut + le contenu glissaient sous la
+     * barre latérale fixe. `clip` coupe ce débordement sans créer de conteneur
+     * de défilement (la barre du haut reste sticky). `position: relative` est
+     * indispensable : sans lui, les éléments en position absolue (ex. .sr-only
+     * dans un tableau large) échappent au clip et élargissent quand même la page.
+     */
+    position: relative;
+    overflow-x: clip;
+    background: var(--shell-surface);
+    transition: margin-left 0.2s linear;
+}
+
+.admin-shell .as-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.75rem;
+    height: 4rem;
+    padding: 0 1.5rem;
+    background: #fff;
+    border-bottom: 1px solid var(--shell-border);
+}
+
+.admin-shell .as-topbar .as-topbar-trigger {
+    margin-left: -0.25rem;
+}
+
+.admin-shell .as-title {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 16px;
+    font-weight: 500;
+    color: #111827;
+}
+
+/* Fil d'Ariane (écrans larges uniquement ; remplace alors le titre). */
+.admin-shell .as-breadcrumb {
+    display: none;
+    min-width: 0;
+}
+
+.admin-shell .as-breadcrumb ol {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-weight: 300;
+    color: var(--shell-muted, #54595f);
+    white-space: nowrap;
+}
+
+.admin-shell .as-breadcrumb li {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.admin-shell .as-breadcrumb a {
+    color: inherit;
+    font-weight: 300;
+}
+
+.admin-shell .as-breadcrumb a:hover {
+    color: var(--shell-primary, #006400);
+}
+
+.admin-shell .as-breadcrumb [aria-current="page"] {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #111827;
+}
+
+.admin-shell .as-breadcrumb svg {
+    color: #a5adbc;
+}
+
+@media (min-width: 1024px) {
+    .admin-shell .as-title {
+        display: none;
+    }
+
+    .admin-shell .as-breadcrumb {
+        display: block;
+    }
+}
+
+.admin-shell .as-main {
+    flex: 1;
+    min-width: 0;
+}
+
+/* --- Menu utilisateur ---------------------------------------------------- */
+
+.admin-shell .as-user {
+    position: relative;
+    margin-left: auto;
+}
+
+.admin-shell .as-user-trigger {
+    gap: 0.625rem;
+    padding: 0.25rem 0.375rem 0.25rem 0.25rem;
+    border-radius: 8px;
+    color: inherit;
+    text-align: left;
+}
+
+.admin-shell .as-user-trigger:hover,
+.admin-shell .as-user-trigger[aria-expanded='true'] {
+    background: var(--shell-soft);
+}
+
+.admin-shell .as-avatar {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: var(--shell-primary);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Photo par-dessus les initiales : si elle ne charge pas, elle est retirée et les initiales restent visibles. */
+.admin-shell .as-avatar img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.admin-shell .as-user-text {
+    display: grid;
+    min-width: 0;
+    line-height: 1.25;
+}
+
+.admin-shell .as-user-text span {
+    max-width: 12rem;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.admin-shell .as-user-name {
+    font-weight: 500;
+    color: #111827;
+}
+
+.admin-shell .as-user-role {
+    font-size: 12px;
+    color: var(--shell-muted);
+}
+
+.admin-shell .as-user-chevron {
+    color: var(--shell-muted);
+}
+
+.admin-shell .as-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 40;
+    min-width: 14rem;
+    padding: 0.25rem;
+    background: #fff;
+    color: var(--shell-text);
+    border: 1px solid var(--shell-border);
+    border-radius: 8px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+}
+
+.admin-shell .as-dropdown[hidden] {
+    display: none;
+}
+
+.admin-shell .as-dropdown-label {
+    padding: 0.375rem 0.5rem;
+}
+
+.admin-shell .as-dropdown-label span {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.admin-shell .as-dropdown-sep {
+    height: 1px;
+    margin: 0.25rem -0.25rem;
+    background: var(--shell-border);
+}
+
+.admin-shell .as-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.375rem 0.5rem;
+    border-radius: 6px;
+    color: var(--shell-text);
+    font-size: 14px;
+    justify-content: flex-start;
+}
+
+/* Le bouton Déconnexion doit s'aligner exactement sur le lien « Mon profil » (button.as-btn centre par défaut). */
+.admin-shell button.as-dropdown-item {
+    display: flex;
+    justify-content: flex-start;
+    padding: 0.375rem 0.5rem;
+    line-height: inherit;
+    text-align: left;
+}
+
+.admin-shell .as-dropdown-item:hover,
+.admin-shell .as-dropdown-item:focus {
+    background: var(--shell-soft);
+    color: var(--shell-primary);
+}
+
+.admin-shell .as-dropdown-item.as-danger,
+.admin-shell .as-dropdown-item.as-danger:hover,
+.admin-shell .as-dropdown-item.as-danger:focus {
+    color: #dc2626;
+}
+
+.admin-shell .as-dropdown-item.as-danger:hover,
+.admin-shell .as-dropdown-item.as-danger:focus {
+    background: rgba(220, 38, 38, 0.1);
+}
+
+.admin-shell .as-backdrop {
+    display: none;
+}
+
+/* --- Info-bulle du mode replié ------------------------------------------- */
+
+.as-tooltip {
+    position: fixed;
+    z-index: 50;
+    padding: 0.375rem 0.75rem;
+    border-radius: 8px;
+    background: #006400;
+    color: #fff;
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.as-tooltip[hidden] {
+    display: none;
+}
+
+/* --- Mode replié (bureau) ------------------------------------------------ */
+
+@media (min-width: 768px) {
+    .admin-shell[data-state='collapsed'] .as-sidebar {
+        width: var(--shell-width-icon);
+    }
+
+    .admin-shell[data-state='collapsed'] .as-inset {
+        margin-left: var(--shell-width-icon);
+    }
+
+    .admin-shell[data-state='collapsed'] .as-sidebar-header {
+        height: auto;
+        padding: 0.75rem 0.5rem;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-brand {
+        padding: 0;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-brand img {
+        width: 2.25rem;
+        height: 2.25rem;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-brand-name {
+        display: none;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-content {
+        overflow: hidden;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-group-label {
+        margin-top: -2rem;
+        opacity: 0;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-menu-button {
+        width: 2.5rem;
+        padding: 0.5rem 0.6875rem;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-menu-button span {
+        display: none;
+    }
+
+    /* Mode replié : pas de sous-menu dans la barre, mais un menu flottant au survol / focus. */
+    .admin-shell[data-state='collapsed'] .as-menu-item[data-has-sub] > .as-menu-button {
+        padding-right: 0.6875rem;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-menu-item[data-active-child='true'] > .as-menu-button[data-active='true'] {
+        background: var(--shell-soft);
+        border-right-color: var(--shell-primary);
+    }
+
+    /* Le sous-menu ne prend pas de place dans la barre repliée : seul le menu flottant s'affiche. */
+    .admin-shell[data-state='collapsed'] .as-menu-item[data-has-sub] > .as-sub-wrap {
+        display: block;
+        margin: 0;
+        opacity: 1;
+        visibility: visible;
+        transition: none;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-sub-toggle,
+    .admin-shell[data-state='collapsed'] .as-menu-item[data-has-sub] .as-sub {
+        display: none;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-menu-item[data-flyout='true'] .as-sub {
+        position: fixed;
+        left: calc(var(--shell-width-icon) + 4px);
+        z-index: 50;
+        display: flex;
+        min-width: 15rem;
+        max-height: calc(100vh - 16px);
+        margin: 0;
+        padding: 0.25rem;
+        overflow-y: auto;
+        background: #fff;
+        border: 1px solid var(--shell-border);
+        border-radius: 8px;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+        animation: as-flyout-in 0.15s ease-out;
+    }
+
+    .admin-shell[data-state='collapsed'] .as-menu-item[data-flyout='true'] .as-sub-title {
+        display: block;
+        padding: 0.375rem 0.5rem 0.25rem;
+        font-size: 12px;
+        font-weight: 500;
+        color: rgba(84, 89, 95, 0.7);
+        white-space: nowrap;
+    }
+}
+
+@keyframes as-flyout-in {
+    from {
+        opacity: 0;
+        transform: translateX(-4px);
+    }
+}
+
+/* --- Mobile : la barre latérale devient un tiroir ------------------------ */
+
+@media (max-width: 767.98px) {
+    .admin-shell .as-sidebar {
+        z-index: 50;
+        width: var(--shell-width-mobile);
+        transform: translateX(-100%);
+        box-shadow: none;
+    }
+
+    .admin-shell[data-mobile-open='true'] .as-sidebar {
+        transform: none;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    .admin-shell[data-mobile-open='true'] .as-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 45;
+        display: block;
+        background: rgba(0, 0, 0, 0.5);
+    }
+
+    .admin-shell .as-inset {
+        margin-left: 0;
+    }
+
+    .admin-shell .as-topbar {
+        padding: 0 1rem;
+    }
+}
+
+@media (max-width: 639.98px) {
+    .admin-shell .as-user-text,
+    .admin-shell .as-user-chevron {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .admin-shell .as-sidebar,
+    .admin-shell .as-inset,
+    .admin-shell .as-menu-button,
+    .admin-shell .as-group-label,
+    .admin-shell .as-sub-toggle svg,
+    .admin-shell .as-sub-wrap,
+    .admin-shell .as-menu-item[data-open='true'] > .as-sub-wrap {
+        transition: none;
+    }
+
+    .admin-shell .as-sub {
+        animation: none !important;
+    }
+}
+
+/* Barres de défilement fines et discrètes sur tout l'espace admin */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #c9cfc3 transparent;
+}
+
+*::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background-color: #c9cfc3;
+    border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background-color: #9aa392;
+}
+
+/*
+ * Pages retravaillées : envelopper le contenu dans <div class="as-refonte">.
+ * typography.css impose Arial via --app-font-family (!important) : on redéfinit
+ * la variable pour ce bloc (DM Sans / Segoe UI) et on allège le gras.
+ */
+.as-refonte {
+    --app-font-family: var(--shell-font, 'DM Sans Shell', 'Segoe UI', system-ui, sans-serif);
+    font-family: var(--app-font-family);
+}
+
+.as-refonte :is(h1, h2, h3, h4, h5, h6, strong, b, th, .font-bold, .font-semibold) {
+    font-weight: 500;
+}
+
+/* Titre de page (<x-breadcrumbs>) : barre orange (accent de la charte) sous le titre. */
+.page-title::after {
+    content: '';
+    display: block;
+    width: 48px;
+    height: 3px;
+    margin-top: 8px;
+    border-radius: 3px;
+    background: var(--shell-accent, #faab04);
+}
+
+/* --- Pied de page -------------------------------------------------------- */
+
+.admin-shell .as-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.625rem;
+    margin: 1.5rem 1rem 0;
+    padding: 1rem 0 1.25rem;
+    border-top: 1px solid var(--shell-border);
+    font-family: var(--shell-font);
+    -webkit-font-smoothing: antialiased;
+}
+
+.admin-shell .as-footer-mark {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--shell-secondary);
+    box-shadow: 0 0 0 3px var(--shell-soft);
+}
+
+.admin-shell .as-footer-text {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--shell-muted);
+    text-align: center;
+}
+
+.app-dark-mode .admin-shell .as-footer {
+    border-color: #334155;
+}
+
+.app-dark-mode .admin-shell .as-footer-text {
+    color: #94a3b8;
+}
