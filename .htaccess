@@ -5,25 +5,9 @@
 
     RewriteEngine On
 
-    # Handle Authorization Header
-    RewriteCond %{HTTP:Authorization} .
-    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-
-    # Handle X-XSRF-Token Header
-    RewriteCond %{HTTP:x-xsrf-token} .
-    RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
-
-    # « /admin » : le dossier admin/ (fichiers envoyés) ne doit pas masquer la route Laravel
-    # (sinon « Not Found » / « Forbidden » au lieu de la redirection vers l'accueil).
-    RewriteRule ^admin/?$ index.php [L]
-
-    # Redirect Trailing Slashes If Not A Folder...
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteCond %{REQUEST_URI} (.+)/$
-    RewriteRule ^ %1 [L,R=301]
-
-    # Send Requests To Front Controller...
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteRule ^ index.php [L]
+    # Compatibility for hosts whose document root is the project directory.
+    # Let public/.htaccess handle Laravel routes and serve public assets there.
+    # Stop on the internal rewrite to avoid adding public/ repeatedly.
+    RewriteRule ^public(?:/|$) - [L]
+    RewriteRule ^(.*)$ public/$1 [L]
 </IfModule>

@@ -70,3 +70,19 @@ Inspecter les logs Actions et `php artisan migrate:status`, corriger le probleme
 puis relancer le workflow. Une migration MySQL peut etre partiellement appliquee :
 aucun rollback automatique n'est fait. Ne lancer `php artisan up` manuellement
 qu'apres avoir verifie l'etat de l'application et de la base.
+
+## Page blanche : fichiers Vite en erreur 404
+
+Si `/` repond en HTTP 200 mais `/build/assets/...` en 404, alors que
+`/public/build/assets/...` repond en 200, le domaine pointe vers la racine du
+projet au lieu de `public/`. Dans cPanel, definir la racine du domaine sur
+`DEPLOY_PATH/public` (le chemin reel du projet suivi de `/public`).
+
+Si cette configuration ne peut pas etre modifiee, le `.htaccess` a la racine
+achemine les requetes vers `public/`, y compris les fichiers JS et CSS. Deployer
+ce fichier avec le reste du projet. Ne pas copier les fichiers compiles a la
+racine et ne pas ajouter `/public` a `APP_URL`.
+
+Apres correction, verifier que les URL JS et CSS presentes dans le HTML de `/`
+repondent en HTTP 200 avec les types `application/javascript` et `text/css`,
+puis recharger la page avec Ctrl+F5.
