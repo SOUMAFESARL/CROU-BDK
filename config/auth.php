@@ -68,6 +68,10 @@ return [
     */
 
     'providers' => [
+        'users' => [
+            'driver' => 'eloquent',
+            'model' => App\Models\User::class,
+        ],
         'etudiants' => [
             'driver' => 'eloquent',
              'model' => App\Models\Etudiant::class,
