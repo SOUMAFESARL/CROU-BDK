@@ -1,4 +1,4 @@
-name: Deploy via SSH test87-sv
+name: Deploy via FTP
 
 on:
   push:
@@ -16,55 +16,103 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Configure SSH and deploy
+      - name: Validate FTP settings
         shell: bash
         env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
         run: |
           set -Eeuo pipefail
-          : "${SSH_HOST:?Missing SSH_HOST}"
-          : "${SSH_USER:?Missing SSH_USER}"
-          : "${SSH_PRIVATE_KEY:?Missing SSH_PRIVATE_KEY}"
-          : "${SSH_PASSPHRASE:?Missing SSH_PASSPHRASE}"
-          : "${DEPLOY_PATH:?Missing DEPLOY_PATH}"
-          [[ "$SSH_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
-          [[ "$SSH_USER" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]]
-          umask 077
-          ssh_dir="$(mktemp -d)"
-          cleanup() {
-            if [[ -n "${SSH_AGENT_PID:-}" ]]; then
-              ssh-agent -k >/dev/null 2>&1 || true
-            fi
-            rm -rf -- "$ssh_dir"
-          }
-          trap cleanup EXIT
-          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/key"
-          touch "$ssh_dir/known_hosts"
-          cat > "$ssh_dir/askpass" <<'ASKPASS'
-          #!/usr/bin/env bash
-          printf '%s\n' "$SSH_PASSPHRASE"
-          ASKPASS
-          chmod 700 "$ssh_dir/askpass"
-          eval "$(ssh-agent -s)" >/dev/null
-          SSH_ASKPASS="$ssh_dir/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 \
-            ssh-add "$ssh_dir/key" </dev/null
-          unset SSH_PASSPHRASE SSH_PRIVATE_KEY
-          encoded_path="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
-          ssh -T -i "$ssh_dir/key" \
-            -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=accept-new \
-            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-            -o ConnectTimeout=20 -o ServerAliveInterval=15 \
-            -o ServerAliveCountMax=4 \
-            "$SSH_USER@$SSH_HOST" \
-            "bash -s -- '$encoded_path' '$GITHUB_SHA'" < scripts/deploy.sh
+          : "${FTP_SERVER:?Missing FTP_SERVER}"
+          : "${FTP_USERNAME:?Missing FTP_USERNAME}"
+          : "${FTP_PASSWORD:?Missing FTP_PASSWORD}"
+          : "${FTP_SERVER_DIR:?Missing FTP_SERVER_DIR}"
+          [[ "$FTP_SERVER_DIR" == */ && "$FTP_SERVER_DIR" != / && "$FTP_SERVER_DIR" != ./ ]]
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, dom, fileinfo, pdo_mysql, gd, zip
+          tools: composer:v2
+          coverage: none
+
+      - name: Install production PHP dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader --no-scripts
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Prepare application files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p deploy-package
+          rsync -a app bootstrap config database lang public resources routes vendor deploy-package/ \
+            --exclude='*.sql' --exclude='*.sqlite*' \
+            --exclude='/bootstrap/cache/***' \
+            --exclude='/public/storage/***' --exclude='/public/hot' \
+            --exclude='/public/files/***' --exclude='/public/admin/assets/images/***'
+          cp artisan composer.json composer.lock .htaccess index.php server.php robots.txt deploy-package/
+          test -f deploy-package/vendor/autoload.php
+          test -f deploy-package/public/build/manifest.json
+          test ! -e deploy-package/.env
+
+      - name: Deploy application over FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
+          port: 21
+          local-dir: ./deploy-package/
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/.env*
+            **/*.sql
+            **/*.sqlite*
+            storage/**
+            bootstrap/cache/**
+            public/storage/**
+            public/files/**
+            public/admin/assets/images/**
+            public/hot
+
+      - name: Migration instructions
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ## FTP transfer completed
+          Migrations have NOT been executed. In the cPanel terminal:
+          ```bash
+          cd /home/c2858133c/public_html/crou
+          php artisan config:clear
+          php artisan package:discover
+          php artisan migrate --force --no-interaction
+          php artisan config:cache
+          php artisan view:cache
+          php artisan queue:restart
+          php artisan up
+          ```
+          See docs/deploiement-ftp.md. FTP updates files in place; enable maintenance
+          manually before starting a deployment and keep it enabled if any step fails.
+          SUMMARY
