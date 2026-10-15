@@ -74,32 +74,17 @@ jobs:
           test -f deploy-package/public/build/manifest.json
           test ! -e deploy-package/.env
 
-      - name: Deploy application over FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+      - name: Install FTP client
+        run: sudo apt-get update && sudo apt-get install --yes lftp
+
+      - name: Deploy application over FTPS with retries
         env:
-          # Avoid TLS 1.3 data-channel interoperability issues on some FTP servers.
-          NODE_OPTIONS: --tls-max-v1.2
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
-          port: 21
-          local-dir: ./deploy-package/
-          server-dir: ${{ secrets.FTP_SERVER_DIR }}
-          dangerous-clean-slate: false
-          exclude: |
-            **/.git*
-            **/.git*/**
-            **/.env*
-            **/*.sql
-            **/*.sqlite*
-            storage/**
-            bootstrap/cache/**
-            public/storage/**
-            public/files/**
-            public/admin/assets/images/**
-            public/hot
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          LFTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
+          FTP_PROTOCOL: ${{ vars.FTP_PROTOCOL || 'ftps' }}
+        run: python3 scripts/deploy-ftp.py
 
       - name: Migration instructions
         run: |

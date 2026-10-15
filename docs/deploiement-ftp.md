@@ -29,11 +29,12 @@ GitHub d'environnement `FTP_PROTOCOL` a `ftp` ; les identifiants et les fichiers
 seront alors transmis sans chiffrement. Ne pas desactiver la verification TLS.
 Les anciens secrets `SSH_*` et `DEPLOY_PATH` ne sont plus utilises.
 
-L'etape de transfert limite TLS a la version 1.2 via `NODE_OPTIONS`, pour contourner
-les problemes de compatibilite du canal de donnees FTPS observes avec certains
-serveurs. Le chiffrement et la verification des certificats restent actifs avec
-`FTP_PROTOCOL=ftps`. Cette mesure doit etre confirmee par une execution reelle ;
-si l'erreur TLS persiste, faire verifier les journaux FTP du serveur par l'hebergeur.
+Le transfert utilise `lftp` avec TLS 1.2, verification des certificats,
+mode passif, deux transferts paralleles et jusqu'a cinq tentatives de reconnexion.
+Les transferts interrompus peuvent etre repris selon les tailles et dates distantes ;
+certains fichiers peuvent etre retransmis. Aucun fichier distant n'est supprime.
+Le fichier d'etat de l'ancienne action n'est plus utilise. Le correctif doit etre
+confirme par un transfert reel ; si TLS echoue encore, consulter les logs FTP LWS.
 
 ## Preparer le serveur
 
@@ -89,4 +90,4 @@ HTTP d'administration n'est installee. Le schema historique du projet repose aus
 sur un dump SQL : verifier la coherence de la base et de la table `migrations`
 avant le premier deploiement. Aucun import, seeder, reset ou rollback automatique.
 
-Reference : [configuration FTP Deploy Action](https://github.com/SamKirkland/FTP-Deploy-Action).
+Reference : [manuel lftp](https://lftp.yar.ru/lftp-man.html).
