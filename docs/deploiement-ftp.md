@@ -7,7 +7,8 @@ de production, compile le frontend puis transfere le code, `vendor` et
 
 ## Secrets GitHub
 
-Dans Settings > Environments > production, ajouter :
+Le serveur de `dev` est distinct de celui de `main`. Dans Settings > Environments >
+development, ajouter les secrets FTP du serveur de developpement :
 
 | Secret | Valeur |
 | --- | --- |
@@ -27,6 +28,12 @@ le transfert sur ce port. Si LWS ne propose que FTP simple, definir la variable
 GitHub d'environnement `FTP_PROTOCOL` a `ftp` ; les identifiants et les fichiers
 seront alors transmis sans chiffrement. Ne pas desactiver la verification TLS.
 Les anciens secrets `SSH_*` et `DEPLOY_PATH` ne sont plus utilises.
+
+L'etape de transfert limite TLS a la version 1.2 via `NODE_OPTIONS`, pour contourner
+les problemes de compatibilite du canal de donnees FTPS observes avec certains
+serveurs. Le chiffrement et la verification des certificats restent actifs avec
+`FTP_PROTOCOL=ftps`. Cette mesure doit etre confirmee par une execution reelle ;
+si l'erreur TLS persiste, faire verifier les journaux FTP du serveur par l'hebergeur.
 
 ## Preparer le serveur
 

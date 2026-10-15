@@ -1,9 +1,10 @@
 # Deploiement SSH de main
 
 `.github/workflows/deploy-ssh.yml` deploie les push sur `main` et les lancements
-manuels depuis `main`. Le workflow FTP sur `dev` reste disponible. Les deux
-workflows partagent le groupe de concurrence `deploy-production` pour eviter
-de modifier simultanement le meme serveur.
+manuels depuis `main`. Le workflow FTP sur `dev` utilise un autre serveur et
+l'environnement `development`. Le workflow SSH utilise `production` et le groupe
+de concurrence `deploy-production` ; les deux serveurs peuvent etre deployes
+independamment.
 
 ## Configuration GitHub
 
@@ -41,9 +42,8 @@ ecriture au compte de deploiement et au serveur web. Configurer le domaine pour
 servir uniquement `public/`. Conserver une `APP_KEY` stable et les identifiants
 de production dans le `.env` du serveur.
 
-Si le workflow FTP et ce workflow ciblent le meme dossier, les fichiers transferes
-par FTP peuvent rendre le checkout Git sale et bloquer le deploiement SSH. Choisir
-une seule methode pour ce dossier ou utiliser deux installations distinctes.
+Les secrets SSH de `production` doivent cibler le serveur de `main`, tandis que
+les secrets FTP de `development` doivent cibler le serveur de `dev`.
 
 ## Migrations et erreurs
 
