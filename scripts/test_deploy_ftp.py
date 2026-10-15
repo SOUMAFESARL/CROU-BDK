@@ -19,6 +19,8 @@ class DeploymentCommandsTest(unittest.TestCase):
         self.assertIn('--exclude-glob .env*', commands)
         self.assertNotIn('--exclude-glob public/files/ ', commands)
         self.assertIn('--only-missing', commands)
+        self.assertIn('mkdir -p "/project/bootstrap/cache"', commands)
+        self.assertIn('mkdir -p "/project/storage/framework/views"', commands)
 
     def test_invalid_destinations_are_rejected(self):
         for path in ['/', './', '', '/project', '/project/../']:

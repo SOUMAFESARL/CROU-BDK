@@ -38,6 +38,13 @@ def commands(env, vendor_only=False):
         'set ssl:check-hostname yes',
         'set ssl:priority "NORMAL:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1:-VERS-TLS1.3"',
         f'open --user {quote(env["FTP_USERNAME"])} --env-password -p 21 {quote("ftp://" + host)}',
+        # These persistent directories are excluded from the file mirror but
+        # must exist on a first installation for Laravel to bootstrap.
+        *[f'mkdir -p {quote(remote + directory)}' for directory in [
+            'bootstrap/cache', 'storage/framework/views', 'storage/framework/sessions',
+            'storage/framework/cache/data', 'storage/logs', 'storage/app/public',
+            'storage/app/private',
+        ]],
         *([
         'mirror --reverse --continue --verbose --parallel=4 --no-perms '
         f'./deploy-package/vendor/ {quote(remote + "vendor/")}',

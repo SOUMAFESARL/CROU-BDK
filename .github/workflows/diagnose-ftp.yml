@@ -19,10 +19,10 @@ jobs:
     environment: development
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
-      - name: Read error categories over FTPS
+      - name: Prepare Laravel runtime directories and read error categories
         env:
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
           FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
-        run: python3 scripts/diagnose-ftp.py
+        run: python3 scripts/diagnose-ftp.py --repair-directories

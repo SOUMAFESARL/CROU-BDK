@@ -3,6 +3,7 @@ import ftplib
 import os
 import re
 import ssl
+import sys
 
 
 context = ssl.create_default_context()
@@ -15,6 +16,16 @@ with ftplib.FTP_TLS(context=context, timeout=30) as ftp:
     ftp.cwd(os.environ['FTP_SERVER_DIR'])
     root = ftp.pwd()
     for directory in ['bootstrap/cache', 'storage/framework/views', 'storage/framework/sessions', 'storage/framework/cache/data', 'storage/logs']:
+        if '--repair-directories' in sys.argv:
+            current = root.rstrip('/')
+            for part in directory.split('/'):
+                current += '/' + part
+                try:
+                    ftp.mkd(current)
+                except ftplib.error_perm:
+                    # Only ignore an existing directory after verifying it.
+                    ftp.cwd(current)
+                ftp.cwd(root)
         try:
             ftp.cwd(root + '/' + directory)
             print(directory + ': directory present')
