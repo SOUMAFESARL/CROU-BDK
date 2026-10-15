@@ -35,9 +35,16 @@ if (in_array('--initialize-empty', $argv, true)) {
 }
 
 // The historical schema is not fully described by this project's migrations.
-if (! Illuminate\Support\Facades\Schema::hasTable('config_app')
-    || ! Illuminate\Support\Facades\Schema::hasTable('etudiants')
-    || ! Illuminate\Support\Facades\Schema::hasTable('migrations')) {
+$missingTables = [];
+foreach (['config_app', 'etudiants', 'migrations'] as $table) {
+    if (! Illuminate\Support\Facades\Schema::hasTable($table)) {
+        $missingTables[] = $table;
+    }
+}
+if ($missingTables !== []) {
     fwrite(STDERR, "Database is partially initialized or incompatible. Inspect the schema and migration history before retrying; existing tables are never reset.\n");
+    fwrite(STDERR, 'Missing required tables: '.implode(', ', $missingTables)."\n");
+    fwrite(STDERR, "Check DB_DATABASE in the server's existing .env (ENV_PRODUCTION does not replace it), and DB_URL if configured.\n");
+    fwrite(STDERR, "If this is the intended database, inspect the historical schema import and migration history before making changes.\n");
     exit(1);
 }
