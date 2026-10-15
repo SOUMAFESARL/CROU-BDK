@@ -25,6 +25,14 @@ class DeploymentCommandsTest(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 deploy.commands({**self.env, 'FTP_SERVER_DIR': path})
 
+    def test_vendor_transfer_is_separate_and_parallel(self):
+        application = deploy.commands(self.env)
+        vendor = deploy.commands(self.env, vendor_only=True)
+        self.assertIn('--exclude-glob vendor/', application)
+        self.assertIn('--parallel=4', vendor)
+        self.assertIn('./deploy-package/vendor/ "/project/vendor/"', vendor)
+        self.assertEqual(vendor.count('mirror --reverse'), 1)
+
     def test_command_injection_characters_are_escaped_or_rejected(self):
         quoted = deploy.quote('user"$`\\')
         self.assertEqual(quoted, '"user\\"\\$\\`\\\\"')

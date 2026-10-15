@@ -13,6 +13,9 @@ est utilise par defaut. La variable `FTP_PROTOCOL=ftp` permet de choisir FTP
 simple si necessaire ; elle transmet les identifiants sans chiffrement.
 
 Le workflow installe les dependances PHP et compile Vite avant le transfert.
+Deux transferts FTPS sont lances simultanement : `vendor` avec quatre fichiers
+en parallele, et l'application avec deux fichiers en parallele. Le workflow
+attend les deux et echoue si l'un des transferts echoue.
 Les CSS, scripts, polices et bibliotheques sous `public/files` sont inclus.
 Le logo CROU et les images d'authentification sont ajoutes uniquement si absents.
 Le `.env`, les fichiers utilisateurs, les caches et les fichiers distants seuls

@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 
 def quote(value):
@@ -12,7 +13,7 @@ def quote(value):
     return '"' + re.sub(r'([\\"$`])', r'\\\1', value) + '"'
 
 
-def commands(env):
+def commands(env, vendor_only=False):
     host = env['FTP_SERVER']
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*', host):
         raise ValueError('FTP_SERVER must be a hostname or IPv4 address')
@@ -37,8 +38,14 @@ def commands(env):
         'set ssl:check-hostname yes',
         'set ssl:priority "NORMAL:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1:-VERS-TLS1.3"',
         f'open --user {quote(env["FTP_USERNAME"])} --env-password -p 21 {quote("ftp://" + host)}',
-        # No --delete: .env, uploads, caches and all other remote-only files survive.
+        *([
+        'mirror --reverse --continue --verbose --parallel=4 --no-perms '
+        f'./deploy-package/vendor/ {quote(remote + "vendor/")}',
+        ] if vendor_only else [
+        # Vendor is handled by a separate lftp process with four parallel files.
+        # No --delete: .env, uploads, caches and all remote-only files survive.
         'mirror --reverse --continue --verbose --parallel=2 --no-perms '
+        '--exclude-glob vendor/ '
         '--exclude-glob .env* --exclude-glob .git* '
         '--exclude-glob storage/ --exclude-glob bootstrap/cache/ '
         '--exclude-glob public/storage/ --exclude-glob public/files/assets/images/ '
@@ -49,6 +56,7 @@ def commands(env):
         f'./deploy-package/public/admin/assets/images/logos/ {quote(remote + "public/admin/assets/images/logos/")}',
         'mirror --reverse --only-missing --verbose --no-perms '
         f'./deploy-package/public/files/assets/images/auth/ {quote(remote + "public/files/assets/images/auth/")}',
+        ]),
         'bye',
         '',
     ])
@@ -60,9 +68,18 @@ if __name__ == '__main__':
     if not Path('deploy-package/vendor/autoload.php').is_file():
         raise ValueError('Missing prepared production package')
     # Password stays in the environment and is never inserted into commands/logs.
-    result = subprocess.run(['lftp', '--norc'], input=commands(os.environ), text=True)
-    if result.returncode:
+    def transfer(vendor_only):
+        label = 'vendor' if vendor_only else 'application'
+        print(f'Starting {label} FTP transfer.', flush=True)
+        result = subprocess.run(['lftp', '--norc'], input=commands(os.environ, vendor_only), text=True)
+        print(f'{label} FTP transfer exited with code {result.returncode}.', flush=True)
+        return result.returncode
+
+    # Wait for both transfers; a failure in either must fail the workflow.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(transfer, [False, True]))
+    if any(results):
         print('FTP transfer failed. For certificate hostname errors, set development/FTP_SERVER '
               'to the host covered by the FTP certificate (web53.lws-hosting.com for the current LWS server). '
               'Inspect the lftp error above; TLS verification remains enabled.', file=sys.stderr)
-        sys.exit(result.returncode)
+        sys.exit(1)
