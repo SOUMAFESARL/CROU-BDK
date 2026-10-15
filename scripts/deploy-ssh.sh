@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Called over SSH by .github/workflows/deploy-ssh.yml. Requires Linux and Bash.
 set -Eeuo pipefail
 
 deploy_path="$(printf '%s' "${1:?Missing encoded deployment path}" | base64 --decode)"
 revision="${2:?Missing commit SHA}"
-[[ "$deploy_path" = /* && "$deploy_path" != / ]] || { echo 'An absolute project path is required.' >&2; exit 1; }
-[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid commit SHA.' >&2; exit 1; }
-cd -- "$deploy_path"
-
+stage="${3:?Missing staging directory}"
+[[ "$deploy_path" = /* && "$deploy_path" != / && "$deploy_path" != "$HOME" ]] || exit 1
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || exit 1
+[[ "$stage" =~ ^/tmp/crou-release\.[a-zA-Z0-9]+$ && -d "$stage" ]] || exit 1
+trap 'status=$?; rm -rf -- "$stage"; if (( status != 0 )); then echo "Deployment failed; do not disable maintenance before checking the logs." >&2; fi; exit "$status"' EXIT
 export PATH="$HOME/.local/bin:$PATH"
-for command in git php npm flock; do
+for command in php tar flock; do
     command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }
 done
 if command -v composer >/dev/null; then
@@ -17,57 +17,51 @@ if command -v composer >/dev/null; then
 elif [[ -r "$HOME/composer.phar" ]]; then
     composer_command=(php "$HOME/composer.phar")
 else
-    echo 'Composer unavailable: install composer or place composer.phar in the SSH user home directory.' >&2
+    echo 'Install Composer or provide ~/composer.phar.' >&2; exit 1
+fi
+"${composer_command[@]}" --version
+mkdir -p -- "$deploy_path"
+cd -- "$deploy_path"
+exec 9>.deploy.lock
+flock -n 9 || { echo 'Another deployment is running.' >&2; exit 1; }
+if [[ ! -f .env && ! -f "$stage/production.env" ]]; then
+    echo 'First installation: configure the ENV_PRODUCTION GitHub secret with the production .env, including a stable APP_KEY and database credentials.' >&2
     exit 1
 fi
-# Verify Composer before putting the application into maintenance.
-"${composer_command[@]}" --version
-test -f .env || { echo 'Configure the server .env first.' >&2; exit 1; }
-test -f vendor/autoload.php || { echo 'Run the initial Composer installation first.' >&2; exit 1; }
-test -w storage && test -w bootstrap/cache
-git rev-parse --is-inside-work-tree >/dev/null
-exec 9>"$(git rev-parse --git-path crou-deploy.lock)"
-flock -n 9 || { echo 'Another deployment is running.' >&2; exit 1; }
-test -z "$(git status --porcelain --untracked-files=normal)" || {
-    echo 'The server checkout has local changes. Resolve them before deployment.' >&2
-    exit 1
-}
-
-export GIT_TERMINAL_PROMPT=0
-git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
-git cat-file -e "$revision^{commit}"
-git merge-base --is-ancestor "$revision" origin/main || {
-    echo 'The requested commit is not on origin/main.' >&2; exit 1;
-}
-git merge-base --is-ancestor HEAD "$revision" || {
-    echo 'The server cannot fast-forward to this commit; deployment stopped.' >&2; exit 1;
-}
-
-maintenance_started=false
-on_error() {
-    status=$?
-    if [[ "$maintenance_started" == true ]]; then
-        echo 'Deployment failed. Maintenance remains enabled; inspect the failure before running php artisan up.' >&2
-    fi
-    exit "$status"
-}
-trap on_error ERR
-
-php artisan down --retry=60
-maintenance_started=true
-git merge --ff-only "$revision"
-# Drop stale configuration before Composer runs Laravel package discovery.
+# Existing installations enter maintenance before any files are changed.
+if [[ -f artisan && -f vendor/autoload.php ]]; then
+    php artisan down --retry=60
+fi
+mkdir -p storage/framework/{cache/data,sessions,views} storage/{logs,app/public,app/private} bootstrap/cache
+# A static maintenance response also protects a first installation until it is ready.
+cat > storage/framework/maintenance.php <<'PHP'
+<?php http_response_code(503); header('Retry-After: 60'); echo 'Maintenance'; exit;
+PHP
+if [[ ! -f .env ]]; then
+    cp "$stage/production.env" .env
+    chmod 600 .env
+fi
+mkdir "$stage/app"
+tar -xzf "$stage/release.tar.gz" -C "$stage/app"
+# Keep uploaded images while installing static images that are not present yet.
+if [[ -d "$stage/app/public/admin/assets/images" ]]; then
+    mkdir -p public/admin/assets/images
+    cp -an "$stage/app/public/admin/assets/images/." public/admin/assets/images/
+fi
+tar -C "$stage/app" --exclude='./storage' --exclude='./bootstrap/cache' \
+    --exclude='./.env*' --exclude='./.git' --exclude='./public/storage' \
+    --exclude='./public/files' --exclude='./public/admin/assets/images' \
+    -cf - . | tar -xf -
+# Composer runs without Laravel scripts until dependencies are complete.
+"${composer_command[@]}" install --no-dev --prefer-dist --no-interaction --optimize-autoloader --no-scripts
 php artisan config:clear
-"${composer_command[@]}" install --no-dev --prefer-dist --no-interaction --optimize-autoloader
-npm ci --no-audit --no-fund
-npm run build
-
-# Run pending migrations only. Never reset the database or run seeders here.
+php artisan package:discover --no-interaction
+php scripts/check-production-database.php --initialize-empty
 php artisan migrate --force --no-interaction
 php artisan storage:link
 php artisan config:cache
 php artisan view:cache
 php artisan queue:restart
 php artisan up
-maintenance_started=false
-echo "Deployment completed: $(git rev-parse HEAD)"
+printf '%s\n' "$revision" > .deployed-revision
+echo "Deployment completed: $revision"

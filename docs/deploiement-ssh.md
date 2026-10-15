@@ -1,77 +1,73 @@
-# Deploiement SSH de main
+# Deploiement SSH de main : premiere installation et mises a jour
 
-`.github/workflows/deploy-ssh.yml` deploie les push sur `main` et les lancements
-manuels depuis `main`. Le workflow FTP sur `dev` utilise un autre serveur et
-l'environnement `development`. Le workflow SSH utilise `production` et le groupe
-de concurrence `deploy-production` ; les deux serveurs peuvent etre deployes
-independamment.
+Le workflow `deploy-ssh.yml` compile le frontend dans GitHub Actions, transfere
+une archive par SSH sur le port 5022 et installe les dependances PHP sur le serveur.
+Le serveur ne requiert ni npm, ni Node.js, ni checkout Git. Le workflow FTP de dev
+reste independant, avec ses secrets dans `development`.
 
-## Configuration GitHub
+## Secrets de production
 
-Dans Settings > Environments > production, configurer :
+Configurer dans GitHub > Settings > Environments > production :
 
 | Secret | Valeur |
 | --- | --- |
-| `SSH_HOST` | Hote SSH fourni par LWS |
-| `SSH_USER` | `c2858133c` si le compte utilise est celui de cPanel |
-| `SSH_PRIVATE_KEY` | Cle privee OpenSSH complete |
-| `SSH_PASSPHRASE` | Passphrase de cette cle |
-| `DEPLOY_PATH` | Chemin absolu du projet, par exemple `/home/c2858133c/public_html/crou` |
+| SSH_HOST | node263-eu.n0c.com |
+| SSH_USER | kkfvkcpk |
+| SSH_PRIVATE_KEY | Cle privee crou complete |
+| SSH_PASSPHRASE | Passphrase de cette cle |
+| DEPLOY_PATH | /home/kkfvkcpk/crou-bdk |
+| ENV_PRODUCTION | Contenu complet du .env de production pour la premiere installation |
 
-Conformement a la configuration demandee, aucun secret `SSH_PORT` ou
-`SSH_KNOWN_HOSTS` n'est utilise. SSH utilise le port 5022 et accepte automatiquement
-la cle d'hote presentee a chaque execution, sans verification prealable de
-l'identite du serveur. L'acces distant depuis GitHub Actions doit etre autorise
-dans le pare-feu LWS ; les erreurs reseau observees precedemment doivent etre
-resolues pour que ce workflow puisse fonctionner.
+`ENV_PRODUCTION` doit contenir une APP_KEY base64 stable, APP_ENV=production,
+APP_DEBUG=false, APP_URL et les identifiants MySQL reels de ce nouveau serveur.
+Ne pas copier aveuglement les valeurs locales. Creer la base et autoriser son
+utilisateur dans le panneau de gestion. Les variables de messagerie et services
+externes doivent aussi etre adaptees. Une fois le .env du serveur cree, il est
+conserve : le secret ne l'ecrase pas aux deploiements suivants.
 
-## Preparation du serveur
+## Base vide : initialisation sans donnees historiques
 
-Le dossier doit etre un checkout Git propre de ce depot, dont le commit courant
-est un ancetre du commit a deployer sur `origin/main`. Le script refuse les
-changements locaux et les historiques divergents, sans les ecraser. Le serveur
-doit pouvoir recuperer `origin/main` sans interaction ; pour un depot prive,
-configurer une cle GitHub de lecture sur le serveur, distincte de la cle de
-connexion de GitHub Actions au serveur.
+Le workflow initialise automatiquement une base MySQL/MariaDB strictement vide
+avec `database/schema/initial-mysql.json`, puis execute les migrations restantes.
+Ce fichier ne contient que le schema et les lignes techniques de `migrations`.
+Les comptes, etudiants, paiements, configurations et autres donnees historiques
+ne sont pas importes. Aucun import phpMyAdmin du dump complet n'est necessaire.
 
-Installer PHP 8.2 ou plus et ses extensions requises, Composer, Node.js 22.14 ou
-plus, npm, Git, Bash et flock. Ils doivent etre accessibles dans la session SSH
-non interactive.
-Le script ajoute `~/.local/bin` au PATH. Si la commande `composer` est absente,
-il utilise automatiquement `php ~/composer.phar` et verifie son execution avant
-la maintenance.
+Le schema conserve les tables historiques que les migrations ne decrivent pas.
+Les tables Laravel manquantes de jetons et verrous de cache sont ajoutees. Le champ
+legacy `departure_requests.decision` est laisse a la migration en attente qui
+cree l'ensemble du workflow de sortie. Les migrations users/cache deja representees
+par le schema sont enregistrees dans l'historique ; la migration jobs reste executee.
 
-Le `.env`, `vendor/autoload.php`, `storage` et `bootstrap/cache`
-doivent deja exister. Les deux derniers dossiers doivent etre accessibles en
-ecriture au compte de deploiement et au serveur web. Configurer le domaine pour
-servir uniquement `public/`. Conserver une `APP_KEY` stable et les identifiants
-de production dans le `.env` du serveur.
+Si des tables existent deja, le schema initial n'est pas applique. Une initialisation
+partiellement echouee doit etre inspectee avant toute reprise : MySQL ne garantit
+pas de rollback des changements DDL. Aucun reset automatique n'est effectue.
 
-Les secrets SSH de `production` doivent cibler le serveur de `main`, tandis que
-les secrets FTP de `development` doivent cibler le serveur de `dev`.
+Cette initialisation prepare la structure, pas les donnees de fonctionnement :
+un compte administrateur, les roles/permissions et la configuration metier devront
+etre initialises explicitement. Le seeder de demonstration n'est pas execute.
 
-## Migrations et erreurs
+## Serveur et fonctionnement
 
-Le script active la maintenance, avance au commit du workflow sans reecrire
-l'historique, installe les dependances, compile le frontend puis execute :
+PHP 8.2 ou plus, les extensions Composer requises, tar et flock doivent etre
+disponibles en SSH non interactif. La commande composer est utilisee si disponible,
+sinon `php ~/composer.phar`. `~/.local/bin` est ajoute au PATH.
 
-```bash
-php artisan migrate --force --no-interaction
-```
+Le script cree le dossier du projet et les dossiers Laravel persistants si besoin.
+Il active la maintenance avant de remplacer les fichiers ; .env, storage et les
+fichiers utilisateurs sont preserves. Les images statiques sous
+public/admin/assets/images sont ajoutees seulement si absentes, pour ne pas ecraser
+les images existantes. Les fichiers devenus obsoletes ne sont pas supprimes par
+ce transfert en place. Les dumps SQL sont exclus de l'archive.
 
-Il ne lance que les migrations en attente, sans importer de dump, executer de
-seeders ou reinitialiser la base. Verifier le schema historique et la table
-`migrations` avant le premier deploiement ; les migrations seules ne reconstruisent
-pas toutes les tables historiques du projet. Faire une sauvegarde de la base avant
-les migrations de production.
+Apres Composer, le script decouvre les packages, applique les migrations, regenere
+les caches et quitte la maintenance. Une erreur laisse le site en maintenance :
+corriger puis relancer, ne pas executer `php artisan up` avant verification.
+Les workers doivent etre supervises pour redemarrer apres queue:restart.
+Configurer le domaine pour servir `/home/kkfvkcpk/crou-bdk/public` et permettre au
+serveur web d'ecrire dans storage et bootstrap/cache. Si OPcache ne verifie pas les
+dates, prevoir un rechargement PHP aupres de l'hebergeur.
 
-Apres succes, le script regenere les caches de configuration et de vues, demande
-le redemarrage des workers existants et quitte la maintenance. Un gestionnaire de
-processus doit relancer ces workers. Si OPcache ne verifie pas les dates, prevoir
-le rechargement PHP-FPM avec l'hebergeur.
-
-En cas d'erreur apres activation de la maintenance, le site reste en maintenance.
-Inspecter les logs Actions et `php artisan migrate:status`, corriger le probleme,
-puis relancer le workflow. Une migration MySQL peut etre partiellement appliquee :
-aucun rollback automatique n'est fait. Ne lancer `php artisan up` manuellement
-qu'apres avoir verifie l'etat de l'application et de la base.
+La cle d'hote SSH est acceptee automatiquement a chaque execution comme demande ;
+aucun secret SSH_KNOWN_HOSTS ou SSH_PORT n'est requis. L'identite du serveur n'est
+pas verifiee a l'avance. Sauvegarder la base avant les mises a jour de schema.

@@ -22,6 +22,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build deployment archive
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          mkdir -p "$RUNNER_TEMP/release"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/release"
+          cp -a public/build "$RUNNER_TEMP/release/public/build"
+          find "$RUNNER_TEMP/release" -type f -name '*.sql' -delete
+          tar -czf "$RUNNER_TEMP/release.tar.gz" -C "$RUNNER_TEMP/release" .
+
       - name: Configure SSH and deploy
         shell: bash
         env:
@@ -30,6 +48,7 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          ENV_PRODUCTION: ${{ secrets.ENV_PRODUCTION }}
         run: |
           set -Eeuo pipefail
           : "${SSH_HOST:?Missing SSH_HOST}"
@@ -60,11 +79,18 @@ jobs:
             ssh-add "$ssh_dir/key" </dev/null
           unset SSH_PASSPHRASE SSH_PRIVATE_KEY
           encoded_path="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
-          ssh -T -p 5022 -i "$ssh_dir/key" \
-            -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=accept-new \
-            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-            -o ConnectTimeout=20 -o ServerAliveInterval=15 \
-            -o ServerAliveCountMax=4 \
-            "$SSH_USER@$SSH_HOST" \
-            "bash -s -- '$encoded_path' '$GITHUB_SHA'" < scripts/deploy-ssh.sh
+          ssh_options=(-p 5022 -i "$ssh_dir/key" -o BatchMode=yes
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=20
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          target="$SSH_USER@$SSH_HOST"
+          remote_stage="$(ssh -T "${ssh_options[@]}" "$target" 'mktemp -d /tmp/crou-release.XXXXXXXX')"
+          [[ "$remote_stage" =~ ^/tmp/crou-release\.[a-zA-Z0-9]+$ ]]
+          # The staging directory is private and outside the document root.
+          ssh -T "${ssh_options[@]}" "$target" "cat > '$remote_stage/release.tar.gz'" < "$RUNNER_TEMP/release.tar.gz"
+          if [[ -n "$ENV_PRODUCTION" ]]; then
+            printf '%s\n' "$ENV_PRODUCTION" | ssh -T "${ssh_options[@]}" "$target" "umask 077; cat > '$remote_stage/production.env'"
+          fi
+          unset ENV_PRODUCTION
+          ssh -T "${ssh_options[@]}" "$target" \
+            "bash -s -- '$encoded_path' '$GITHUB_SHA' '$remote_stage'" < scripts/deploy-ssh.sh
