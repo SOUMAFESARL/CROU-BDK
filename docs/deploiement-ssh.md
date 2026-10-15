@@ -36,7 +36,12 @@ connexion de GitHub Actions au serveur.
 
 Installer PHP 8.2 ou plus et ses extensions requises, Composer, Node.js 22.14 ou
 plus, npm, Git, Bash et flock. Ils doivent etre accessibles dans la session SSH
-non interactive. Le `.env`, `vendor/autoload.php`, `storage` et `bootstrap/cache`
+non interactive.
+Le script ajoute `~/.local/bin` au PATH. Si la commande `composer` est absente,
+il utilise automatiquement `php ~/composer.phar` et verifie son execution avant
+la maintenance.
+
+Le `.env`, `vendor/autoload.php`, `storage` et `bootstrap/cache`
 doivent deja exister. Les deux derniers dossiers doivent etre accessibles en
 ecriture au compte de deploiement et au serveur web. Configurer le domaine pour
 servir uniquement `public/`. Conserver une `APP_KEY` stable et les identifiants

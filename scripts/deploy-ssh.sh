@@ -8,9 +8,20 @@ revision="${2:?Missing commit SHA}"
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid commit SHA.' >&2; exit 1; }
 cd -- "$deploy_path"
 
-for command in git php composer npm flock; do
+export PATH="$HOME/.local/bin:$PATH"
+for command in git php npm flock; do
     command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }
 done
+if command -v composer >/dev/null; then
+    composer_command=(composer)
+elif [[ -r "$HOME/composer.phar" ]]; then
+    composer_command=(php "$HOME/composer.phar")
+else
+    echo 'Composer unavailable: install composer or place composer.phar in the SSH user home directory.' >&2
+    exit 1
+fi
+# Verify Composer before putting the application into maintenance.
+"${composer_command[@]}" --version
 test -f .env || { echo 'Configure the server .env first.' >&2; exit 1; }
 test -f vendor/autoload.php || { echo 'Run the initial Composer installation first.' >&2; exit 1; }
 test -w storage && test -w bootstrap/cache
@@ -47,7 +58,7 @@ maintenance_started=true
 git merge --ff-only "$revision"
 # Drop stale configuration before Composer runs Laravel package discovery.
 php artisan config:clear
-composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+"${composer_command[@]}" install --no-dev --prefer-dist --no-interaction --optimize-autoloader
 npm ci --no-audit --no-fund
 npm run build
 
