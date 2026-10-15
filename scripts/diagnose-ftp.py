@@ -13,6 +13,15 @@ with ftplib.FTP_TLS(context=context, timeout=30) as ftp:
     ftp.login(os.environ['FTP_USERNAME'], os.environ['FTP_PASSWORD'])
     ftp.prot_p()
     ftp.cwd(os.environ['FTP_SERVER_DIR'])
+    root = ftp.pwd()
+    for directory in ['bootstrap/cache', 'storage/framework/views', 'storage/framework/sessions', 'storage/framework/cache/data', 'storage/logs']:
+        try:
+            ftp.cwd(root + '/' + directory)
+            print(directory + ': directory present')
+        except ftplib.error_perm:
+            print(directory + ': DIRECTORY MISSING')
+        finally:
+            ftp.cwd(root)
     for path in ['error_log', 'public/error_log', 'storage/logs/laravel.log']:
         chunks = bytearray()
         def collect(data):
@@ -38,6 +47,8 @@ with ftplib.FTP_TLS(context=context, timeout=30) as ftp:
             'PHP_MEMORY': r'Allowed memory size.*exhausted',
             'PHP_EXTENSION': r'(?:could not find driver|Call to undefined function)',
             'SESSION_SCHEMA': r'(?:Incorrect integer value.*sessions|Field.*user_id.*default value)',
+            'BOOTSTRAP_CACHE': r'bootstrap[/\\]cache.*(?:writable|present)',
+            'COMPOSER_CLASS_MISSING': r'Class .*not found',
         }
         recent = text[-100000:]
         found = [name for name, pattern in categories.items() if re.search(pattern, recent, re.I)]
@@ -52,7 +63,7 @@ with ftplib.FTP_TLS(context=context, timeout=30) as ftp:
         dates = re.findall(r'\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\]', recent)
         if dates:
             print('Last log timestamp: ' + dates[-1])
-    for path in ['vendor/autoload.php', 'vendor/composer/autoload_real.php', 'vendor/composer/platform_check.php']:
+    for path in ['vendor/autoload.php', 'vendor/composer/autoload_real.php', 'vendor/composer/platform_check.php', 'vendor/laravel/framework/src/Illuminate/View/ViewServiceProvider.php']:
         try:
             data = bytearray()
             ftp.retrbinary('RETR ' + path, data.extend)
