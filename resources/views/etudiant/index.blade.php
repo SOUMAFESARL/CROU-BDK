@@ -8,7 +8,7 @@
     <!-- Dans votre layout -->
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <link rel="stylesheet" href="{{ asset('files/assets/css/system-theme.css') }}">
-     <link rel="icon" href="{{ systemLogo('files/assets/logo/logo.jpg') }}" type="image/x-icon">
+     <link rel="icon" href="{{ asset('admin/assets/images/logos/crou_bdk.jpeg') }}" type="image/jpeg">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <!-- Inclure jQuery -->
