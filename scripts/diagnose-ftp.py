@@ -4,6 +4,8 @@ import os
 import re
 import ssl
 import sys
+from pathlib import Path
+from io import BytesIO
 
 
 context = ssl.create_default_context()
@@ -15,6 +17,9 @@ with ftplib.FTP_TLS(context=context, timeout=30) as ftp:
     ftp.prot_p()
     ftp.cwd(os.environ['FTP_SERVER_DIR'])
     root = ftp.pwd()
+    if '--repair-web-root' in sys.argv:
+        ftp.storbinary('STOR .htaccess', BytesIO(Path('.htaccess').read_bytes()))
+        print('Installed project-root routing to public/.')
     for directory in ['bootstrap/cache', 'storage/framework/views', 'storage/framework/sessions', 'storage/framework/cache/data', 'storage/logs']:
         if '--repair-directories' in sys.argv:
             current = root.rstrip('/')
