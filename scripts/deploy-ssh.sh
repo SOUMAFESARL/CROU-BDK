@@ -60,6 +60,23 @@ tar -C "$stage/app" --exclude='./storage' --exclude='./bootstrap/cache' \
     -cf - . | tar -xf -
 # Composer runs without Laravel scripts until dependencies are complete.
 "${composer_command[@]}" install --no-dev --prefer-dist --no-interaction --optimize-autoloader --no-scripts
+# The historical sessions table cannot store Laravel string IDs and user UUIDs.
+# Match the working local setup without changing the production database schema.
+php <<'PHP'
+<?php
+$path = '.env';
+$content = file_get_contents($path);
+if ($content === false) {
+    throw new RuntimeException('Cannot read server environment.');
+}
+$updated = preg_replace('/^SESSION_DRIVER=[^\r\n]*/m', 'SESSION_DRIVER=file', $content, -1, $count);
+if ($count === 0) {
+    $updated = rtrim($content)."\nSESSION_DRIVER=file\n";
+}
+if (file_put_contents($path, $updated, LOCK_EX) === false) {
+    throw new RuntimeException('Cannot configure file sessions.');
+}
+PHP
 php artisan config:clear
 php artisan package:discover --no-interaction
 php scripts/check-production-database.php --initialize-empty

@@ -1,5 +1,11 @@
 # Deploiement SSH de main : premiere installation et mises a jour
 
+Le deploiement configure `SESSION_DRIVER=file` dans le `.env` du serveur :
+la table historique `sessions` utilise des identifiants numeriques incompatibles
+avec Laravel et les UUID des utilisateurs. Les sessions sont conservees dans
+`storage/framework/sessions`, qui doit rester accessible en ecriture et persistant.
+Aucune modification du schema de la base n'est necessaire. Le `.env` reste prive.
+
 Le workflow `deploy-ssh.yml` compile le frontend dans GitHub Actions, transfere
 une archive par SSH sur le port 5022 et installe les dependances PHP sur le serveur.
 Le serveur ne requiert ni npm, ni Node.js, ni checkout Git. Le workflow FTP de dev
