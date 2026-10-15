@@ -17,7 +17,8 @@ return new class extends Migration
         }
 
         Schema::create('etudiant_password_reset_tokens', function (Blueprint $table) {
-            $table->string('email')->primary();
+            // utf8mb4 uses up to four bytes per character for indexed values.
+            $table->string('email', 191)->primary();
             $table->string('token');
             $table->timestamp('created_at')->nullable();
         });
