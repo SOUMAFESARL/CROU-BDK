@@ -43,6 +43,15 @@ if [[ ! -f .env ]]; then
 fi
 mkdir "$stage/app"
 tar -xzf "$stage/release.tar.gz" -C "$stage/app"
+# public/files also contains versioned frontend code, not just uploaded files.
+# Update only these static directories; leave user content and other paths intact.
+for asset_directory in assets/css assets/css_web assets/js assets/js_web \
+    assets/fonts assets/icon assets/pages bower_components; do
+    if [[ -d "$stage/app/public/files/$asset_directory" ]]; then
+        mkdir -p "public/files/$asset_directory"
+        cp -a "$stage/app/public/files/$asset_directory/." "public/files/$asset_directory/"
+    fi
+done
 # Keep uploaded images while installing static images that are not present yet.
 if [[ -d "$stage/app/public/admin/assets/images" ]]; then
     mkdir -p public/admin/assets/images
