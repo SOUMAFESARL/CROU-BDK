@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Journal d'activité — {{ systemConfig('app_name', config('app.name')) }}</title>
-    <link rel="icon" href="{{ systemLogo('files/assets/logo/logo.jpg') }}" type="image/x-icon">
+    <link rel="icon" href="{{ asset('admin/assets/images/logos/crou_bdk.jpeg') }}?v=20261015" type="image/jpeg">
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; padding: 24px; font-family: 'DM Sans', 'Segoe UI', system-ui, sans-serif; font-size: 12px; color: #1f2328; background: #fff; }

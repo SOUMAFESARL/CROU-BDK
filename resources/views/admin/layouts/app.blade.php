@@ -19,7 +19,7 @@
     <title>@yield('title', systemConfig('app_name', config('app.name', 'CROU')))</title>
 
     <!-- Favicon -->
-    <link rel="icon" href="{{ systemLogo('files/assets/logo/logo.jpg') }}" type="image/x-icon">
+    <link rel="icon" href="{{ asset('admin/assets/images/logos/crou_bdk.jpeg') }}?v=20261015" type="image/jpeg">
     <style>:root { --app-brand-color: {{ systemConfig('brand_color', '#1F7C43') }}; }</style>
 
     <script src="https://cdn.tailwindcss.com"></script>

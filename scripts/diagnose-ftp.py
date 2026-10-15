@@ -17,6 +17,18 @@ with ftplib.FTP_TLS(context=context, timeout=30) as ftp:
     ftp.prot_p()
     ftp.cwd(os.environ['FTP_SERVER_DIR'])
     root = ftp.pwd()
+    if '--repair-favicons' in sys.argv:
+        for template in Path('resources/views').rglob('*.blade.php'):
+            data = template.read_bytes()
+            if b'crou_bdk.jpeg\') }}?v=20261015' in data:
+                ftp.storbinary('STOR ' + template.as_posix(), BytesIO(data))
+                print('Updated favicon template: ' + template.as_posix())
+        # Blade views are generated cache files, not user uploads.
+        for cached in ftp.nlst('storage/framework/views'):
+            if re.fullmatch(r'[a-f0-9]{40}\.php', cached.rsplit('/', 1)[-1]):
+                path = cached if '/' in cached else 'storage/framework/views/' + cached
+                ftp.delete(path)
+        print('Cleared compiled Blade view cache.')
     if '--repair-auth-configuration' in sys.argv:
         # Keep credentials in memory; never include environment contents in logs.
         environment = bytearray()

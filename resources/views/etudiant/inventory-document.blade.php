@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>État des lieux</title><link rel="icon" href="{{ systemLogo() }}">
+<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>État des lieux</title><link rel="icon" href="{{ asset('admin/assets/images/logos/crou_bdk.jpeg') }}?v=20261015" type="image/jpeg">
 <style>body{font:16px Arial;max-width:960px;margin:24px auto;padding:16px}table{width:100%;border-collapse:collapse}td,th{padding:10px;border:1px solid #ddd;text-align:left}img{max-width:240px;max-height:200px;margin:8px}@media print{.actions{display:none}}</style>    <link rel="stylesheet" href="{{ asset('files/assets/css/typography.css') }}?v=20260923">
 </head><body>
 <div class="actions"><a href="{{ route('etudiants.documents.personal') }}">← Mes documents</a> <button onclick="window.print()">Imprimer / Enregistrer en PDF</button></div>
