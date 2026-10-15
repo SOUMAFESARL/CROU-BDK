@@ -46,3 +46,19 @@ with ftplib.FTP_TLS(context=context, timeout=30) as ftp:
         classes = re.findall(r'([A-Za-z_\\]+(?:Exception|Error)):', recent)
         if classes:
             print('Recent exception classes: ' + ', '.join(dict.fromkeys(classes[-10:])))
+        targets = re.findall(r'Target class \[([A-Za-z_\\][A-Za-z0-9_\\]*)\] does not exist', recent)
+        if targets:
+            print('Missing container classes: ' + ', '.join(dict.fromkeys(targets[-10:])))
+        dates = re.findall(r'\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\]', recent)
+        if dates:
+            print('Last log timestamp: ' + dates[-1])
+    for path in ['vendor/autoload.php', 'vendor/composer/autoload_real.php', 'vendor/composer/platform_check.php']:
+        try:
+            data = bytearray()
+            ftp.retrbinary('RETR ' + path, data.extend)
+            print(path + ': present')
+            if path.endswith('platform_check.php'):
+                versions = re.findall(r'PHP_VERSION_ID\s*(?:>=|<)\s*(\d+)', data.decode(errors='replace'))
+                print('Composer PHP version thresholds: ' + ', '.join(versions))
+        except ftplib.error_perm:
+            print(path + ': MISSING')
