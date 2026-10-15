@@ -7,7 +7,6 @@ use App\Models\User;
 use App\Services\AdminViewAccess;
 use App\Services\AdminViewData;
 use App\Services\HousingReportingService;
-use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -29,6 +28,18 @@ class SharedAdminViewsTest extends TestCase
         };
     }
 
+    /** Props Inertia du tableau de bord « Vie résidentielle » pour l'administrateur connecté. */
+    private function vieResidentielle(\App\Http\Services\OrdreTravailService $service): array
+    {
+        $request = \Illuminate\Http\Request::create('/admin/gestion-hebergement/vie-residentielle');
+        $request->headers->set('X-Inertia', 'true');
+        $page = (new \App\Http\Controllers\admin\immobilier\vie_residentielle\VieResidentielleController($service))->index()
+            ->toResponse($request)->getData(true);
+        $this->assertSame('Admin/Hebergement/VieResidentielle/Index', $page['component']);
+
+        return $page['props'];
+    }
+
     public function test_page_entry_does_not_grant_its_sections(): void
     {
         $actor = $this->actor(['hebergement.vie-residentielle.view']);
@@ -39,32 +50,43 @@ class SharedAdminViewsTest extends TestCase
         $service = \Mockery::mock(\App\Http\Services\OrdreTravailService::class);
         $service->shouldNotReceive('getAll');
         DB::enableQueryLog();
-        $view = (new \App\Http\Controllers\admin\immobilier\vie_residentielle\VieResidentielleController($service))->index();
-        $this->assertSame([], $view->getData()['residences']);
-        $this->assertSame([], $view->getData()['kpis']);
+        $props = $this->vieResidentielle($service);
+        $this->assertSame([], $props['residences']);
+        $this->assertSame([], $props['kpis']);
+        $this->assertSame([], $props['ordresRecents']);
         $this->assertSame([], DB::getQueryLog());
     }
 
     public function test_finance_profile_only_receives_its_tab_and_no_other_panels(): void
     {
+        foreach (['cite' => ['id_cite', 'name'], 'paiements' => ['id_paiement', 'cite_id', 'type_paiement', 'statut_paiement', 'montant'],
+            'cautions' => ['id_caution', 'cite_id', 'statut', 'montant_retenu'], 'loyers' => ['id_loyer', 'cite_id', 'statut', 'montant_total', 'solde_restant'],
+            'ordres_travail' => ['id_ordres_travail', 'cite_id', 'cout_reel']] as $table => $colonnes) {
+            Schema::create($table, function ($t) use ($colonnes) {
+                foreach ($colonnes as $colonne) {
+                    $t->string($colonne)->nullable();
+                }
+                $t->timestamps();
+                $t->softDeletes();
+            });
+        }
+        DB::table('cite')->insert(['id_cite' => 'c1', 'name' => 'Cité Bondoukou']);
+        DB::table('loyers')->insert(['id_loyer' => 'l1', 'cite_id' => 'c1', 'statut' => 'en_retard', 'montant_total' => 20000, 'solde_restant' => 5000]);
+
         $actor = $this->actor(['hebergement.paiements.view']);
         $this->actingAs($actor, 'admin');
-        $source = file_get_contents(resource_path('views/admin/hebergement/vie_residentielle/index.blade.php'));
-        $source = preg_replace('/@extends\(.*?\)\s*/s', '', $source, 1);
-        $source .= "\n@yield('content')\n@stack('scripts')";
-        $html = Blade::render($source, [
-            'viewAccess' => app(AdminViewAccess::class)->housing($actor), 'residences' => [], 'kpis' => [],
-            'periodLabel' => '2026-2027', 'lastUpdated' => '29/09/2026',
-            'paiementsGlobaux' => collect(), 'ordresTravail' => collect(), 'sanctions' => collect(),
-            'rapportsDisciplinaires' => collect(), 'demandesSortie' => collect(), 'decomptesSortie' => collect(),
-            'globalOTUrgents' => 0, 'globalOTEnCours' => 0, 'globalOTResolutionRate' => 0,
-        ]);
-        $this->assertStringContainsString('id="tab2"', $html);
-        foreach ([1, 3, 4, 5, 6] as $tab) {
-            $this->assertStringNotContainsString('id="tab'.$tab.'"', $html);
-            $this->assertStringNotContainsString('data-tab="tab'.$tab.'"', $html);
-        }
-        $this->assertStringContainsString('tabs[0]?.click()', $html);
+        $service = \Mockery::mock(\App\Http\Services\OrdreTravailService::class);
+        $service->shouldNotReceive('getAll');
+        $props = $this->vieResidentielle($service);
+
+        $this->assertSame(['finance'], array_keys(array_filter($props['viewAccess'])));
+        $this->assertSame(['recouvrement', 'impayes'], array_column($props['kpis'], 'key'));
+        $this->assertEquals(75, $props['kpis'][0]['value']);
+        // Seules les colonnes financières de la cité sont envoyées au navigateur.
+        $this->assertSame(['id', 'name', 'recovery_rate', 'unpaid_rate', 'finance'], array_keys($props['residences'][0]));
+        $this->assertSame([], $props['ordresRecents']);
+        $this->assertSame(['paiements'], array_column($props['raccourcis'], 'key'));
+        $this->assertSame([null], array_unique(array_values($props['synthese'])));
     }
 
     public function test_report_permissions_filter_modules_and_sections_before_queries(): void

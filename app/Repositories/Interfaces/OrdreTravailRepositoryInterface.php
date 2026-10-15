@@ -58,7 +58,7 @@ interface OrdreTravailRepositoryInterface
     /**
      * Mettre à jour le statut d'un ordre de travail
      */
-    public function updateStatut(string $id, string $statut): OrdreTravail;
+    public function updateStatut(string $id, string $statut, ?string $solution = null): OrdreTravail;
 
     /**
      * Ajouter une intervention à un ordre de travail

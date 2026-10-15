@@ -117,13 +117,13 @@ class OrdreTravailRepository implements OrdreTravailRepositoryInterface
     /**
      * Mettre à jour le statut d'un ordre de travail
      */
-    public function updateStatut(string $id, string $statut): OrdreTravail
+    public function updateStatut(string $id, string $statut, ?string $solution = null): OrdreTravail
     {
-        return DB::transaction(function () use ($id, $statut) {
+        return DB::transaction(function () use ($id, $statut, $solution) {
             $ordre = $this->model->newQuery()->lockForUpdate()->findOrFail($id);
 
             if ($statut === 'termine') {
-                $ordre->terminer();
+                $ordre->terminer($solution);
             } else {
                 $ordre->statut = $statut;
                 $ordre->save();

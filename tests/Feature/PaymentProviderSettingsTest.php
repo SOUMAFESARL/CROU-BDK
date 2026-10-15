@@ -187,4 +187,81 @@ class PaymentProviderSettingsTest extends TestCase
         $this->assertStringContainsString('Aucun réseau', $html);
         $this->assertStringNotContainsString('Moov', $html);
     }
+
+    public function test_page_shows_networks_without_ever_sending_secrets(): void
+    {
+        $this->admin();
+        $wave = PaymentProvider::where('code', 'wave')->firstOrFail();
+        $this->put($this->url($wave), [
+            'api_url' => 'https://api.wave.com', 'api_key' => 'wave-secret-key',
+            'webhook_secret' => 'webhook-secret-value', 'is_active' => 1,
+        ])->assertSessionHasNoErrors();
+
+        $html = $this->html(route('admin.parametrage.payment-providers.index'));
+        foreach (['wave-secret-key', 'webhook-secret-value', $wave->fresh()->getRawOriginal('api_key')] as $secret) {
+            $this->assertStringNotContainsString($secret, $html);
+        }
+        $page = $this->pageFrom($html);
+        $this->assertSame('Admin/Parametrage/ApiPaiement/Index', $page['component']);
+        $this->assertCount(6, $page['props']['providers']);
+
+        $reseau = collect($page['props']['providers'])->firstWhere('code', 'wave');
+        $this->assertTrue($reseau['is_active']);
+        $this->assertSame('https://api.wave.com', $reseau['api_url']);
+        $this->assertSame(['default' => 'https://api.wave.com'], $reseau['expected_urls']);
+        $this->assertSame(route('admin.parametrage.payment-providers.update', $wave), $reseau['update_url']);
+        $identifiants = collect($reseau['credentials'])->keyBy('field');
+        $this->assertSame(['api_key', 'request_signing_secret', 'webhook_secret'], $identifiants->keys()->all());
+        $this->assertTrue($identifiants['api_key']['saved']);
+        $this->assertFalse($identifiants['request_signing_secret']['saved']);
+        $this->assertFalse($identifiants['request_signing_secret']['required']);
+        $this->assertStringEndsWith('/api/payments/notifications/wave', $reseau['webhook_url']);
+
+        $mtn = collect($page['props']['providers'])->firstWhere('code', 'mtn');
+        $this->assertSame('https://proxy.momoapi.mtn.com', $mtn['expected_urls']['mtnivorycoast']);
+        $this->assertSame(['api_user', 'api_key', 'subscription_key'], array_column($mtn['credentials'], 'field'));
+    }
+
+    public function test_online_payments_are_counted_and_filtered_by_state(): void
+    {
+        $provider = PaymentProvider::where('code', 'wave')->firstOrFail();
+        foreach (['succeeded' => 5000, 'review' => 3000, 'pending' => 2000, 'failed' => 1000] as $status => $amount) {
+            DB::table('online_payments')->insert([
+                'id' => (string) \Illuminate\Support\Str::uuid(), 'reference' => 'REF-'.$status, 'provider_id' => $provider->id,
+                'provider_code' => 'wave', 'student_id' => 'etu-1', 'loyer_id' => 'loyer-1', 'amount' => $amount, 'status' => $status,
+                'credentials' => encrypt([]), 'callback_token_hash' => str_repeat('a', 64), 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+        $this->admin();
+        $props = $this->pageFrom($this->html(route('admin.parametrage.payment-providers.index')))['props'];
+        $this->assertSame(['total' => 4, 'confirmes' => 1, 'montant_confirme' => 5000, 'a_verifier' => 1, 'echoues' => 1, 'en_attente' => 1], $props['kpis']);
+        $this->assertSame(4, $props['encaissements']['total']);
+        $this->assertArrayNotHasKey('credentials', $props['encaissements']['data'][0]);
+
+        $filtre = $this->pageFrom($this->html(route('admin.parametrage.payment-providers.index', ['statut' => 'a_verifier'])))['props'];
+        $this->assertSame(['REF-review'], array_column($filtre['encaissements']['data'], 'reference'));
+        $attente = $this->pageFrom($this->html(route('admin.parametrage.payment-providers.index', ['statut' => 'en_attente'])))['props'];
+        $this->assertSame(['REF-pending'], array_column($attente['encaissements']['data'], 'reference'));
+        $ignore = $this->pageFrom($this->html(route('admin.parametrage.payment-providers.index', ['statut' => 'inconnu'])))['props'];
+        $this->assertSame('', $ignore['filters']['statut']);
+        $this->assertSame(4, $ignore['encaissements']['total']);
+    }
+
+    private function html(string $url): string
+    {
+        $this->withoutVite();
+        $settings = new \App\Models\ConfigApp(['app_name' => 'Résidence test']);
+        $settings->setRelation('region', null)->setRelation('ville', null);
+        $this->mock(\App\Repositories\Interfaces\ConfigAppRepositoryInterface::class)->shouldReceive('getConfig')->andReturn($settings);
+
+        return $this->get($url)->assertOk()->getContent();
+    }
+
+    /** Page Inertia lue dans `data-page` (un middleware global reconstruit la réponse). */
+    private function pageFrom(string $html): array
+    {
+        preg_match('/data-page="([^"]+)"/', $html, $matches);
+
+        return json_decode(html_entity_decode($matches[1] ?? ''), true) ?? [];
+    }
 }

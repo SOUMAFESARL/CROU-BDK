@@ -14,6 +14,16 @@ use Illuminate\Support\Facades\Log;
 
 class OrdreTravailService implements OrdreTravailServiceInterface
 {
+    /** Changements de statut autorisés (l'assignation fait passer de « en attente » à « en cours »). */
+    public const TRANSITIONS = [
+        'en_attente' => ['en_cours', 'annule'],
+        'en_cours' => ['en_attente_pieces', 'termine', 'annule', 'reporte'],
+        'en_attente_pieces' => ['en_cours', 'termine', 'annule'],
+        'termine' => [],
+        'annule' => [],
+        'reporte' => ['en_attente', 'en_cours'],
+    ];
+
     protected  $repository;
 
     public function __construct(OrdreTravailRepositoryInterface $repository)
@@ -181,7 +191,7 @@ class OrdreTravailService implements OrdreTravailServiceInterface
     /**
      * Mettre à jour le statut d'un ordre de travail
      */
-    public function updateStatut(string $id, string $statut): OrdreTravail
+    public function updateStatut(string $id, string $statut, ?string $solution = null): OrdreTravail
     {
         try {
             DB::beginTransaction();
@@ -192,7 +202,7 @@ class OrdreTravailService implements OrdreTravailServiceInterface
             }
 
             $this->validateStatutTransition($ordre->statut, $statut);
-            $ordre = $this->repository->updateStatut($id, $statut);
+            $ordre = $this->repository->updateStatut($id, $statut, $solution);
 
             DB::commit();
             return $ordre;
@@ -306,14 +316,7 @@ class OrdreTravailService implements OrdreTravailServiceInterface
      */
     protected function validateStatutTransition(string $oldStatut, string $newStatut): void
     {
-        $transitions = [
-            'en_attente' => ['en_cours', 'annule'],
-            'en_cours' => ['en_attente_pieces', 'termine', 'annule', 'reporte'],
-            'en_attente_pieces' => ['en_cours', 'termine', 'annule'],
-            'termine' => [],
-            'annule' => [],
-            'reporte' => ['en_attente', 'en_cours']
-        ];
+        $transitions = self::TRANSITIONS;
 
         if (!isset($transitions[$oldStatut]) || !in_array($newStatut, $transitions[$oldStatut])) {
             throw new \Exception("Transition de statut invalide: '{$oldStatut}' → '{$newStatut}'");

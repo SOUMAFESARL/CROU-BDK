@@ -184,6 +184,7 @@ return [
         'admin.parametrage.filiere.update' => 'parametrage.referentiels.update',
         'admin.parametrage.index' => ['parametrage.configuration.configure', 'parametrage.configuration.view', 'parametrage.legal-documents.manage', 'parametrage.modules.configure', 'parametrage.modules.view', 'parametrage.payment-providers.configure', 'parametrage.referentiels.view', 'parametrage.roles.view', 'parametrage.view'],
         'admin.parametrage.legal-documents.create' => 'parametrage.legal-documents.manage',
+        'admin.parametrage.legal-documents.destroy' => 'parametrage.legal-documents.manage',
         'admin.parametrage.legal-documents.edit' => 'parametrage.legal-documents.manage',
         'admin.parametrage.legal-documents.index' => 'parametrage.legal-documents.manage',
         'admin.parametrage.legal-documents.pdf' => 'parametrage.legal-documents.manage',

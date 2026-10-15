@@ -137,7 +137,7 @@ class OrdreTravail extends Model
     }
     public function equipement(): BelongsTo
     {
-        return $this->belongsTo(Equipement::class, 'equipement_id', 'id_equipement');
+        return $this->belongsTo(Equipement::class, 'equipement_id', 'equipement_id');
     }
 
     public function assigneA(): BelongsTo

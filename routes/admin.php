@@ -282,10 +282,6 @@ Route::middleware(['admin'])->group(function () {
         ->group(function () {
 
             Route::get('/', 'index')->name('index');
-            Route::get('/annonce', 'annonce')->name('annonce');
-
-
-
         });
 
     Route::prefix('gestion-hebergement/vie-residentielle/annonce')
@@ -298,7 +294,8 @@ Route::middleware(['admin'])->group(function () {
             Route::post('/store', 'store')->name('store');
             Route::get('{id}',  'show')->name('show');
             Route::get('{id}/edit',  'edit')->name('edit');
-            Route::get('{id}/update', 'update')->name('update');
+            // PUT : l'écran envoie la modification avec `_method=PUT` (l'ancienne route GET la rendait impossible).
+            Route::put('{id}', 'update')->name('update');
             Route::post('{id}/publish', 'publish')->name('publish');
             Route::delete('{id}','destroy')->name('destroy');
 
@@ -520,6 +517,7 @@ Route::middleware(['admin'])->group(function () {
                 Route::get('/{document}/edit', 'edit')->name('edit');
                 Route::put('/{document}', 'update')->name('update');
                 Route::post('/{document}/publish', 'publish')->name('publish');
+                Route::delete('/{document}', 'destroy')->name('destroy');
                 Route::get('/{document}/preview', 'preview')->name('preview');
                 Route::get('/{document}/pdf', 'pdf')->name('pdf');
                 Route::get('/{document}/versions/{version}/pdf', 'versionPdf')->name('versions.pdf');

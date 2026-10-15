@@ -12,6 +12,8 @@ type EnvoiOptions<T extends FieldValues> = {
     forceFormData?: boolean;
     preserveScroll?: boolean;
     only?: string[];
+    /** Sac d'erreurs nommé de l'action (`withErrors($validator, 'nom')`). */
+    errorBag?: string;
     onSuccess?: () => void;
     /** Erreurs restantes après répartition dans les champs. */
     onError?: (erreurs: Record<string, string>) => void;
@@ -23,7 +25,7 @@ type EnvoiOptions<T extends FieldValues> = {
  * le message de succès est affiché par `AdminLayout`, les erreurs de champ vont dans le formulaire.
  */
 export function envoyer<T extends FieldValues>(url: string, data: RequestPayload, options: EnvoiOptions<T> = {}): Promise<boolean> {
-    const { method = 'post', setError, champs = [], forceFormData = false, preserveScroll = true, only, onSuccess, onError } = options;
+    const { method = 'post', setError, champs = [], forceFormData = false, preserveScroll = true, only, errorBag, onSuccess, onError } = options;
     const methode = forceFormData && (method === 'put' || method === 'patch') ? 'post' : method;
     const donnees = forceFormData && methode !== method && data && typeof data === 'object' && !(data instanceof FormData)
         ? { ...(data as Record<string, unknown>), _method: method }
@@ -37,6 +39,7 @@ export function envoyer<T extends FieldValues>(url: string, data: RequestPayload
             preserveScroll,
             preserveState: true,
             only,
+            errorBag,
             onSuccess: (page) => {
                 // Un `back()->with('error', …)` n'est pas une erreur de validation : on le considère comme un échec.
                 const flash = (page.props as { flash?: { error?: string | null } }).flash;

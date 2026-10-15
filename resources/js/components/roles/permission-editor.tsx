@@ -145,7 +145,7 @@ export function PermissionEditor({ tree, selected, onChange, disabled = false }:
             </div>
 
             <Tabs defaultValue={String(tree[0].id)} className="gap-4">
-                <TabsList aria-label="Grands modules" className="flex-wrap gap-2 overflow-visible border-b-0">
+                <TabsList aria-label="Grands modules" indicator={false} className="flex-wrap gap-2 overflow-visible border-b-0">
                     {tree.map((root) => {
                         const Icon = moduleIcon(root.slug);
                         const permissions = totals.get(root.id) ?? [];
