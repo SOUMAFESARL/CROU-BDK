@@ -8,6 +8,8 @@ type RowActionProps = {
     icon: LucideIcon;
     /** Lien classique (écrans Blade non migrés : rechargement complet). */
     href?: string;
+    /** Ouvre le lien dans un nouvel onglet (PDF…). */
+    newTab?: boolean;
     onClick?: () => void;
     tone?: Tone;
 };
@@ -27,7 +29,7 @@ const base =
     'inline-flex size-8 cursor-pointer items-center justify-center rounded-brand transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary';
 
 /** Bouton d'action d'une ligne de tableau : icône seule + info-bulle (le libellé sert aussi d'aria-label). */
-export function RowAction({ label, icon: Icon, href, onClick, tone = 'default' }: RowActionProps) {
+export function RowAction({ label, icon: Icon, href, newTab, onClick, tone = 'default' }: RowActionProps) {
     const className = cn(base, tones[tone]);
     const content = <Icon className="size-4.5" strokeWidth={1.5} aria-hidden />;
 
@@ -35,7 +37,7 @@ export function RowAction({ label, icon: Icon, href, onClick, tone = 'default' }
         <Tooltip>
             <TooltipTrigger asChild>
                 {href ? (
-                    <a href={href} aria-label={label} className={className}>
+                    <a href={href} aria-label={label} className={className} {...(newTab && { target: '_blank', rel: 'noopener' })}>
                         {content}
                     </a>
                 ) : (

@@ -2,64 +2,42 @@
 
 namespace App\Http\Controllers\admin\immobilier\residents_contrat;
 
-
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use App\Http\Services\EtudiantService;
-use App\Models\Document;
-use App\Http\Requests\CampagneRequest;
-use App\Http\Services\CampagneService;
-use Illuminate\Http\JsonResponse;
-use Illuminate\View\View;
-use Illuminate\Http\RedirectResponse;
-use \App\Models\Cite;
-use \App\Models\DocumentCampagne;
-use \App\Models\ResidenceCampagne;
-use Illuminate\Support\Str;
-use App\Http\Services\DocumentEtudiantService;
-use App\Repositories\Interfaces\DocumentEtudiantRepositoryInterface;
-use App\Repositories\Interfaces\EtudiantRepositoryInterface;
 use App\Http\Services\CampagneValidationService;
+use App\Http\Services\EtudiantService;
+use App\Models\AssignationChambre;
+use App\Models\Etudiant;
+use App\Repositories\EtudiantRepository;
+use App\Services\AdminAccess;
+use App\Services\AdminViewAccess;
+use Illuminate\Http\Request;
+use Inertia\Inertia;
 
 class ResidentContratControler extends Controller
 {
+    /** Filtres de la page : dossiers en vérification et étudiants déjà logés. */
+    private const FILTRES = ['en_verification', 'residents'];
 
-
-    protected $etudiantService;
-
-    public function __construct(EtudiantService $etudiantService,CampagneService $campagneService)
+    public function __construct(protected EtudiantService $etudiantService)
     {
-        $this->etudiantService = $etudiantService;
-        $this->campagneService = $campagneService;
     }
-
 
     public function liste(Request $request, ?string $etat = null)
     {
         try {
-
-            $result = $this->etudiantService->getListeEtudiantsWithStats($etat ?? $request->get('etat'));
-            $result = app(\App\Services\AdminViewData::class)->filter($result, $request->user('admin'));
-            //  dd($result);
-            if ($request->wantsJson()) {
-                return response()->json($result);
+            if (! $request->wantsJson()) {
+                return $this->pageResidents($request, $etat ?? $request->get('etat'));
             }
 
-            return view('admin.hebergement.resident_contrat.index', [
-                'etudiants' => $result['data']['etudiants'],
-                'stats' => $result['data']['stats'],
-                'etat' => $result['data']['filtre_actif'] ?? 'residents',
-                'success' => $result['success'],
-                'message' => $result['message'] ?? null,
-                'campagne_active' => $result['data']['campagne_active'], // ← nouveau
-            ]);
+            $result = $this->etudiantService->getListeEtudiantsWithStats($etat ?? $request->get('etat'));
 
+            return response()->json(app(\App\Services\AdminViewData::class)->filter($result, $request->user('admin')));
         } catch (\Exception $e) {
             if ($request->wantsJson()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Erreur lors de la récupération de la liste',
-                    'error' => \App\Support\UserFacingErrors::caught($e)
+                    'error' => \App\Support\UserFacingErrors::caught($e),
                 ], 500);
             }
 
@@ -67,10 +45,80 @@ class ResidentContratControler extends Controller
         }
     }
 
-
-    public function attributionChambre($etudiant_id)
+    /**
+     * Résidents et contrats (page React `Admin/Hebergement/Residents/Index`).
+     * Colonnes personnelles et historique envoyés seulement avec les droits correspondants ;
+     * chaque URL d'action n'est envoyée que si `AdminAccess` l'autorise.
+     */
+    private function pageResidents(Request $request, ?string $filtre)
     {
+        $admin = $request->user('admin');
+        $access = app(AdminAccess::class);
+        $vues = app(AdminViewAccess::class);
+        $personnel = $vues->allows($admin, 'admissions.personal');
+        $historique = $vues->allows($admin, 'admissions.history');
+        $etat = in_array($filtre, self::FILTRES, true) ? $filtre : 'residents';
+        $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+        $repository = app(EtudiantRepository::class);
+        $campagne = app(CampagneValidationService::class)->getCampagneActive();
 
+        $recherche = trim((string) $request->query('q', ''));
+        $page = $repository->getAdmissionsPage($etat, 10, $recherche);
+        $page->getCollection()->load(['assignationsChambre' => fn ($q) => $q->where('statut', 'confirmee')
+            ->with(['chambre.batiment', 'chambre.cite'])]);
+
+        $stats = $repository->getStats();
+        $stats['sans_chambre'] = Etudiant::whereRaw('LOWER(statut_inscription) = ?', ['residents'])
+            ->whereDoesntHave('assignationsChambre', fn ($q) => $q->where('statut', 'confirmee'))
+            ->count();
+
+        return Inertia::render('Admin/Hebergement/Residents/Index', [
+            'residents' => $page->through(function (Etudiant $etudiant) use ($personnel, $historique, $url, $etat) {
+                /** @var AssignationChambre|null $assignation */
+                $assignation = $etudiant->assignationsChambre->sortByDesc('created_at')->first();
+                $chambre = $assignation?->chambre;
+
+                return [
+                    'id' => (string) $etudiant->id_etudiant,
+                    'name' => $etudiant->name,
+                    'numero_demande' => $etudiant->derniereDemande?->numero_demande,
+                    'date' => $etudiant->created_at?->format('Y-m-d H:i'),
+                    'personnel' => $personnel ? [
+                        'telephone' => $etudiant->telephone1,
+                        'adresse' => $etudiant->adresse,
+                        'region' => $etudiant->region?->name,
+                        'ville' => $etudiant->ville?->name,
+                        'date_naissance' => $etudiant->date_naissance?->toDateString(),
+                    ] : null,
+                    'demandes' => $historique ? (int) $etudiant->demandes_count : null,
+                    'chambre' => $assignation ? [
+                        'numero' => $chambre?->numero_chambre,
+                        'lieu' => collect([$chambre?->batiment?->name, $chambre?->cite?->name])->filter()->implode(' · ') ?: null,
+                    ] : null,
+                    'urls' => [
+                        'dossier' => $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant]),
+                        'traiter' => $etat === 'en_verification'
+                            ? $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant])
+                            : null,
+                        'contrat' => $url('admin.etudiant.contrat', ['etudiant' => $etudiant->id_etudiant]),
+                    ],
+                ];
+            }),
+            'stats' => [
+                'residents' => $stats['residents'],
+                'en_verification' => $stats['en_verification'],
+                'sans_chambre' => $stats['sans_chambre'],
+            ],
+            'etat' => $etat,
+            'filters' => ['q' => $recherche],
+            'colonnes' => ['personnel' => $personnel, 'historique' => $historique],
+            'campagneActive' => $campagne ? ['annee' => $campagne->annee_campagne] : null,
+            'urls' => [
+                'attributions' => $campagne ? $url('admin.allocation.show', ['campagneId' => $campagne->id_campagne]) : null,
+                'filtres' => $access->allows($admin, 'admin.hebergement.residents_contrat.admission')
+                    ? collect(self::FILTRES)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.residents_contrat.admission', ['etat' => $f])])
+                    : null,
+            ],
+        ]);
     }
-
 }

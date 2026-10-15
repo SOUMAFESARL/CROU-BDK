@@ -64,12 +64,10 @@ class EquipmentAllocationTest extends TestCase
         $this->assertEquals(6, Equipement::find('e')->stock_actuel);
         $this->assertNull($allocation->fresh()->returned_at);
     }
-    public function test_initial_entry_is_not_counted_twice_and_view_compiles(): void
+    public function test_initial_entry_is_not_counted_twice(): void
     {
         Equipement::find('e')->mouvements()->create(['type' => 'entry', 'quantity' => 10]);
         app(EquipmentAllocationService::class)->allocate($this->data(), 'agent');
         $this->assertEquals(6, Equipement::find('e')->stock_actuel);
-        $compiled = app('blade.compiler')->compileString(file_get_contents(resource_path('views/admin/hebergement/equipements/affectations.blade.php')));
-        $this->assertNotEmpty(token_get_all($compiled, TOKEN_PARSE));
     }
 }

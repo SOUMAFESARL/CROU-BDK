@@ -6,6 +6,8 @@ Les exceptions inattendues restent dans les journaux Laravel. Les utilisateurs r
 
 Sur les pages, les erreurs générales affichent une page indépendante du modèle administrateur et de la base de données, avec un bouton de retour. Les validations conservent la redirection vers le formulaire, les erreurs de champs et les anciennes valeurs ; les mots de passe sont exclus par Laravel. Les erreurs de connexion conservent le circuit d’authentification.
 
+Pages React (Inertia, en-tête `X-Inertia`) : une erreur de validation revient au formulaire comme ailleurs (erreurs affichées sous les champs). Toute autre erreur sur une action (POST, PUT, PATCH, DELETE) renvoie à la page précédente avec le message simple en `flash.error`, affiché en toast par `AdminLayout`, au lieu de la page d’erreur HTML.
+
 Le middleware possède un `try-catch` couvrant toutes les requêtes ; le rendu de la page d’erreur possède aussi un secours si le modèle ne peut pas être rendu. Il n’est pas nécessaire d’entourer chaque simple lecture d’un catch qui masquerait les pannes.
 
 Dans un catch applicatif, utiliser `UserFacingErrors::caught($exception)` pour journaliser le détail et obtenir un texte destiné au public. Pour les transactions, laisser l’exception sortir de la transaction avant de la convertir en réponse afin que Laravel annule les écritures. Ne pas transformer une panne en réponse de succès ou en liste vide.

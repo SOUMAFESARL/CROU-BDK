@@ -40,26 +40,34 @@ class AllocationChambresPageTest extends \Tests\Support\DossierTestCase
         }
     }
 
-    private function controller(): AllocationChambreController
+    /** Page Inertia rendue par une action d'affichage du contrôleur (composant + props). */
+    private function page(string $action, array $parametres = [], array $query = []): array
     {
-        $this->app->instance('request', Request::create('/admin/allocation-chambres'));
+        $request = Request::create('/admin/allocation-chambres', 'GET', $query);
+        $request->headers->set('X-Inertia', 'true');
+        $request->setLaravelSession($this->app['session.store']);
+        $this->app->instance('request', $request);
 
-        return app(AllocationChambreController::class);
+        return app()->call([app(AllocationChambreController::class), $action], ['request' => $request, ...$parametres])
+            ->toResponse($request)->getData(true);
     }
 
     public function test_liste_des_campagnes_et_indicateurs(): void
     {
-        $data = $this->controller()->index()->getData();
+        $page = $this->page('index');
+        $this->assertSame('Admin/Hebergement/Allocations/Index', $page['component']);
+        $data = $page['props'];
 
         $this->assertSame(['total' => 2, 'active' => 1, 'planifiee' => 0, 'terminee' => 1], $data['stats']);
-        $this->assertSame(['campaign', 'old'], collect($data['campagnes']->items())->pluck('id_campagne')->all());
-        $this->assertSame(2, $data['campagnes']->first()->dossiers_eligibles_count);
+        $this->assertSame(['campaign', 'old'], array_column($data['campagnes']['data'], 'id'));
+        $this->assertSame(2, $data['campagnes']['data'][0]['a_loger']);
+        $this->assertNull($data['classement']);
 
         $this->allocate();
-        $campagne = $this->controller()->index()->getData()['campagnes']->first();
-        $this->assertSame(1, $campagne->dossiers_eligibles_count);
-        $this->assertSame(1, $campagne->propositions_count);
-        $this->assertSame(0, $campagne->confirmees_count);
+        $campagne = $this->page('index')['props']['campagnes']['data'][0];
+        $this->assertSame(1, $campagne['a_loger']);
+        $this->assertSame(1, $campagne['propositions']);
+        $this->assertSame(0, $campagne['confirmees']);
     }
 
     public function test_precontrole_du_sexe_de_la_chambre(): void
@@ -85,21 +93,56 @@ class AllocationChambresPageTest extends \Tests\Support\DossierTestCase
         DB::table('chambre')->update(['type_chambre_id' => 'double']);
         $this->allocate();
 
-        $vue = $this->controller()->statistics('campaign');
+        $page = $this->page('statistics', ['campagneId' => 'campaign']);
 
-        $this->assertInstanceOf(\Illuminate\View\View::class, $vue);
-        $this->assertSame('admin.hebergement.resident_contrat.allocation_statistics', $vue->name());
+        $this->assertSame('Admin/Hebergement/Allocations/Statistics', $page['component']);
         // L'attribution en attente est rattachée au type de sa chambre.
-        $parType = $vue->getData()['stats']['par_type']['Double'];
+        $parType = collect($page['props']['stats']['par_type'])->firstWhere('nom', 'Double');
         $this->assertSame(1, $parType['total']);
         $this->assertSame(1, $parType['occupees']);
     }
 
-    public function test_les_vues_compilent(): void
+    /** Tables lues par les listes d'éligibles et de chambres (documents, niveaux). */
+    private function tablesDuSuivi(): void
     {
-        foreach (['allocation_index', 'allocation_show', 'allocation_form', 'allocation_statistics', 'ranking-summary'] as $vue) {
-            $compiled = app('blade.compiler')->compileString(file_get_contents(resource_path("views/admin/hebergement/resident_contrat/{$vue}.blade.php")));
-            $this->assertNotEmpty(token_get_all($compiled, TOKEN_PARSE), $vue);
-        }
+        Schema::create('document_etudiant', function (Blueprint $t) {
+            $t->string('id_document_etudiant')->primary();
+            $t->string('etudiant_id')->nullable();
+            $t->softDeletes();
+            $t->timestamps();
+        });
+    }
+
+    public function test_suivi_de_la_campagne(): void
+    {
+        $this->tablesDuSuivi();
+        $this->allocate();
+        session()->flash('allocation_result', ['allocated' => [['rang' => 1, 'name' => 'Étudiant', 'score' => 80.5, 'chambre' => '101']], 'not_allocated' => []]);
+
+        $page = $this->page('show', ['campagneId' => 'campaign']);
+
+        $this->assertSame('Admin/Hebergement/Allocations/Show', $page['component']);
+        $props = $page['props'];
+        $this->assertCount(1, $props['assignations']);
+        $this->assertTrue($props['assignations'][0]['annulable']);
+        $this->assertFalse($props['assignations'][0]['confirmable']);
+        $this->assertCount(1, $props['etudiants']);
+        $this->assertSame(1, $props['classement']['reservations']);
+        $this->assertSame('101', $props['classement']['lignes'][0]['chambre']);
+    }
+
+    public function test_formulaire_d_attribution_et_precontrole(): void
+    {
+        $this->tablesDuSuivi();
+        $page = $this->page('allocateForm', ['campagneId' => 'campaign'], ['etudiant_id' => 'student']);
+
+        $this->assertSame('Admin/Hebergement/Allocations/Allocate', $page['component']);
+        $props = $page['props'];
+        $this->assertSame('student', $props['etudiantInitial']);
+        $this->assertSame(['other', 'student'], collect($props['etudiants'])->pluck('id')->sort()->values()->all());
+        $this->assertSame('m', collect($props['etudiants'])->firstWhere('id', 'student')['sexe']);
+        $chambre = collect($props['chambres'])->firstWhere('id', 'room');
+        $this->assertSame('mixte', $chambre['sexe']);
+        $this->assertNotEmpty($chambre['lits']);
     }
 }

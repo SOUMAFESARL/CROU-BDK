@@ -188,16 +188,25 @@ class EtudiantRepository implements EtudiantRepositoryInterface
         ];
     }
 
-    public function getAdmissionsPage(?string $etat = null): \Illuminate\Pagination\LengthAwarePaginator
+    /** `$recherche` : nom de l'étudiant, numéro de demande ou numéro de chambre (affectation confirmée). */
+    public function getAdmissionsPage(?string $etat = null, int $parPage = 25, ?string $recherche = null): \Illuminate\Pagination\LengthAwarePaginator
     {
+        $recherche = trim((string) $recherche);
         $status = match($etat) {
             'nouvelles_demandes'=>'demande', 'en_attente'=>'en_attente',
             'en_verification'=>'en_verification', 'annuler'=>'annuler', default=>'residents',
         };
         return Etudiant::with(['region','ville','derniereDemande'])->withCount('demandes')
             ->whereRaw('LOWER(statut_inscription) = ?',[$status])
+            ->when($recherche !== '', function ($query) use ($recherche) {
+                $motif = '%'.addcslashes($recherche, '%_\\').'%';
+                $query->where(fn ($q) => $q->where('name', 'like', $motif)
+                    ->orWhereHas('demandes', fn ($d) => $d->where('numero_demande', 'like', $motif))
+                    ->orWhereHas('assignationsChambre', fn ($a) => $a->where('statut', 'confirmee')
+                        ->whereHas('chambre', fn ($c) => $c->where('numero_chambre', 'like', $motif))));
+            })
             ->orderByDesc('date_inscription')->orderByDesc('id_etudiant')
-            ->paginate(25)->withQueryString();
+            ->paginate($parPage)->withQueryString();
     }
 
     public function verifierEligibilite(mixed $demande, mixed $campagne, bool $ignorerDocuments = false): array

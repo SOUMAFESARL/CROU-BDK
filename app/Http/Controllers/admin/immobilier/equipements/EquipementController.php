@@ -9,10 +9,13 @@ use App\Models\EquipementMouvement;
 use App\Models\Equipement;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
+use App\Services\AdminAccess;
+use Carbon\Carbon;
+use Inertia\Inertia;
 
 class EquipementController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request, AdminAccess $access)
     {
         // Les mouvements sont chargés d'avance : stock_actuel les lit pour chaque équipement.
         $equipements = Equipement::with(['type_equipement', 'mouvements'])->orderBy('name')->get()
@@ -48,19 +51,38 @@ class EquipementController extends Controller
             'query' => $request->query(),
         ]);
 
-        return view('admin.hebergement.equipements.index', [
-            'equipements' => $paginees,
+        $admin = $request->user('admin');
+        $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+        $filtre = fn (string $statut) => route('admin.hebergement.equipements.index', array_filter([
+            'statut' => $statut === 'tous' ? null : $statut, 'q' => $recherche ?: null, 'type' => $type ?: null,
+        ]));
+
+        return Inertia::render('Admin/Hebergement/Equipements/Index', [
+            'equipements' => $paginees->through(fn (Equipement $materiel) => [
+                ...$this->equipementProps($materiel),
+                'urls' => [
+                    'mouvements' => $url('admin.hebergement.equipements.mouvements', ['materiel' => $materiel->equipement_id]),
+                    'destroy' => $url('admin.hebergement.equipements.destroy', ['materiel' => $materiel->equipement_id]),
+                ],
+            ]),
             'stats' => $stats,
-            'stockTotal' => $equipements->sum('stock_actuel'),
-            'statut' => $statut,
-            'recherche' => $recherche,
-            'type' => $type,
-            'type_equipement' => $types,
+            'stockTotal' => (float) $equipements->sum('stock_actuel'),
+            'filters' => ['statut' => $statut, 'q' => $recherche, 'type' => $type],
+            'types' => $types->map(fn ($item) => ['id' => (string) $item->id_type_equipement, 'name' => $item->name])->values(),
+            'urls' => [
+                'index' => route('admin.hebergement.equipements.index'),
+                'filtres' => collect(['tous', 'disponible', 'faible', 'rupture'])->mapWithKeys(fn ($s) => [$s => $filtre($s)]),
+                'affectations' => $url('admin.hebergement.equipements.affectations.index'),
+                'storeType' => $url('admin.hebergement.parametrage-herb.type-equipement.store'),
+                'store' => $url('admin.hebergement.equipements.store'),
+                'update' => $url('admin.hebergement.equipements.update'),
+                'storeMouvement' => $url('admin.hebergement.equipements.store_mouvement'),
+            ],
         ]);
     }
 
 
-    public function mouvements(Request $request, Equipement $materiel)
+    public function mouvements(Request $request, AdminAccess $access, Equipement $materiel)
     {
         $materiel->load(['type_equipement', 'mouvements']);
         $this->enrichirAvecStock($materiel);
@@ -76,17 +98,34 @@ class EquipementController extends Controller
         ];
 
         $type = in_array($request->query('type'), ['entry', 'exit'], true) ? $request->query('type') : 'tous';
+        $admin = $request->user('admin');
+        $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
 
-        return view('admin.hebergement.equipements.historique', [
-            'equipement' => $materiel,
-            'stats' => $stats,
+        return Inertia::render('Admin/Hebergement/Equipements/Historique', [
+            'equipement' => [...$this->equipementProps($materiel), 'reference' => $materiel->reference],
+            'stats' => [...$stats, 'dernier' => $stats['dernier'] ? Carbon::parse($stats['dernier'])->toDateString() : null],
             'type' => $type,
             'mouvements' => $materiel->mouvements()
                 ->with('createdBy')
                 ->when($type !== 'tous', fn ($query) => $query->where('type', $type))
                 ->latest()
                 ->paginate(15)
-                ->withQueryString(),
+                ->withQueryString()
+                ->through(fn (EquipementMouvement $mouvement) => [
+                    'id' => (string) $mouvement->equipement_mouvement_id,
+                    'date' => $mouvement->created_at?->format('Y-m-d H:i'),
+                    'type' => $mouvement->type,
+                    'quantite' => (float) $mouvement->quantity,
+                    'motif' => $mouvement->reason,
+                    'auteur' => $mouvement->createdBy->name ?? null,
+                ]),
+            'urls' => [
+                'catalogue' => $url('admin.hebergement.equipements.index'),
+                'storeMouvement' => $url('admin.hebergement.equipements.store_mouvement'),
+                'filtres' => collect(['tous', 'entry', 'exit'])->mapWithKeys(fn ($filtre) => [$filtre => route('admin.hebergement.equipements.mouvements', array_filter([
+                    'materiel' => $materiel->equipement_id, 'type' => $filtre === 'tous' ? null : $filtre,
+                ]))]),
+            ],
         ]);
     }
 
@@ -210,6 +249,22 @@ class EquipementController extends Controller
             report($e);
             return back()->withErrors(['error' => 'Probleme survenu lors de l\'enregistrement']);
         }
+    }
+
+    /** Colonnes d'un équipement envoyées aux pages React (catalogue et historique). */
+    private function equipementProps(Equipement $materiel): array
+    {
+        return [
+            'id' => (string) $materiel->equipement_id,
+            'name' => $materiel->name,
+            'type' => $materiel->type_equipement->name ?? null,
+            'type_id' => $materiel->type_equipement_id ? (string) $materiel->type_equipement_id : null,
+            'photo' => $materiel->photo ?: null,
+            'stock_initial' => (float) $materiel->stock_initial,
+            'stock_actuel' => (float) $materiel->stock_actuel,
+            'threshold' => (float) $materiel->threshold,
+            'statut' => $this->statutStock($materiel),
+        ];
     }
 
     private function enrichirAvecStock(Equipement $materiel): void

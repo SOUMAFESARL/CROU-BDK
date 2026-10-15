@@ -381,8 +381,11 @@ Route::middleware(['admin'])->group(function () {
 
 
 
-    Route::get('/gestion-hebergement', function () {
-        return view('admin.hebergement.index');
+    // Accueil du module : modules du sous-menu « Gestion Hébergement » (config/admin_menu.php), filtrés par droits.
+    Route::get('/gestion-hebergement', function (\Illuminate\Http\Request $request) {
+        return \Inertia\Inertia::render('Admin/Hebergement/Index', [
+            'modules' => app(\App\Services\AdminMenu::class)->childrenOf($request->user('admin'), 'admin.hebergement.index', $request),
+        ]);
     })->name('hebergement.index');
 
     Route::get('/gestion-hebergement/reporting', [ReportingHebergementController::class, 'index'])

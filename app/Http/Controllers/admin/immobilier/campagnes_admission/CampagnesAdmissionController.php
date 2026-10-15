@@ -22,6 +22,9 @@ use App\Repositories\Interfaces\EtudiantRepositoryInterface;
 use App\Http\Services\CampagneValidationService;
 use App\Models\Campagne;
 use App\Services\AdminAccess;
+use App\Services\AdminViewAccess;
+use App\Http\Services\DossierWorkflow;
+use App\Models\Etudiant;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -45,39 +48,19 @@ class CampagnesAdmissionController extends Controller
     }
 
 
+    /** Filtres de la liste des admissions (statut d'inscription de l'étudiant). */
+    private const FILTRES_ADMISSION = ['nouvelles_demandes', 'en_attente', 'annuler', 'en_verification', 'residents'];
+
     public function liste(Request $request, ?string $etat = null)
     {
         try {
-
             if (!$request->wantsJson()) {
-                $filter = $etat ?? $request->get('etat');
-                $repository = app(\App\Repositories\EtudiantRepository::class);
-                return view('admin.hebergement.campagnes_admission.admission.admission', [
-                    'etudiants'=>$repository->getAdmissionsPage($filter),
-                    'stats'=>$repository->getStats(), 'etat'=>$filter ?? 'residents',
-                    'success'=>true, 'message'=>null,
-                    'campagne_active'=>app(CampagneValidationService::class)->getCampagneActive()?->only([
-                        'id_campagne','annee_campagne','date_echeance_demande',
-                        'moyenne_min','distance_min','age_min','age_max',
-                    ]),
-                ]);
+                return $this->pageAdmissions($request, $etat ?? $request->get('etat'));
             }
             $result = $this->etudiantService->getListeEtudiantsWithStats($etat ?? $request->get('etat'));
             $result = app(\App\Services\AdminViewData::class)->filter($result, $request->user('admin'));
-         //  dd($result);
-            if ($request->wantsJson()) {
-                return response()->json($result);
-            }
-//dd($result['data']);
-            return view('admin.hebergement.campagnes_admission.admission.admission', [
-                'etudiants' => $result['data']['etudiants'],
-                'stats' => $result['data']['stats'],
-                'etat' => $result['data']['filtre_actif'] ?? 'residents',
-                'success' => $result['success'],
-                'message' => $result['message'] ?? null,
-                'campagne_active' => $result['data']['campagne_active'], // ← nouveau
-            ]);
 
+            return response()->json($result);
         } catch (\Exception $e) {
             if ($request->wantsJson()) {
                 return response()->json([
@@ -86,9 +69,60 @@ class CampagnesAdmissionController extends Controller
                     'error' => \App\Support\UserFacingErrors::caught($e)
                 ], 500);
             }
-        //dd('dcxhzjbkvjn,dmsx.zc'. $e->getMessage());
             return redirect()->back()->with('error', 'Erreur lors de la récupération de la liste');
         }
+    }
+
+    /**
+     * Liste des dossiers de candidature (page React `Admin/Hebergement/Admissions/Index`).
+     * Les colonnes personnelles et l'historique ne sont envoyés qu'avec les droits correspondants.
+     */
+    private function pageAdmissions(Request $request, ?string $filtre)
+    {
+        $admin = $request->user('admin');
+        $access = app(AdminAccess::class);
+        $vues = app(AdminViewAccess::class);
+        $personnel = $vues->allows($admin, 'admissions.personal');
+        $historique = $vues->allows($admin, 'admissions.history');
+        $etat = in_array($filtre, self::FILTRES_ADMISSION, true) ? $filtre : 'residents';
+        $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+        $repository = app(\App\Repositories\EtudiantRepository::class);
+        $campagne = app(CampagneValidationService::class)->getCampagneActive();
+
+        return Inertia::render('Admin/Hebergement/Admissions/Index', [
+            'dossiers' => $repository->getAdmissionsPage($etat, 10)->through(fn (Etudiant $etudiant) => [
+                'id' => (string) $etudiant->id_etudiant,
+                'name' => $etudiant->name,
+                'numero_demande' => $etudiant->derniereDemande?->numero_demande,
+                'etat_dossier' => $etudiant->derniereDemande?->etat_dossier,
+                'date' => $etudiant->created_at?->format('Y-m-d H:i'),
+                'personnel' => $personnel ? [
+                    'telephone' => $etudiant->telephone1,
+                    'adresse' => $etudiant->adresse,
+                    'region' => $etudiant->region?->name,
+                    'ville' => $etudiant->ville?->name,
+                    'date_naissance' => $etudiant->date_naissance?->toDateString(),
+                ] : null,
+                'demandes' => $historique ? (int) $etudiant->demandes_count : null,
+                'url' => $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant]),
+            ]),
+            'stats' => $repository->getStats(),
+            'etat' => $etat,
+            'colonnes' => ['personnel' => $personnel, 'historique' => $historique],
+            'campagneActive' => $campagne ? [
+                'annee' => $campagne->annee_campagne,
+                'echeance' => $campagne->date_echeance_demande ? Carbon::parse($campagne->date_echeance_demande)->toDateString() : null,
+                'moyenne_min' => $campagne->moyenne_min,
+                'distance_min' => $campagne->distance_min,
+            ] : null,
+            'urls' => [
+                'campagnes' => $url('admin.hebergement.campagnes_admission.campagnes'),
+                'admissionDirecte' => $url('admin.etudiant.admission_directe'),
+                'filtres' => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
+                    ? collect(self::FILTRES_ADMISSION)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.campagnes_admission.admission', ['etat' => $f])])
+                    : null,
+            ],
+        ]);
     }
 
     // Nouvelle méthode pour récupérer uniquement les stats (pour API ou appels AJAX)
@@ -103,24 +137,238 @@ class CampagnesAdmissionController extends Controller
         return response()->json($result, 500);
     }
 
-    public function show(string $id)
+    /** Traitement d'un dossier de candidature (page React `Admin/Hebergement/Admissions/Show`). */
+    public function show(Request $request, string $id)
     {
-        $student = app(\App\Services\AdminStudentView::class)->find($id, auth('admin')->user());
-        $campaigns = app(\App\Services\AdminViewAccess::class)->allows(auth('admin')->user(), 'admissions.eligibility')
-            ? $this->campagneService->getListeCampagnesWithStats('active')['data'] : collect();
+        $admin = $request->user('admin');
+        $access = app(AdminAccess::class);
+        $vues = app(AdminViewAccess::class);
+        $etudiant = app(\App\Services\AdminStudentView::class)->find($id, $admin);
+        $derniere = $etudiant->derniereDemande;
+        $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+        $voirAdmissions = $admin->hasPermission('hebergement.admissions.view');
+        $derogations = $voirAdmissions ? \App\Models\AdmissionDerogation::where('etudiant_id', $id)->latest()->get() : collect();
+        $peutApprouver = app(\App\Http\Services\AdmissionDerogationService::class)->canApprove($admin);
+        $personnel = $vues->allows($admin, 'admissions.personal');
+        $documents = $vues->allows($admin, 'admissions.documents');
+        $historique = $vues->allows($admin, 'admissions.history');
 
+        $statutDisciplinaire = $vues->allows($admin, 'housing.discipline') ? $etudiant->statut_disciplinaire : 'aucune';
 
-
-        return view('admin.hebergement.campagnes_admission.admission.traiter-demande', [
-            'demande' => $student,
-            'campagnes' => $campaigns,
-            'derogations' => auth('admin')->user()->hasPermission('hebergement.admissions.view')
-                ? \App\Models\AdmissionDerogation::where('etudiant_id', $id)->latest()->get() : collect(),
-            'canApproveDerogation' => app(\App\Http\Services\AdmissionDerogationService::class)->canApprove(auth('admin')->user()),
-            'moduleActif' => 'admission'
+        return Inertia::render('Admin/Hebergement/Admissions/Show', [
+            'etudiant' => [
+                'id' => (string) $etudiant->id_etudiant,
+                'name' => $etudiant->name,
+                'matricule' => $etudiant->matricule,
+                'statut_inscription' => $etudiant->statut_inscription,
+                'is_validation' => (bool) $etudiant->is_validation,
+                'is_rejet' => (bool) $etudiant->is_rejet,
+            ],
+            'demande' => $derniere ? [
+                'id' => (string) $derniere->getKey(),
+                'numero' => $derniere->numero_demande,
+                'etat' => $derniere->etat_dossier,
+                'date' => $derniere->created_at ? Carbon::parse($derniere->created_at)->toDateString() : null,
+            ] : null,
+            'discipline' => $statutDisciplinaire !== 'aucune' ? [
+                'label' => \App\Http\Services\DisciplinaryImpactService::LABELS[$statutDisciplinaire] ?? $statutDisciplinaire,
+                'bloquant' => in_array($statutDisciplinaire, ['suspension', 'expulsion'], true),
+            ] : null,
+            'eligibilite' => $vues->allows($admin, 'admissions.eligibility')
+                ? $this->criteresEligibilite($etudiant, $this->campagneActive())
+                : null,
+            'documents' => $documents ? collect($etudiant->documents)->map(fn ($document) => [
+                'id' => (string) $document['id_document'],
+                'type' => $document['type_document'],
+                'url' => $document['chemin_fichier'],
+                'statut' => $document['statut'],
+                'valider' => !in_array($document['statut'], ['valide', 'rejete'], true)
+                    ? $url('admin.hebergement.campagnes_admission.validate_document', ['documentId' => $document['id_document'], 'statut' => 'valide']) : null,
+                'rejeter' => !in_array($document['statut'], ['valide', 'rejete'], true)
+                    ? $url('admin.hebergement.campagnes_admission.validate_document', ['documentId' => $document['id_document'], 'statut' => 'rejete']) : null,
+            ])->values() : null,
+            'derogations' => $voirAdmissions ? [
+                'liste' => $derogations->map(fn ($derogation) => [
+                    'id' => (string) $derogation->id,
+                    'statut' => $derogation->status,
+                    'demandeur' => $derogation->requester_name,
+                    'date' => $derogation->created_at?->format('Y-m-d H:i'),
+                    'motif' => $derogation->reason,
+                    'non_respectes' => collect($derogation->eligibility['regles'] ?? [])->reject(fn ($regle) => $regle['ok'] ?? false)
+                        ->map(fn ($regle) => $regle['label'] ?? 'Critère non respecté')->values(),
+                    'decision' => $derogation->decided_at ? [
+                        'auteur' => $derogation->decider_name,
+                        'date' => $derogation->decided_at->format('Y-m-d H:i'),
+                        'motif' => $derogation->decision_reason,
+                    ] : null,
+                    // Le demandeur ne peut pas valider sa propre dérogation.
+                    'decider' => !$derogation->decided_at && $peutApprouver && (string) $derogation->requested_by !== (string) $admin->getKey()
+                        ? $url('admin.hebergement.campagnes_admission.derogations.decide', ['derogation' => $derogation->id]) : null,
+                ])->values(),
+                'demander' => $derniere?->etat_dossier === 'en_etude'
+                    && !$derogations->where('demande_id', $derniere->getKey())->contains('status', 'pending')
+                    ? $url('admin.hebergement.campagnes_admission.derogations.store', ['student' => $etudiant->getKey()]) : null,
+            ] : null,
+            'suivi' => $voirAdmissions && $derniere ? $this->suiviDossier($derniere, $admin) : null,
+            'profil' => $personnel ? [
+                'boursier' => (bool) $etudiant->boursier,
+                'niveau' => $derniere?->niveauEtudiantActuel?->name,
+                'campagne' => $derniere?->campagne?->annee_campagne,
+                'groupe_sanguin' => $etudiant->groupeSanguin?->name,
+                'telephone1' => $etudiant->telephone1,
+                'telephone2' => $etudiant->telephone2,
+                'email1' => $etudiant->email1,
+                'email2' => $etudiant->email2,
+                'region' => $etudiant->region?->name,
+                'ville' => $etudiant->ville?->name,
+                'adresse' => $etudiant->adresse,
+                'nationalite' => $etudiant->nationalite,
+                'date_naissance' => $etudiant->date_naissance?->toDateString(),
+                'lieu_naissance' => $etudiant->lieu_naissance,
+                'type_piece' => $etudiant->typePiece?->name,
+                'numero_piece' => $etudiant->numero_piece,
+                'date_expiration' => $etudiant->date_expiration ? Carbon::parse($etudiant->date_expiration)->toDateString() : null,
+            ] : null,
+            'historique' => $historique ? $etudiant->demandes->sortByDesc('created_at')->values()->map(fn ($item) => [
+                'id' => (string) $item->getKey(),
+                'numero' => $item->numero_demande,
+                'annee' => $item->annee_academique_precedent,
+                'date' => $item->created_at ? Carbon::parse($item->created_at)->toDateString() : null,
+                'statut' => $item->statut_demande,
+            ]) : null,
+            'urls' => [
+                'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
+                'contrat' => $url('admin.etudiant.contrat', ['etudiant' => $etudiant->id_etudiant]),
+            ],
         ]);
     }
 
+    /**
+     * Critères d'éligibilité affichés à l'agent (mêmes règles que l'ancienne vue) : état ok, nok ou nd (non renseigné).
+     * La décision reste prise par le workflow ; ce tableau sert d'aide à l'étude du dossier.
+     */
+    private function criteresEligibilite(Etudiant $demande, ?Campagne $campagne): array
+    {
+        $derniere = $demande->derniereDemande;
+        $niveauActuel = $derniere?->niveauEtudiantActuel;
+        $regles = [];
+        $regle = fn (string $label, string $regleCampagne, string $valeur, string $etat) => ['label' => $label, 'campagne' => $regleCampagne, 'etudiant' => $valeur, 'etat' => $etat];
+
+        // 1. Âge maximum selon le niveau
+        $age = $demande->date_naissance?->age;
+        $ageMax = $campagne?->{'age_'.strtoupper($niveauActuel->abreviation ?? '').'_max'} ?? null;
+        if ($ageMax !== null) {
+            $regles[] = $age === null
+                ? $regle('Âge maximum', '≤ '.$ageMax.' ans', 'Date de naissance non renseignée', 'nd')
+                : $regle('Âge maximum (niveau '.strtoupper($niveauActuel->name ?? '?').')', '≤ '.$ageMax.' ans', $age.' ans', $age <= $ageMax ? 'ok' : 'nok');
+        }
+        // 2. Moyenne minimale
+        if ($campagne?->moyenne_min !== null) {
+            $moyenne = $derniere?->moyenne;
+            $regles[] = $moyenne === null
+                ? $regle('Moyenne', '≥ '.$campagne->moyenne_min.'/20', 'Non renseignée', 'nd')
+                : $regle('Moyenne', '≥ '.$campagne->moyenne_min.'/20', $moyenne.'/20', $moyenne >= $campagne->moyenne_min ? 'ok' : 'nok');
+        }
+        // 3. Crédits validés (hors L1)
+        if ($campagne?->pourcentage_validate !== null && ($niveauActuel->abreviation ?? null) != 'L1') {
+            $credits = $derniere?->credit_valider;
+            $regles[] = $credits === null
+                ? $regle('Crédits validés', '≥ '.$campagne->pourcentage_validate.' %', 'Non renseigné', 'nd')
+                : $regle('Crédits validés', '≥ '.$campagne->pourcentage_validate.' %', $credits.' %', $credits >= $campagne->pourcentage_validate ? 'ok' : 'nok');
+        }
+        // 4. Distance domicile ↔ campus
+        if ($campagne?->distance_min !== null) {
+            $distance = $demande->distance;
+            $regles[] = $distance === null
+                ? $regle('Distance domicile – campus', '≥ '.$campagne->distance_min.' km', 'Non renseignée', 'nd')
+                : $regle('Distance domicile – campus', '≥ '.$campagne->distance_min.' km', $distance.' km', $distance >= $campagne->distance_min ? 'ok' : 'nok');
+        }
+        if ($campagne !== null) {
+            // 5. Boursier (toujours accepté)
+            $regles[] = $regle('Boursier', 'Acceptés', $demande->boursier ? 'Oui' : 'Non', 'ok');
+        }
+        // 6. Redoublement
+        if ($campagne?->redoublement !== null) {
+            $autorise = (bool) $campagne->redoublement;
+            $redoublant = (bool) ($demande->redoublant ?? false);
+            $regles[] = $regle('Redoublement', $autorise ? 'Autorisé' : 'Non autorisé', $redoublant ? 'Redoublant' : 'Non redoublant', $autorise || !$redoublant ? 'ok' : 'nok');
+        }
+        // 7. PMR
+        if ($campagne?->pmr !== null) {
+            $autorise = (bool) $campagne->pmr;
+            $pmr = (bool) ($demande->pmr ?? false);
+            $regles[] = $regle('PMR (mobilité réduite)', $autorise ? 'Accepté' : 'Non accepté', $pmr ? 'Oui' : 'Non', !$pmr || $autorise ? 'ok' : 'nok');
+        }
+        // 8. Étudiants internationaux
+        if ($campagne?->internationnaux !== null) {
+            $autorise = (bool) $campagne->internationnaux;
+            $nationalite = strtolower(trim((string) $demande->nationalite));
+            $international = $demande->nationalite !== null && !in_array($nationalite, ['ivoirienne', 'ivoirien'], true);
+            $regles[] = $regle('Étudiant international', $autorise ? 'Accepté' : 'Non accepté', $international ? 'Oui ('.$demande->nationalite.')' : 'Non', !$international || $autorise ? 'ok' : 'nok');
+        }
+        // 9. Nouveau bachelier
+        if ($campagne?->new_bachelier !== null) {
+            $autorise = (bool) $campagne->new_bachelier;
+            $nouveau = (bool) ($demande->nouveau_bachelier ?? false);
+            $regles[] = $regle('Nouveau bachelier', $autorise ? 'Accepté' : 'Non accepté', $nouveau ? 'Oui' : 'Non', !$nouveau || $autorise ? 'ok' : 'nok');
+        }
+        // 10. Réadmission
+        if ($campagne?->readmission !== null) {
+            $autorise = (bool) $campagne->readmission;
+            $nombre = $demande->demandes->count();
+            $regles[] = $regle('Réadmission', $autorise ? 'Autorisée' : 'Non autorisée', $nombre > 1 ? 'Oui ('.$nombre.' demande(s))' : 'Non', $nombre <= 1 || $autorise ? 'ok' : 'nok');
+        }
+        // 11. Documents validés
+        $total = count($demande->documents);
+        $valides = collect($demande->documents)->where('statut', 'valide')->count();
+        $pourcentage = $total > 0 ? round($valides / $total * 100) : 0;
+        $requis = $campagne?->pourcentage_validate ?? 100;
+        $regles[] = $regle('Documents validés', '≥ '.$requis.' %', $valides.'/'.$total.' ('.$pourcentage.' %)', $pourcentage >= $requis ? 'ok' : 'nok');
+
+        $conformes = collect($regles)->where('etat', 'ok')->count();
+
+        return [
+            'campagne' => $campagne?->annee_campagne,
+            'regles' => $regles,
+            'conformes' => $conformes,
+            'score' => $regles ? (int) round($conformes / count($regles) * 100) : 0,
+        ];
+    }
+
+    /** Campagne active servant de référence aux critères (liste vide si le service échoue). */
+    private function campagneActive(): ?Campagne
+    {
+        $campagnes = $this->campagneService->getListeCampagnesWithStats('active')['data']['campagnes'] ?? null;
+
+        return $campagnes instanceof \Illuminate\Support\Collection ? $campagnes->first() : null;
+    }
+
+    /** Suivi du dossier (équivalent admin du partiel `dossier-cycle`) : parcours, actions permises et historique. */
+    private function suiviDossier($dossier, $admin): array
+    {
+        $actions = array_values(array_intersect(DossierWorkflow::NEXT[$dossier->etat_dossier] ?? [], ['en_etude', 'incomplet', 'eligible', 'refuse', 'annule']));
+        $peutChanger = app(AdminAccess::class)->allows($admin, 'admin.dossiers.transition');
+        $proposition = in_array($dossier->etat_dossier, ['pre_attribue', 'accepte', 'attribue_definitif'], true) ? $dossier->proposition : null;
+
+        return [
+            'labels' => DossierWorkflow::LABELS,
+            'proposition' => $proposition ? [
+                'chambre' => $proposition->chambre?->numero_chambre ?? $proposition->chambre_id,
+                'jusqu_au' => $proposition->date_fin ? Carbon::parse($proposition->date_fin)->format('Y-m-d H:i') : null,
+            ] : null,
+            'actions' => $peutChanger ? array_map(fn ($etat) => ['etat' => $etat, 'label' => DossierWorkflow::LABELS[$etat] ?? $etat], $actions) : [],
+            'transition' => $peutChanger && $actions ? route('admin.dossiers.transition', $dossier) : null,
+            'assignation_id' => $dossier->assignation_id,
+            'historique' => $admin->hasPermission('hebergement.admissions.history')
+                ? $dossier->transitions->map(fn ($transition) => [
+                    'date' => $transition->created_at?->format('Y-m-d H:i'),
+                    'etat' => DossierWorkflow::LABELS[$transition->nouvel_etat] ?? $transition->nouvel_etat,
+                    'auteur' => $transition->details['auteur_nom'] ?? $transition->acteur_type,
+                    'motif' => $transition->motif,
+                ])->values()
+                : null,
+        ];
+    }
 
     public function getCampagne($id)
     {

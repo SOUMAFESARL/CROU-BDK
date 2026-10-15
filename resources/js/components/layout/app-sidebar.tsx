@@ -144,7 +144,8 @@ export function AppSidebar() {
     );
 }
 
-function MenuIcon({ name, size = ICON.size }: { name: string; size?: number }) {
+/** Icône Lucide d'une entrée de `config/admin_menu.php` (aussi utilisée par les pages d'accueil des modules). */
+export function MenuIcon({ name, size = ICON.size }: { name: string; size?: number }) {
     const Icon = ICONS[name] ?? LayoutDashboard;
 
     return <Icon size={size} strokeWidth={ICON.strokeWidth} />;

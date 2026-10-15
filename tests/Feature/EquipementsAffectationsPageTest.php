@@ -38,9 +38,13 @@ class EquipementsAffectationsPageTest extends TestCase
     private function page(array $query): array
     {
         $request = Request::create('/admin/gestion-hebergement/equipements/affectations', 'GET', $query);
+        $request->headers->set('X-Inertia', 'true');
         $this->app->instance('request', $request);
 
-        return app(EquipmentAllocationController::class)->index($request)->getData();
+        $page = app()->call([app(EquipmentAllocationController::class), 'index'], ['request' => $request])->toResponse($request)->getData(true);
+        $this->assertSame('Admin/Hebergement/Equipements/Affectations', $page['component']);
+
+        return $page['props'];
     }
 
     public function test_indicateurs(): void
@@ -50,24 +54,20 @@ class EquipementsAffectationsPageTest extends TestCase
         $this->assertSame('actives', $data['statut']);
         $this->assertSame(['actives' => 2, 'unites' => 6, 'retournees' => 1, 'a_reparer' => 1, 'defectueux' => 1], array_diff_key($data['stats'], ['magasin' => 0]));
         $this->assertEquals(9, $data['stats']['magasin']);
-        $this->assertSame(2, $data['affectations']->total());
+        $this->assertSame(2, $data['affectations']['total']);
+        $this->assertSame(['Cité A', 'Cité B'], array_column($data['cites'], 'name'));
+        $this->assertSame([['id' => 'b', 'name' => 'Bât. 1', 'cite_id' => 'c']], $data['batiments']);
     }
 
     public function test_filtres_statut_cite_et_recherche(): void
     {
-        $this->assertSame(1, $this->page(['statut' => 'retournees'])['affectations']->total());
-        $this->assertSame(['f'], collect($this->page(['statut' => 'a_reparer'])['affectations']->items())->pluck('equipement_id')->all());
-        $this->assertSame(['e'], collect($this->page(['cite_id' => 'c'])['affectations']->items())->pluck('equipement_id')->all());
-        $this->assertSame(['f'], collect($this->page(['q' => 'chai'])['affectations']->items())->pluck('equipement_id')->all());
+        $retournees = $this->page(['statut' => 'retournees'])['affectations'];
+        $this->assertSame(1, $retournees['total']);
+        $this->assertNotNull($retournees['data'][0]['retourne_le']);
+        $this->assertSame(['Chaise'], array_column($this->page(['statut' => 'a_reparer'])['affectations']['data'], 'equipement'));
+        $this->assertSame(['Matelas'], array_column($this->page(['cite_id' => 'c'])['affectations']['data'], 'equipement'));
+        $this->assertSame(['Chaise'], array_column($this->page(['q' => 'chai'])['affectations']['data'], 'equipement'));
         $this->assertSame('actives', $this->page(['statut' => 'inconnu'])['statut']);
-    }
-
-    public function test_la_vue_compile(): void
-    {
-        foreach (['affectations', 'historique', 'index'] as $vue) {
-            $compiled = app('blade.compiler')->compileString(file_get_contents(resource_path("views/admin/hebergement/equipements/{$vue}.blade.php")));
-            $this->assertNotEmpty(token_get_all($compiled, TOKEN_PARSE));
-        }
     }
 
     public function test_historique_des_mouvements_filtre_et_indicateurs(): void
@@ -78,10 +78,15 @@ class EquipementsAffectationsPageTest extends TestCase
 
         $historique = function (array $query) {
             $request = Request::create('/admin/gestion-hebergement/equipements/e/mouvement', 'GET', $query);
+            $request->headers->set('X-Inertia', 'true');
             $this->app->instance('request', $request);
 
-            return app(\App\Http\Controllers\admin\immobilier\equipements\EquipementController::class)
-                ->mouvements($request, \App\Models\Equipement::findOrFail('e'))->getData();
+            $page = app()->call([app(\App\Http\Controllers\admin\immobilier\equipements\EquipementController::class), 'mouvements'], [
+                'request' => $request, 'materiel' => \App\Models\Equipement::findOrFail('e'),
+            ])->toResponse($request)->getData(true);
+            $this->assertSame('Admin/Hebergement/Equipements/Historique', $page['component']);
+
+            return $page['props'];
         };
 
         $data = $historique([]);
@@ -90,10 +95,12 @@ class EquipementsAffectationsPageTest extends TestCase
         $this->assertSame(4, $data['stats']['tous']);
         $this->assertSame(2, $data['stats']['entry']);
         $this->assertSame(2, $data['stats']['exit']);
-        $this->assertSame(4, $data['mouvements']->total());
+        $this->assertSame(4, $data['mouvements']['total']);
+        $this->assertSame('Matelas', $data['equipement']['name']);
 
         $sorties = $historique(['type' => 'exit']);
-        $this->assertSame(2, $sorties['mouvements']->total());
+        $this->assertSame(2, $sorties['mouvements']['total']);
+        $this->assertSame(['exit', 'exit'], array_column($sorties['mouvements']['data'], 'type'));
         $this->assertSame('tous', $historique(['type' => 'inconnu'])['type']);
     }
 }
