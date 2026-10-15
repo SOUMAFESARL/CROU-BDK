@@ -1,0 +1,18 @@
+<?php
+
+namespace Database\Seeders\SqlDump;
+
+// Generated from kkfvkcpk_croudedaloa_db (2).sql; regenerate with scripts/generate-dump-seeders.py.
+class EtudiantsSeeder extends DumpTableSeeder
+{
+    protected const TABLE = 'etudiants';
+    protected const STATEMENTS = [
+        <<<'SQL_DUMP_ETUDIANTS_0'
+INSERT INTO `etudiants` (`id_etudiant`, `name`, `date_naissance`, `lieu_naissance`, `genre_id`, `nationalite`, `email1`, `email2`, `telephone1`, `telephone2`, `countrie_id`, `password`, `regions_id`, `ville_id`, `adresse`, `departement_code`, `faculte`, `moyenne`, `matricule`, `annee_academique_actuel`, `numero_etudiant`, `type_piece_id`, `numero_piece`, `date_delivrance`, `date_expiration`, `groupe_sanguin_id`, `allergies`, `maladies_chroniques`, `autiste`, `name_tuteur`, `telephone_tuteur`, `adresse_tuteur`, `boursier`, `type_bourse`, `photo_identite`, `piece_identite_recto`, `piece_identite_verso`, `certificat_scolarite`, `statut_inscription`, `statut`, `distance`, `date_inscription`, `users_validation`, `is_validation`, `date_validation`, `users_rejet`, `is_rejet`, `motif_rejet`, `date_rejet`, `created_by`, `updated_by`, `deleted_by`, `created_at`, `updated_at`, `deleted_at`, `pmr_confirme`, `pmr_confirme_by`, `pmr_confirme_at`) VALUES
+('d052d932-81c1-4065-bf7a-c6bbda59d7d1', 'John Doe femme', '2026-07-07', 'abobo', 1, 'IVOIRIENNE', 'yaporodrigue1109@gmail.com', NULL, '+2250707902963', NULL, NULL, NULL, 2, 15, 'Bondoukou', NULL, NULL, 0, '23000000876500', NULL, NULL, 1, 'ci8780809100', NULL, '2026-09-05', 1, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, 'en_attente', 1, 100, '2026-08-03 16:28:44', NULL, 0, NULL, NULL, 0, NULL, NULL, 'cb9995ba-6a55-11f1-aaa2-fa163e85dd73', 'cb9995ba-6a55-11f1-aaa2-fa163e85dd73', NULL, '2026-08-03 16:28:44', '2026-08-03 16:28:46', NULL, 0, NULL, NULL),
+('a5802ce0-35ea-4649-af43-c61ecebe4f0a', 'Koffi Koundjodji', '2026-06-01', 'Bingerville', 1, 'IVOIRIENNE', 'yaporodrigue09@gmail.com', NULL, '+2250707902969', NULL, NULL, '$2y$12$44z3oXFu.eM/L9DEHLDE7.8McYRhTErA7i1J15jUP8jq1lUCzeUn.', 2, 16, 'Bondoukou', NULL, NULL, 0, '230000007608', NULL, NULL, 1, 'ci8780809210', NULL, '2026-08-30', 1, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, 'en_attente', 1, 233, '2026-08-05 11:12:54', NULL, 0, NULL, NULL, 0, NULL, NULL, 'cb9995ba-6a55-11f1-aaa2-fa163e85dd73', 'cb9995ba-6a55-11f1-aaa2-fa163e85dd73', NULL, '2026-08-05 11:12:54', '2026-08-05 11:33:58', NULL, 0, NULL, NULL),
+('cf04c35b-e23a-4f1f-acc4-f05d6a227d72', 'John Doe', '2026-07-29', 'treichville', 1, 'IVOIRIENNE', 'rodrigue.yapo@soumafe.ci', NULL, '0707902962', NULL, NULL, '$2y$12$qdNmOmolXBd.XMIUoDKnXO/RNpfhXHo2t6wh023vdMLBPHaJZYLD2', 1, 4, 'cite kalilou', NULL, NULL, 0, '23000000761', NULL, NULL, 1, 'ci878080921', NULL, '2026-09-04', 2, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, 'residents', 1, 120, '2026-08-03 15:58:57', NULL, 0, NULL, NULL, 1, 'Critères non respectés : Crédits validés, Distance domicile – campus', '2026-08-03 15:58:59', 'cb9995ba-6a55-11f1-aaa2-fa163e85dd73', 'cb9995ba-6a55-11f1-aaa2-fa163e85dd73', NULL, '2026-08-03 15:58:57', '2026-08-03 16:35:48', NULL, 0, NULL, NULL),
+('7dd5b3aa-bebb-42b8-880c-a607f737babd', 'test', NULL, NULL, 2, 'IVOIRIENNE', NULL, NULL, '707902962', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '457896321', '2025-2026', '457896321', NULL, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, 'demande', 1, NULL, '2026-10-12 00:00:00', 'cb9995ba-6a55-11f1-aaa2-fa163e85dd73', 0, '2026-10-12', NULL, 0, NULL, NULL, 'cb9995ba-6a55-11f1-aaa2-fa163e85dd73', 'cb9995ba-6a55-11f1-aaa2-fa163e85dd73', NULL, '2026-10-12 23:10:42', '2026-10-12 23:10:42', NULL, 0, NULL, NULL);
+SQL_DUMP_ETUDIANTS_0,
+    ];
+}
