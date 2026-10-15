@@ -16,7 +16,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     environment: production
     steps:
       - name: Checkout
@@ -38,7 +38,17 @@ jobs:
           git archive HEAD | tar -x -C "$RUNNER_TEMP/release"
           cp -a public/build "$RUNNER_TEMP/release/public/build"
           find "$RUNNER_TEMP/release" -type f -name '*.sql' -delete
-          tar -czf "$RUNNER_TEMP/release.tar.gz" -C "$RUNNER_TEMP/release" .
+          tar -czf "$RUNNER_TEMP/release.tar.gz" \
+            --exclude='*/assets/images/etudiant-document' \
+            --exclude='*/assets/images/equipement' \
+            --exclude='*/assets/images/users' \
+            --exclude='*/assets/images/campus' \
+            --exclude='*/assets/images/cite' \
+            --exclude='./storage' --exclude='./bootstrap/cache' \
+            --exclude='./.env*' --exclude='./public/storage' \
+            --exclude='./public/hot' --exclude='*.sqlite*' \
+            -C "$RUNNER_TEMP/release" .
+          echo "Deployment archive size: $(du -h "$RUNNER_TEMP/release.tar.gz" | cut -f1)"
 
       - name: Configure SSH and deploy
         shell: bash
@@ -92,10 +102,10 @@ jobs:
           remote_stage="$(timeout 60s ssh -T "${ssh_options[@]}" "$target" 'mktemp -d /tmp/crou-release.XXXXXXXX')"
           [[ "$remote_stage" =~ ^/tmp/crou-release\.[a-zA-Z0-9]+$ ]]
           # The staging directory is private and outside the document root.
-          echo "Uploading archive: $(du -h "$RUNNER_TEMP/release.tar.gz" | cut -f1) (maximum 10 minutes)..."
+          echo "Uploading archive: $(du -h "$RUNNER_TEMP/release.tar.gz" | cut -f1) (maximum 20 minutes)..."
           (while sleep 15; do echo 'SSH archive upload still running...'; done) &
           transfer_heartbeat=$!
-          if timeout 10m ssh -T "${ssh_options[@]}" "$target" "cat > '$remote_stage/release.tar.gz'" < "$RUNNER_TEMP/release.tar.gz"; then
+          if timeout 20m ssh -T "${ssh_options[@]}" "$target" "cat > '$remote_stage/release.tar.gz'" < "$RUNNER_TEMP/release.tar.gz"; then
             kill "$transfer_heartbeat" 2>/dev/null || true
             wait "$transfer_heartbeat" 2>/dev/null || true
             unset transfer_heartbeat
