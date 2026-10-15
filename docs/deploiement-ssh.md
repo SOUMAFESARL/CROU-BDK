@@ -19,7 +19,7 @@ Dans Settings > Environments > production, configurer :
 | `DEPLOY_PATH` | Chemin absolu du projet, par exemple `/home/c2858133c/public_html/crou` |
 
 Conformement a la configuration demandee, aucun secret `SSH_PORT` ou
-`SSH_KNOWN_HOSTS` n'est utilise. SSH utilise le port 22 et accepte automatiquement
+`SSH_KNOWN_HOSTS` n'est utilise. SSH utilise le port 5022 et accepte automatiquement
 la cle d'hote presentee a chaque execution, sans verification prealable de
 l'identite du serveur. L'acces distant depuis GitHub Actions doit etre autorise
 dans le pare-feu LWS ; les erreurs reseau observees precedemment doivent etre

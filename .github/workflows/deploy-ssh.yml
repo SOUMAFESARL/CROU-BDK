@@ -60,7 +60,7 @@ jobs:
             ssh-add "$ssh_dir/key" </dev/null
           unset SSH_PASSPHRASE SSH_PRIVATE_KEY
           encoded_path="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
-          ssh -T -i "$ssh_dir/key" \
+          ssh -T -p 5022 -i "$ssh_dir/key" \
             -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$ssh_dir/known_hosts" \
