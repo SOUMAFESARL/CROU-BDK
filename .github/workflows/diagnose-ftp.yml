@@ -1,6 +1,11 @@
 name: Diagnose development PHP errors
 
 on:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/diagnose-ftp.yml
+      - scripts/diagnose-ftp.py
   workflow_dispatch:
 
 permissions:
