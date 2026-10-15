@@ -38,7 +38,6 @@ les secrets suivants (ou utiliser les secrets Actions du depot) :
 | Secret | Valeur |
 | --- | --- |
 | `SSH_HOST` | Nom DNS ou adresse IPv4 du serveur |
-| `SSH_PORT` | Port SSH, optionnel, `22` par defaut |
 | `SSH_USER` | Utilisateur SSH de deploiement |
 | `SSH_PRIVATE_KEY` | Cle privee SSH dediee, complete, protegee par une passphrase |
 | `SSH_PASSPHRASE` | Passphrase de la cle privee SSH |
@@ -51,7 +50,8 @@ fichiers cPanel peut afficher `/public_html/crou` relativement au compte.
 Verifier le chemin reel dans une session SSH avec `cd ~/public_html/crou && pwd`,
 puis copier le resultat dans `DEPLOY_PATH` (souvent
 `/home/<compte>/public_html/crou`). Ne pas utiliser l'URL du gestionnaire cPanel
-comme hote SSH : `SSH_HOST` et `SSH_PORT` doivent venir des parametres SSH LWS.
+comme hote SSH : `SSH_HOST` doit venir des parametres SSH LWS.
+Le workflow utilise le port SSH standard `22`, sans secret de port.
 
 Verifier que `php`, `composer`, `npm` et `flock` sont disponibles dans une session
 SSH non interactive. La version PHP du terminal peut differer de celle configuree
