@@ -60,14 +60,33 @@ class EquipementController extends Controller
     }
 
 
-    public function mouvements(Equipement $materiel)
+    public function mouvements(Request $request, Equipement $materiel)
     {
+        $materiel->load(['type_equipement', 'mouvements']);
+        $this->enrichirAvecStock($materiel);
+
+        $tous = $materiel->mouvements;
+        $stats = [
+            'tous' => $tous->count(),
+            'entry' => $tous->where('type', 'entry')->count(),
+            'exit' => $tous->where('type', 'exit')->count(),
+            'entrees' => (float) $tous->where('type', 'entry')->sum('quantity'),
+            'sorties' => (float) $tous->where('type', 'exit')->sum('quantity'),
+            'dernier' => $tous->max('created_at'),
+        ];
+
+        $type = in_array($request->query('type'), ['entry', 'exit'], true) ? $request->query('type') : 'tous';
+
         return view('admin.hebergement.equipements.historique', [
             'equipement' => $materiel,
+            'stats' => $stats,
+            'type' => $type,
             'mouvements' => $materiel->mouvements()
-                ->with(['equipement','createdBy'])
+                ->with('createdBy')
+                ->when($type !== 'tous', fn ($query) => $query->where('type', $type))
                 ->latest()
-                ->get()
+                ->paginate(15)
+                ->withQueryString(),
         ]);
     }
 

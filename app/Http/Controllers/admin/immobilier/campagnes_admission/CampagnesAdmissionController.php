@@ -20,6 +20,12 @@ use App\Http\Services\DocumentEtudiantService;
 use App\Repositories\Interfaces\DocumentEtudiantRepositoryInterface;
 use App\Repositories\Interfaces\EtudiantRepositoryInterface;
 use App\Http\Services\CampagneValidationService;
+use App\Models\Campagne;
+use App\Services\AdminAccess;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Inertia\Inertia;
 
 
 class CampagnesAdmissionController extends Controller
@@ -136,30 +142,108 @@ class CampagnesAdmissionController extends Controller
 
 
 
-    public function campagnes(Request $request, ?string $etat = null): View
+    /** Filtres de la liste des campagnes (statut en base, `tous` = aucun filtre). */
+    private const FILTRES_CAMPAGNE = ['tous', 'active', 'planifier', 'terminer'];
+
+    private const NIVEAUX = ['L1', 'L2', 'L3', 'M1', 'M2', 'D1', 'D2', 'D3'];
+
+    /**
+     * Liste des campagnes (Inertia) : indicateurs par statut, tableau paginé et détail en panneau latéral.
+     * La création se fait sur une page dédiée (`createCampagne`).
+     */
+    public function campagnes(Request $request, AdminAccess $access, ?string $etat = null)
     {
-
-
-
-        $result = $this->campagneService->getListeCampagnesWithStats($etat ?? $request->get('etat'));
+        $etat = $etat ?? $request->get('etat');
+        $etat = in_array($etat, self::FILTRES_CAMPAGNE, true) ? $etat : 'tous';
+        $result = $this->campagneService->getListeCampagnesWithStats($etat === 'tous' ? null : $etat);
 
         if ($request->wantsJson()) {
             return response()->json($result);
         }
 
-        return view('admin.hebergement.campagnes_admission.campagnes.campagnes', [
-            'campagnes' => $result['data']['campagnes'],
+        // En cas d'erreur, le service renvoie une liste vide (et le dépôt une chaîne) : la page reste affichable.
+        $campagnes = $result['data']['campagnes'] instanceof EloquentCollection ? $result['data']['campagnes'] : new EloquentCollection();
+        $campagnes->loadMissing('residences.cites.batiment.chambresDisponibles');
+        $page = LengthAwarePaginator::resolveCurrentPage();
+        $admin = $request->user('admin');
+        $url = fn (string $route) => $access->allows($admin, $route) ? route($route) : null;
+
+        return Inertia::render('Admin/Hebergement/Campagnes/Index', [
+            'campagnes' => (new LengthAwarePaginator(
+                $campagnes->forPage($page, 10)->map(fn (Campagne $campagne) => $this->campagneListe($campagne))->values(),
+                $campagnes->count(),
+                10,
+                $page,
+                ['path' => $request->url(), 'query' => $request->query()],
+            )),
             'stats' => $result['data']['stats'],
-            'etat' => $result['data']['filtre_actif'] ?? 'planifier',
-            'success' => $result['success'],
-            'message' => $result['message'] ?? null,
-            "document" => Document::getAllDocuments(1),
-            'residences' =>  $this->citeService->getCiteByStatut('ouvert'),
-            'moduleActif' => 'campagnes',
+            'etat' => $etat,
+            'urls' => [
+                'hebergement' => route('admin.hebergement.index'),
+                'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
+                'create' => $url('admin.hebergement.campagnes_admission.create_campagne'),
+                'filtres' => collect(self::FILTRES_CAMPAGNE)
+                    ->mapWithKeys(fn ($filtre) => [$filtre => route('admin.hebergement.campagnes_admission.campagnes', ['etat' => $filtre])]),
+            ],
         ]);
+    }
 
+    /** Formulaire de création d'une campagne (Inertia, en plusieurs étapes). */
+    public function createCampagne(Request $request, AdminAccess $access)
+    {
+        $admin = $request->user('admin');
 
+        return Inertia::render('Admin/Hebergement/Campagnes/Create', [
+            'residences' => Cite::query()->where('statut', 'ouvert')->orderBy('name')
+                ->with('batiment.chambresDisponibles')->get()
+                ->map(fn (Cite $cite) => [
+                    'id' => (string) $cite->id_cite,
+                    'name' => $cite->name,
+                    'chambres' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->count()),
+                    'places' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->sum('capacite_max')),
+                ])->values(),
+            'documents' => Document::getAllDocuments(1)
+                ->map(fn ($document) => ['id' => (string) $document->id_document, 'name' => $document->name])->values(),
+            'urls' => [
+                'hebergement' => route('admin.hebergement.index'),
+                'index' => route('admin.hebergement.campagnes_admission.campagnes'),
+                'submit' => $access->allows($admin, 'admin.hebergement.campagnes_admission.post_campagnes')
+                    ? route('admin.hebergement.campagnes_admission.post_campagnes') : null,
+            ],
+        ]);
+    }
 
+    /** Ligne de la liste des campagnes, avec tout ce qu'affiche le panneau de détail. */
+    private function campagneListe(Campagne $campagne): array
+    {
+        $date = fn ($valeur) => $valeur ? Carbon::parse($valeur)->toDateString() : null;
+        $residences = $campagne->residences->flatMap->cites->map(fn (Cite $cite) => [
+            'name' => $cite->name,
+            'places' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->sum('capacite_max')),
+        ])->values();
+
+        return [
+            'id' => (string) $campagne->id_campagne,
+            'annee' => $campagne->annee_campagne,
+            'description' => $campagne->description,
+            'statut' => $campagne->statut,
+            'periode_debut' => $date($campagne->periode_debut),
+            'periode_fin' => $date($campagne->periode_fin),
+            'date_echeance_demande' => $date($campagne->date_echeance_demande),
+            'date_echeance_contrat' => $date($campagne->date_echeance_contrat),
+            'criteres' => [
+                'moyenne_min' => $campagne->moyenne_min,
+                'pourcentage_validate' => $campagne->pourcentage_validate !== null ? (int) $campagne->pourcentage_validate : null,
+                'distance_min' => $campagne->distance_min,
+                'ages' => collect(self::NIVEAUX)
+                    ->mapWithKeys(fn ($niveau) => [$niveau => $campagne->{'age_'.$niveau.'_max'}])
+                    ->filter(fn ($age) => $age !== null),
+            ],
+            'conditions' => collect(['admission', 'readmission', 'internationnaux', 'redoublement', 'pmr', 'is_participate', 'is_discipline'])
+                ->mapWithKeys(fn ($champ) => [$champ => (bool) $campagne->{$champ}]),
+            'residences' => $residences,
+            'documents' => $campagne->documentCampagnes->flatMap->documents->pluck('name')->values(),
+        ];
     }
 
     /**
@@ -211,7 +295,9 @@ class CampagnesAdmissionController extends Controller
 
             }
 
-            return redirect()->bacK()->with('success', 'Campagne créée avec succès');
+            return redirect()
+                ->route('admin.hebergement.campagnes_admission.campagnes')
+                ->with('success', 'Campagne créée avec succès');
 
         } catch (\Exception $e) {
             return redirect()

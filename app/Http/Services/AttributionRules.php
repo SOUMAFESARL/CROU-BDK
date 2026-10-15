@@ -80,6 +80,38 @@ class AttributionRules
         }
     }
 
+    /**
+     * Public accepté par la chambre (types d'occupation chambre, bâtiment et cité), pour le
+     * pré-contrôle de l'écran d'attribution : 'mixte', 'm', 'f', 'incomplet' (type non renseigné)
+     * ou 'conflit' (niveaux contradictoires). La règle qui fait foi reste erreurs().
+     */
+    public function sexeRequis(Chambre $room): string
+    {
+        $requis = [];
+        foreach ([$room->typeOccupation?->name, $room->batiment?->typeOccupation?->name, $room->cite?->typeCite?->name] as $type) {
+            if (Str::lower(Str::ascii(trim((string) $type))) === 'mixte') {
+                continue;
+            }
+            $sexe = $this->sexe($type);
+            if ($sexe === null) {
+                return 'incomplet';
+            }
+            $requis[$sexe] = true;
+        }
+
+        return match (count($requis)) {
+            0 => 'mixte',
+            1 => array_key_first($requis),
+            default => 'conflit',
+        };
+    }
+
+    /** 'm', 'f' ou null si le genre de l'étudiant n'est pas reconnu. */
+    public function sexeEtudiant(Etudiant $student): ?string
+    {
+        return $this->sexe($student->genre?->name);
+    }
+
     private function sexe(?string $value): ?string
     {
         return match (Str::lower(Str::ascii(trim((string) $value)))) {

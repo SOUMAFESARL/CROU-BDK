@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'Paiement de loyer')</title>
+    <link rel="icon" href="{{ systemLogo() }}">
     <style>
         *{box-sizing:border-box}body{margin:0;background:#f3f6fa;color:#18354b;font:16px/1.5 system-ui,sans-serif}
         main{max-width:1000px;margin:32px auto;padding:0 20px}a{color:#146a91}

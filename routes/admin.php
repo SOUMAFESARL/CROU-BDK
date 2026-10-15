@@ -237,6 +237,7 @@ Route::middleware(['admin'])->group(function () {
         ->group(function () {
 
             Route::get('/liste/{etat?}', 'liste')->name('admission');
+            Route::get('/campagnes/nouvelle', 'createCampagne')->name('create_campagne');
             Route::get('/campagnes/{etat?}', 'campagnes')->name('campagnes');
             Route::post('/campagnes', 'storeCampagne')->name('post_campagnes');
             Route::get('/validateDocument/{documentId}/{statut}/{message?}', 'valideDocument')->name('validate_document');

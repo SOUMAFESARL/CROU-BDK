@@ -34,7 +34,3 @@
 @endsection
 
 @include('admin.partials.module-cards-styles')
-
-@push('scripts')
-    <script src="{{ asset('files/assets/pages/dashboard/custom-dashboard.js') }}"></script>
-@endpush

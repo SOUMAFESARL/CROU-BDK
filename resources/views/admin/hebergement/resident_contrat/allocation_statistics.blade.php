@@ -2,228 +2,149 @@
     'activeMenu' => 'hebergement',
     'activeSubMenu' => 'residents'
 ])
-@section('title', 'Residents & Contrats')
 
+@section('title', 'Statistiques d’attribution')
+
+@push('styles')
+    <link rel="stylesheet" href="{{ asset('css/campagnes-admission.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/allocation-chambres.css') }}">
+@endpush
+
+@php
+    $nombre = fn ($valeur) => number_format((float) $valeur, 0, ',', ' ');
+    $pourcent = fn ($valeur) => rtrim(rtrim(number_format((float) $valeur, 2, ',', ' '), '0'), ',');
+    $taux = max(0, min(100, (float) ($stats['taux_allocation'] ?? 0)));
+    $enAttente = (int) ($stats['assignations_en_attente'] ?? 0);
+    $confirmees = (int) ($stats['assignations_confirmees'] ?? 0);
+    $demandesEnAttente = (int) ($stats['sans_chambre'] ?? 0);
+@endphp
 
 @section('content')
+<div class="as-refonte ca-page">
+    <x-breadcrumbs
+            title="Statistiques d’attribution"
+            :items="[
+                'Gestion Hébergement' => route('admin.hebergement.index'),
+                'Attribution des chambres' => route('admin.allocation.index'),
+                $campagne->annee_campagne => route('admin.allocation.show', $campagne->id_campagne),
+                'Statistiques' => null,
+            ]"
+    />
 
+    <div class="ca-header">
+        <div class="ca-header-text">
+            <p class="ca-subtitle">Campagne <strong>{{ $campagne->annee_campagne }}</strong> · Vue d’ensemble des demandes, des propositions et de l’occupation par type de chambre.</p>
+        </div>
+        <div class="ca-actions">
+            @adminroute('admin.allocation.show')
+            <a href="{{ route('admin.allocation.show', $campagne->id_campagne) }}" class="ca-btn ca-btn-outline"><x-admin-icon name="arrow-left" /> Suivi de la campagne</a>
+            @endadminroute
+            @adminroute('admin.allocation.export-csv')
+            <a href="{{ route('admin.allocation.export-csv', $campagne->id_campagne) }}" class="ca-btn ca-btn-primary"><x-admin-icon name="download" /> Exporter (CSV)</a>
+            @endadminroute
+        </div>
+    </div>
 
-
-    <div class="container mx-auto px-4 py-8">
-        <!-- Header -->
-        <div class="mb-8">
-            <a href="{{ route('allocation.show', $campagne->id_campagne) }}" class="text-blue-600 hover:text-blue-800 mb-4 inline-block">
-                &larr; Retour aux détails
-            </a>
-            <h1 class="text-3xl font-bold text-gray-800">Statistiques d'Allocation</h1>
-            <p class="text-gray-600">Campagne: <strong>{{ $campagne->annee_campagne }}</strong></p>
+    @if(empty($stats))
+        <div class="ca-card">
+            <div class="ca-empty">
+                <span class="ca-empty-icon"><x-admin-icon name="chart-column" size="22" /></span>
+                <span>Aucune statistique disponible pour cette campagne.</span>
+            </div>
+        </div>
+    @else
+        <div class="ca-kpis ca-kpis--teintes">
+            <div class="ca-kpi kpi-blue">
+                <span class="ca-kpi-label">Demandes attribuées définitivement</span>
+                <span class="ca-kpi-row"><strong class="ca-kpi-value">{{ $nombre($stats['demandes_acceptees']) }}</strong></span>
+            </div>
+            <div class="ca-kpi kpi-green">
+                <span class="ca-kpi-label">Attributions confirmées</span>
+                <span class="ca-kpi-row"><strong class="ca-kpi-value">{{ $nombre($confirmees) }}</strong></span>
+            </div>
+            <div class="ca-kpi kpi-amber">
+                <span class="ca-kpi-label">Propositions à confirmer</span>
+                <span class="ca-kpi-row"><strong class="ca-kpi-value">{{ $nombre($enAttente) }}</strong></span>
+            </div>
+            <div class="ca-kpi kpi-plum">
+                <span class="ca-kpi-label">Demandes en attente d’étude</span>
+                <span class="ca-kpi-row"><strong class="ca-kpi-value">{{ $nombre($demandesEnAttente) }}</strong></span>
+            </div>
         </div>
 
-        @if(!empty($stats))
-            <!-- Cartes KPI -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <!-- Demandes Acceptées -->
-                <div class="bg-white rounded-lg shadow-lg p-6 border-l-4 border-blue-500">
-                    <p class="text-blue-600 text-sm font-semibold uppercase">Demandes Acceptées</p>
-                    <p class="text-4xl font-bold text-blue-900 mt-2">{{ $stats['demandes_acceptees'] }}</p>
-                    <p class="text-xs text-gray-500 mt-2">Étudiants avec demande</p>
+        <div class="ca-card">
+            <div class="ca-card-header"><h2 class="ca-card-title">Taux d’attribution</h2></div>
+            <div class="ca-card-body al-rate-card">
+                <div>
+                    <div class="al-rate-big">
+                        <strong>{{ $pourcent($taux) }} %</strong>
+                        <span class="ca-muted">des demandes de la campagne sont attribuées définitivement</span>
+                    </div>
+                    <div class="ca-progress" style="margin-top:10px"><span style="width: {{ $taux }}%"></span></div>
                 </div>
-
-                <!-- Assignations Confirmées -->
-                <div class="bg-white rounded-lg shadow-lg p-6 border-l-4 border-green-500">
-                    <p class="text-green-600 text-sm font-semibold uppercase">Confirmées</p>
-                    <p class="text-4xl font-bold text-green-900 mt-2">{{ $stats['assignations_confirmees'] }}</p>
-                    <p class="text-xs text-gray-500 mt-2">Assignations validées</p>
-                </div>
-
-                <!-- En Attente -->
-                <div class="bg-white rounded-lg shadow-lg p-6 border-l-4 border-yellow-500">
-                    <p class="text-yellow-600 text-sm font-semibold uppercase">En Attente</p>
-                    <p class="text-4xl font-bold text-yellow-900 mt-2">{{ $stats['assignations_en_attente'] }}</p>
-                    <p class="text-xs text-gray-500 mt-2">À confirmer</p>
-                </div>
-
-                <!-- Sans Chambre -->
-                <div class="bg-white rounded-lg shadow-lg p-6 border-l-4 border-red-500">
-                    <p class="text-red-600 text-sm font-semibold uppercase">Sans Chambre</p>
-                    <p class="text-4xl font-bold text-red-900 mt-2">{{ $stats['sans_chambre'] }}</p>
-                    <p class="text-xs text-gray-500 mt-2">Non assignés</p>
-                </div>
+                <dl class="ca-dl">
+                    <div class="ca-dl-row"><dt>Attributions confirmées</dt><dd style="color:var(--ca-primary)">{{ $nombre($confirmees) }}</dd></div>
+                    <div class="ca-dl-row"><dt>Propositions en attente</dt><dd style="color:#a15c00">{{ $nombre($enAttente) }}</dd></div>
+                    <div class="ca-dl-row"><dt>Total des attributions actives</dt><dd>{{ $nombre($stats['total_assignations'] ?? ($confirmees + $enAttente)) }}</dd></div>
+                </dl>
             </div>
+        </div>
 
-            <!-- Taux d'Allocation Global -->
-            <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
-                <h2 class="text-2xl font-bold text-gray-800 mb-6">Taux d'Allocation Global</h2>
-
-                <div class="mb-8">
-                    <div class="flex justify-between items-center mb-4">
-                <span class="text-lg font-semibold text-gray-700">
-                    {{ $stats['assignations_confirmees'] }} / {{ $stats['demandes_acceptees'] }} étudiants
-                </span>
-                        <span class="text-5xl font-bold text-blue-600">{{ $stats['taux_allocation'] }}%</span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-4">
-                        <div class="bg-gradient-to-r from-blue-500 to-blue-600 h-4 rounded-full transition-all"
-                             style="width: {{ $stats['taux_allocation'] }}%"></div>
-                    </div>
-                </div>
-
-                <!-- Détails du Taux -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t">
-                    <div>
-                        <p class="text-sm text-gray-600 mb-2">Assignations Confirmées</p>
-                        <div class="flex items-baseline gap-2">
-                            <span class="text-3xl font-bold text-green-600">{{ $stats['assignations_confirmees'] }}</span>
-                            <span class="text-sm text-gray-600">/ {{ $stats['demandes_acceptees'] }}</span>
-                        </div>
-                    </div>
-                    <div>
-                        <p class="text-sm text-gray-600 mb-2">Assignations Attendues</p>
-                        <div class="flex items-baseline gap-2">
-                            <span class="text-3xl font-bold text-yellow-600">{{ $stats['assignations_en_attente'] }}</span>
-                            <span class="text-sm text-gray-600">en validation</span>
-                        </div>
-                    </div>
-                    <div>
-                        <p class="text-sm text-gray-600 mb-2">Non Assignés</p>
-                        <div class="flex items-baseline gap-2">
-                            <span class="text-3xl font-bold text-red-600">{{ $stats['sans_chambre'] }}</span>
-                            <span class="text-sm text-gray-600">non attribués</span>
-                        </div>
-                    </div>
-                </div>
+        <div class="ca-card">
+            <div class="ca-card-header">
+                <h2 class="ca-card-title">Occupation par type de chambre</h2>
+                <span class="ca-card-meta">Attributions de la campagne rapportées au parc de chaque type</span>
             </div>
-
-            <!-- Distribution par Type de Chambre -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-                @foreach(['individuelle' => ['label' => 'Individuelles', 'color' => 'blue'], 'double' => ['label' => 'Doubles', 'color' => 'purple'], 'triple' => ['label' => 'Triples', 'color' => 'indigo']] as $type => $config)
-                    @if(isset($stats['par_type'][$type]))
-                        <div class="bg-white rounded-lg shadow-lg overflow-hidden">
-                            <div class="bg-gradient-to-r from-{{ $config['color'] }}-500 to-{{ $config['color'] }}-600 px-6 py-4">
-                                <h3 class="text-lg font-bold text-white">Chambres {{ $config['label'] }}</h3>
-                            </div>
-
-                            <div class="p-6">
-                                <!-- Stat Principale -->
-                                <div class="text-center mb-6">
-                                    <p class="text-4xl font-bold text-gray-800">{{ $stats['par_type'][$type]['occupees'] }}</p>
-                                    <p class="text-sm text-gray-600">assignées sur {{ $stats['par_type'][$type]['total'] }}</p>
+            <div class="ca-card-body">
+                @if(empty($stats['par_type']))
+                    <div class="ca-empty">
+                        <span class="ca-empty-icon"><x-admin-icon name="bed-double" size="22" /></span>
+                        <span>Aucun type de chambre n’est paramétré.</span>
+                    </div>
+                @else
+                    <div class="al-grid">
+                        @foreach($stats['par_type'] as $data)
+                            @php $occupation = $data['total'] > 0 ? min(100, round($data['occupees'] / $data['total'] * 100, 1)) : 0; @endphp
+                            <article class="al-tile">
+                                <div class="al-tile-head">
+                                    <h3 class="al-tile-title">Chambres {{ $data['nom'] }}</h3>
+                                    <span class="ca-badge tone-blue">{{ $pourcent($occupation) }} %</span>
                                 </div>
-
-                                <!-- Barre -->
-                                <div class="mb-6">
-                                    @php
-                                        $occupation = $stats['par_type'][$type]['total'] > 0
-                                            ? round(($stats['par_type'][$type]['occupees'] / $stats['par_type'][$type]['total']) * 100, 1)
-                                            : 0;
-                                    @endphp
-                                    <div class="flex justify-between text-xs text-gray-600 mb-2">
-                                        <span>Taux</span>
-                                        <span>{{ $occupation }}%</span>
-                                    </div>
-                                    <div class="w-full bg-gray-200 rounded-full h-3">
-                                        <div class="bg-{{ $config['color'] }}-600 h-3 rounded-full"
-                                             style="width: {{ $occupation }}%"></div>
-                                    </div>
-                                </div>
-
-                                <!-- Détails -->
-                                <div class="space-y-3 pt-4 border-t border-gray-200">
-                                    <div class="flex justify-between text-sm">
-                                        <span class="text-gray-600">Assignées:</span>
-                                        <span class="font-bold">{{ $stats['par_type'][$type]['occupees'] }}</span>
-                                    </div>
-                                    <div class="flex justify-between text-sm">
-                                        <span class="text-gray-600">Libres:</span>
-                                        <span class="font-bold text-green-600">{{ $stats['par_type'][$type]['disponibles'] }}</span>
-                                    </div>
-                                    <div class="flex justify-between text-sm">
-                                        <span class="text-gray-600">Total:</span>
-                                        <span class="font-bold">{{ $stats['par_type'][$type]['total'] }}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    @endif
-                @endforeach
+                                <div class="ca-progress"><span style="width: {{ $occupation }}%"></span></div>
+                                <dl class="ca-dl">
+                                    <div class="ca-dl-row"><dt>Attribuées</dt><dd>{{ $nombre($data['occupees']) }}</dd></div>
+                                    <div class="ca-dl-row"><dt>Disponibles</dt><dd style="color:var(--ca-primary)">{{ $nombre($data['disponibles']) }}</dd></div>
+                                    <div class="ca-dl-row"><dt>Total</dt><dd>{{ $nombre($data['total']) }}</dd></div>
+                                </dl>
+                            </article>
+                        @endforeach
+                    </div>
+                @endif
             </div>
+        </div>
 
-            <!-- Résumé Texte -->
-            <div class="bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg shadow-lg p-8">
-                <h2 class="text-2xl font-bold text-gray-800 mb-6">Résumé de la Campagne</h2>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <div>
-                        <h3 class="font-bold text-lg text-gray-800 mb-4">Situation Actuelle</h3>
-                        <ul class="space-y-3 text-gray-700">
-                            <li class="flex items-start">
-                                <span class="text-green-600 font-bold mr-3">✓</span>
-                                <span><strong>{{ $stats['assignations_confirmees'] }} étudiants</strong> ont une chambre confirmée</span>
-                            </li>
-                            <li class="flex items-start">
-                                <span class="text-yellow-600 font-bold mr-3">⏳</span>
-                                <span><strong>{{ $stats['assignations_en_attente'] }} assignations</strong> sont en attente de confirmation</span>
-                            </li>
-                            <li class="flex items-start">
-                                <span class="text-red-600 font-bold mr-3">✗</span>
-                                <span><strong>{{ $stats['sans_chambre'] }} étudiants</strong> n'ont pas encore de chambre</span>
-                            </li>
-                            <li class="flex items-start">
-                                <span class="text-blue-600 font-bold mr-3">📊</span>
-                                <span>Le taux d'allocation est de <strong>{{ $stats['taux_allocation'] }}%</strong></span>
-                            </li>
-                        </ul>
-                    </div>
-
-                    <div>
-                        <h3 class="font-bold text-lg text-gray-800 mb-4">Types de Chambres</h3>
-                        <ul class="space-y-3 text-gray-700">
-                            @foreach(['individuelle' => 'Chambres individuelles (1 personne)', 'double' => 'Chambres doubles (2 personnes)', 'triple' => 'Chambres triples (3 personnes)'] as $type => $label)
-                                @if(isset($stats['par_type'][$type]))
-                                    <li class="flex items-start">
-                                        <span class="text-blue-600 font-bold mr-3">•</span>
-                                        <span>
-                                <strong>{{ $stats['par_type'][$type]['total'] }}</strong> {{ $label }}
-                                ({{ $stats['par_type'][$type]['occupees'] }} assignées,
-                                {{ $stats['par_type'][$type]['disponibles'] }} libres)
-                            </span>
-                                    </li>
-                                @endif
-                            @endforeach
-                        </ul>
-                    </div>
+        @if($demandesEnAttente > 0 || $enAttente > 0 || $taux < 50 || $taux >= 100)
+            <div class="ca-card">
+                <div class="ca-card-header">
+                    <h2 class="ca-card-title"><span class="ca-kpi-icon tone-amber"><x-admin-icon name="list-checks" /></span> Points d’attention</h2>
                 </div>
-            </div>
-
-            <!-- Recommandations -->
-            <div class="mt-8 bg-blue-50 border-l-4 border-blue-500 rounded-lg p-6">
-                <h3 class="font-bold text-lg text-blue-900 mb-3">Recommandations</h3>
-                <ul class="space-y-2 text-blue-800 text-sm">
-                    @if($stats['sans_chambre'] > 0)
-                        <li>• <strong>{{ $stats['sans_chambre'] }} étudiants</strong> attendent toujours une assignation. Envisagez une allocation automatique.</li>
-                    @endif
-                    @if($stats['assignations_en_attente'] > 0)
-                        <li>• <strong>{{ $stats['assignations_en_attente'] }} assignations</strong> en attente peuvent être confirmées si elles sont valides.</li>
-                    @endif
-                    @if($stats['taux_allocation'] < 50)
-                        <li>• Le taux d'allocation est inférieur à 50%. Vérifiez la disponibilité des chambres.</li>
-                    @elseif($stats['taux_allocation'] == 100)
-                        <li>• ✓ Tous les étudiants acceptés ont une chambre assignée.</li>
-                    @endif
-                </ul>
-            </div>
-
-            <!-- Actions -->
-            <div class="mt-8 flex gap-4 flex-wrap">
-                <a href="{{ route('allocation.show', $campagne->id_campagne) }}"
-                   class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition">
-                    ← Retour aux Détails
-                </a>
-                <a href="{{ route('allocation.index') }}"
-                   class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-medium transition">
-                    ← Retour aux Campagnes
-                </a>
+                <div class="ca-card-body">
+                    <ul class="al-checks">
+                        @if($demandesEnAttente > 0)
+                            <li class="is-warn"><x-admin-icon name="triangle-alert" size="16" /> <span><strong>{{ $nombre($demandesEnAttente) }}</strong> demande(s) attendent encore leur étude ; elles ne peuvent pas recevoir de chambre tant qu’elles ne sont pas éligibles.</span></li>
+                        @endif
+                        @if($enAttente > 0)
+                            <li class="is-warn"><x-admin-icon name="hourglass" size="16" /> <span><strong>{{ $nombre($enAttente) }}</strong> proposition(s) attendent la réponse de l’étudiant ou la validation définitive.</span></li>
+                        @endif
+                        @if($taux >= 100)
+                            <li class="is-ok"><x-admin-icon name="circle-check" size="16" /> <span>Toutes les demandes de la campagne sont attribuées définitivement.</span></li>
+                        @elseif($taux < 50)
+                            <li class="is-warn"><x-admin-icon name="info" size="16" /> <span>Moins de la moitié des demandes sont attribuées définitivement : vérifiez les places disponibles et les dossiers en attente.</span></li>
+                        @endif
+                    </ul>
+                </div>
             </div>
         @endif
-    </div>
+    @endif
+</div>
 @endsection

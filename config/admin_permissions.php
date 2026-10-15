@@ -48,6 +48,7 @@ return [
         'admin.hebergement.annonce.update' => 'hebergement.annonces.update',
         'admin.hebergement.campagnes_admission.admission' => 'hebergement.admissions.view',
         'admin.hebergement.campagnes_admission.campagnes' => 'hebergement.admissions.view',
+        'admin.hebergement.campagnes_admission.create_campagne' => 'hebergement.admissions.create',
         'admin.hebergement.campagnes_admission.derogations.decide' => 'hebergement.admissions.derogations.validate',
         'admin.hebergement.campagnes_admission.derogations.store' => 'hebergement.admissions.create',
         'admin.hebergement.campagnes_admission.getCampagne' => 'hebergement.admissions.view',

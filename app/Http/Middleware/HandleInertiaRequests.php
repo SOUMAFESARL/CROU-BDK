@@ -22,7 +22,7 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'auth' => fn () => [
                 'user' => ($user = Auth::guard('admin')->user()) ? [
-                    'name' => $user->name,
+                    'name' => $user->nom_affichage,
                     'email' => $user->email,
                     'role' => $user->role?->name,
                     'avatar' => $user->photo ?: asset('files/assets/images/avatar-4.jpg'),

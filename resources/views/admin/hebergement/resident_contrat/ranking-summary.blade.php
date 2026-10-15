@@ -1,23 +1,46 @@
-<div class="bg-blue-50 border border-blue-200 rounded p-4 mb-6">
-    <strong>Ordre de l’attribution automatique</strong>
-    <p>Le barème actif de la campagne est utilisé : priorité PMR si activée, score décroissant, puis ancienneté du dossier.</p>
-    <p>Sans barème actif, le classement provisoire par score d’éligibilité et ancienneté reste appliqué. Configurez les règles dans Paramétrage hébergement → Scoring.</p>
-</div>
+{{-- Après « Attribution automatique » : classement utilisé. --}}
 @if(session('allocation_result'))
-    @php($allocationReport = session('allocation_result'))
-    <section class="bg-white rounded border p-4 mb-6">
-        <h2 class="text-lg font-semibold mb-3">Classement utilisé lors de l’attribution</h2>
-        <div class="overflow-x-auto">
-            <table class="table w-full">
-                <thead><tr><th>Rang</th><th>Candidat</th><th>Score /100</th><th>Résultat</th></tr></thead>
+    @php
+        $allocationReport = session('allocation_result');
+        $classement = collect($allocationReport['allocated'] ?? [])->merge($allocationReport['not_allocated'] ?? [])->sortBy('rang');
+    @endphp
+    <div class="ca-card">
+        <div class="ca-card-header">
+            <h2 class="ca-card-title">
+                <span class="ca-kpi-icon tone-amber"><x-admin-icon name="zap" /></span>
+                Classement utilisé lors de l’attribution
+            </h2>
+            <span class="ca-card-meta">{{ count($allocationReport['allocated'] ?? []) }} réservation(s) sur {{ $classement->count() }} candidat(s)</span>
+        </div>
+        <div class="ca-table-wrap">
+            <table class="ca-table">
+                <thead>
+                <tr><th class="is-num">Rang</th><th>Candidat</th><th>Score</th><th>Résultat</th></tr>
+                </thead>
                 <tbody>
-                @foreach(collect($allocationReport['allocated'] ?? [])->merge($allocationReport['not_allocated'] ?? [])->sortBy('rang') as $entry)
-                    <tr><td>{{ $entry['rang'] ?? '—' }}</td><td>{{ $entry['name'] }}</td>
-                    <td>{{ isset($entry['score']) ? number_format($entry['score'], 2, ',', ' ').' /100' : '—' }}</td>
-                    <td>@if($entry['scoring_version'] ?? null)<small>Barème #{{ $entry['scoring_version'] }} · Priorité {{ $entry['priority'] }}</small><br>@else<small>Classement provisoire</small><br>@endif{{ isset($entry['chambre']) ? 'Chambre '.$entry['chambre'].' réservée' : ($entry['reason'] ?? 'Non attribué') }}</td></tr>
+                @foreach($classement as $entry)
+                    <tr>
+                        <td class="is-num ca-mono">{{ $entry['rang'] ?? '—' }}</td>
+                        <td class="ca-strong">{{ $entry['name'] }}</td>
+                        <td class="ca-mono ca-nowrap">{{ isset($entry['score']) ? number_format($entry['score'], 2, ',', ' ').' / 100' : '—' }}</td>
+                        <td>
+                            @if(isset($entry['chambre']))
+                                <span class="ca-badge tone-green"><x-admin-icon name="check" size="14" /> Chambre {{ $entry['chambre'] }} réservée</span>
+                            @else
+                                <span class="ca-badge tone-red"><x-admin-icon name="x" size="14" /> {{ $entry['reason'] ?? 'Non attribué' }}</span>
+                            @endif
+                            <span class="ca-muted ca-small" style="display:block;margin-top:4px">
+                                @if($entry['scoring_version'] ?? null)
+                                    Barème #{{ $entry['scoring_version'] }} · Priorité {{ $entry['priority'] }}
+                                @else
+                                    Classement provisoire
+                                @endif
+                            </span>
+                        </td>
+                    </tr>
                 @endforeach
                 </tbody>
             </table>
         </div>
-    </section>
+    </div>
 @endif

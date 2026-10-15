@@ -139,12 +139,12 @@
                     <button type="button" class="as-btn as-user-trigger" data-shell-user-toggle aria-haspopup="menu" aria-expanded="false">
                         <span class="as-avatar">
                             @if ($avatar)
-                                <img src="{{ $avatar }}" alt="{{ $adminUser->name }}" onerror="this.remove()">
+                                <img src="{{ $avatar }}" alt="{{ $adminUser->nom_affichage }}" onerror="this.remove()">
                             @endif
                             {{ $initiales }}
                         </span>
                         <span class="as-user-text">
-                            <span class="as-user-name">{{ $adminUser->name }}</span>
+                            <span class="as-user-name">{{ $adminUser->nom_affichage }}</span>
                             @if ($adminUser->role?->name)
                                 <span class="as-user-role">{{ $adminUser->role->name }}</span>
                             @endif
@@ -153,7 +153,7 @@
                     </button>
                     <div class="as-dropdown" role="menu" hidden>
                         <div class="as-dropdown-label">
-                            <span class="as-user-name">{{ $adminUser->name }}</span>
+                            <span class="as-user-name">{{ $adminUser->nom_affichage }}</span>
                             <span class="as-user-role">{{ $adminUser->email }}</span>
                         </div>
                         <div class="as-dropdown-sep"></div>

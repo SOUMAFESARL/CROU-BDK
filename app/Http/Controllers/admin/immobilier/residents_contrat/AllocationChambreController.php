@@ -36,13 +36,27 @@ class AllocationChambreController extends Controller
      */
     public function index()
     {
-
         $campagnes = Campagne::where('statut', '!=', 'annulee')
+            ->withCount([
+                // Dossiers éligibles qui attendent une proposition de chambre.
+                'demandes as dossiers_eligibles_count' => fn ($q) => $q->where('etat_dossier', 'eligible'),
+                'assignations as propositions_count' => fn ($q) => $q->where('statut', 'en_attente'),
+                'assignations as confirmees_count' => fn ($q) => $q->where('statut', 'confirmee'),
+            ])
             ->orderByDesc('periode_debut')
             ->paginate(10);
 
+        $parStatut = Campagne::where('statut', '!=', 'annulee')
+            ->selectRaw('statut, count(*) as total')->groupBy('statut')->pluck('total', 'statut');
+
         return view('admin.hebergement.resident_contrat.allocation_index', [
-            'campagnes' => $campagnes
+            'campagnes' => $campagnes,
+            'stats' => [
+                'total' => (int) $parStatut->sum(),
+                'active' => (int) ($parStatut['active'] ?? 0),
+                'planifiee' => (int) ($parStatut['planifiee'] ?? 0),
+                'terminee' => (int) ($parStatut['terminee'] ?? 0),
+            ],
         ]);
     }
 
@@ -106,11 +120,15 @@ class AllocationChambreController extends Controller
         $etudiants = $this->assignationRepository->getStudentsSansChambres($campagneId);
 
         $chambres = $this->chambreRepository->getDisponibles($campagneId);
-    //  dd($chambres[0],$campagneId);
+        $regles = app(\App\Http\Services\AttributionRules::class);
+
         return view('admin.hebergement.resident_contrat.allocation_form', [
             'campagne' => $campagne,
             'etudiants' => $etudiants,
             'chambres' => $chambres,
+            // Pré-contrôle affiché à l'écran ; AttributionRules::erreurs() refait la vérification complète.
+            'sexesEtudiants' => $etudiants->mapWithKeys(fn ($e) => [$e->getKey() => $regles->sexeEtudiant($e)]),
+            'sexesChambres' => $chambres->mapWithKeys(fn ($c) => [$c->getKey() => $regles->sexeRequis($c)]),
         ]);
     }
 
@@ -142,9 +160,9 @@ class AllocationChambreController extends Controller
                     "Chambre {$assignation->chambre->numero_chambre} assignée avec succès à {$etudiant->name}");
             }
 
-            return back()->with('error', 'Impossible d\'assigner une chambre. Vérifiez les critères.');
+            return back()->withInput()->with('error', 'Impossible d\'assigner une chambre. Vérifiez les critères.');
         } catch (Exception $e) {
-            return back()->with('error', 'Erreur: ' . \App\Support\UserFacingErrors::caught($e));
+            return back()->withInput()->with('error', 'Erreur: ' . \App\Support\UserFacingErrors::caught($e));
         }
     }
 
@@ -344,7 +362,7 @@ class AllocationChambreController extends Controller
                 $a->etudiant->name,
                 $a->etudiant->getAnneeEtude(),
                 $a->chambre->numero_chambre,
-                $a->chambre->type_chambre_code,
+                $a->chambre->typeChambre?->name,
                 $a->chambre->batiment?->name,
                 $a->statut,
                 $a->date_assignation?->format('d/m/Y H:i'),
@@ -369,7 +387,7 @@ class AllocationChambreController extends Controller
             $campagne = Campagne::findOrFail($campagneId);
             $stats = $this->service->getStatistiques($campagneId);
 
-            return view('allocation.statistics', [
+            return view('admin.hebergement.resident_contrat.allocation_statistics', [
                 'campagne' => $campagne,
                 'stats' => $stats,
             ]);

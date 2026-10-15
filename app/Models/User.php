@@ -110,4 +110,26 @@ class User extends Authenticatable
     {
         return $this->belongsTo(User::class, 'updated_by', 'id_user');
     }
+
+    /**
+     * Nom court affiché dans la barre du haut : « NOM Prénom ».
+     * `name` contient « Nom Prénom1 Prénom2… » : nom en majuscules,
+     * seul le premier prénom est gardé (initiale en majuscule, reste en minuscules).
+     */
+    public function getNomAffichageAttribute(): string
+    {
+        $mots = preg_split('/\s+/u', trim((string) $this->name), -1, PREG_SPLIT_NO_EMPTY);
+        if (! $mots) {
+            return '';
+        }
+
+        $nom = mb_strtoupper($mots[0]);
+        if (! isset($mots[1])) {
+            return $nom;
+        }
+
+        $prenom = mb_strtoupper(mb_substr($mots[1], 0, 1)).mb_strtolower(mb_substr($mots[1], 1));
+
+        return $nom.' '.$prenom;
+    }
 }

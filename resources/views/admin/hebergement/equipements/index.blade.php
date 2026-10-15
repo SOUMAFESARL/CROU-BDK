@@ -10,9 +10,19 @@
     <style>
         .eq-thumb { width: 38px; height: 38px; flex: none; border-radius: var(--ca-radius); object-fit: cover; border: 1px solid var(--ca-border); background: var(--ca-surface); }
         .eq-thumb-icon { display: inline-flex; align-items: center; justify-content: center; color: #a15c00; background: #fff4d6; border-color: transparent; }
-        .eq-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .eq-catalogue-header { flex-direction: column; align-items: stretch; }
+        .eq-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-start; }
         .eq-toolbar .ca-input { width: auto; min-width: 0; }
-        .eq-search { position: relative; flex: 1 1 220px; }
+        .eq-search { position: relative; flex: 0 1 300px; }
+        .eq-search.is-loading svg { animation: eq-pulse 1s ease-in-out infinite; }
+        @keyframes eq-pulse { 50% { opacity: .35; } }
+        [data-eq-results] { transition: opacity .15s; }
+        [data-eq-results].is-loading { opacity: .55; }
+        .eq-file-preview { display: none; width: 56px; height: 56px; border-radius: var(--ca-radius); object-fit: cover; border: 1px solid var(--ca-border); }
+        .ca-file.has-preview .eq-file-preview { display: block; }
+        .ca-file.has-preview .ca-file-icon { display: none; }
+        .eq-file-badge { display: none; padding: 2px 8px; border-radius: 999px; background: #fff; color: var(--ca-muted); font-size: 12px; }
+        .ca-file.has-current:not(.has-file) .eq-file-badge { display: inline-block; }
         .eq-search .ca-input { width: 100%; padding-left: 36px; }
         .eq-search svg { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); color: #8a9087; pointer-events: none; }
         .eq-stock { display: flex; flex-direction: column; gap: 4px; min-width: 120px; }
@@ -23,17 +33,18 @@
         .eq-target strong { color: var(--ca-text); font-weight: 500; }
         .eq-radios input[type="radio"] { flex: none; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--ca-primary); }
         .eq-radios { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-        @media (max-width: 639px) { .eq-toolbar .ca-input, .eq-toolbar .ca-btn { flex: 1 1 100%; } }
+        .eq-toolbar .ca-select-trigger { min-width: 200px; min-height: 40px; }
+        @media (max-width: 639px) { .eq-toolbar .ca-input, .eq-toolbar .ca-btn, .eq-toolbar .ca-select { flex: 1 1 100%; } }
     </style>
 @endpush
 
 @php
     // [statut, libellé, icône, couleur]
     $filtres = [
-        ['tous', 'Tous les équipements', 'package', 'tone-gray'],
-        ['disponible', 'Stock suffisant', 'circle-check', 'tone-green'],
-        ['faible', 'Stock faible', 'triangle-alert', 'tone-amber'],
-        ['rupture', 'En rupture', 'circle-x', 'tone-red'],
+        ['tous', 'Tous les équipements', 'package', 'kpi-blue'],
+        ['disponible', 'Stock suffisant', 'circle-check', 'kpi-green'],
+        ['faible', 'Stock faible', 'triangle-alert', 'kpi-amber'],
+        ['rupture', 'En rupture', 'circle-x', 'kpi-plum'],
     ];
     $badges = [
         'Disponible' => ['Stock suffisant', 'tone-green', 'check', ''],
@@ -95,17 +106,16 @@
     @endif
 
     {{-- Indicateurs / filtres --}}
-    <div class="ca-kpis">
+    <div class="ca-kpis ca-kpis--teintes" data-eq-kpis>
         @foreach($filtres as [$filtre, $libelle, $icone, $couleur])
             <a href="{{ route('admin.hebergement.equipements.index', array_filter(['statut' => $filtre === 'tous' ? null : $filtre, 'q' => $recherche ?: null, 'type' => $type ?: null])) }}"
-               class="ca-kpi {{ $statut === $filtre ? 'is-active' : '' }}"
+               class="ca-kpi {{ $couleur }} {{ $statut === $filtre ? 'is-active' : '' }}"
                @if($statut === $filtre) aria-current="page" @endif>
-                <span class="ca-kpi-icon {{ $couleur }}"><x-admin-icon :name="$icone" size="20" /></span>
-                <span>
-                    <span class="ca-kpi-label">{{ $libelle }}</span>
-                    <span class="ca-kpi-value">{{ $stats[$filtre] ?? 0 }}</span>
+                <span class="ca-kpi-label">{{ $libelle }}</span>
+                <span class="ca-kpi-row">
+                    <strong class="ca-kpi-value">{{ $nombre($stats[$filtre] ?? 0) }}</strong>
                     @if($filtre === 'tous')
-                        <span class="ca-kpi-hint">{{ $nombre($stockTotal) }} unité(s) en magasin</span>
+                        <span class="ca-kpi-badge">{{ $nombre($stockTotal) }} unité(s) en magasin</span>
                     @endif
                 </span>
             </a>
@@ -114,29 +124,27 @@
 
     {{-- Catalogue --}}
     <div class="ca-card">
-        <div class="ca-card-header">
+        <div class="ca-card-header eq-catalogue-header">
             <h2 class="ca-card-title">Catalogue &amp; disponibilités</h2>
-            <form method="GET" action="{{ route('admin.hebergement.equipements.index') }}" class="eq-toolbar" role="search">
+            <form method="GET" action="{{ route('admin.hebergement.equipements.index') }}" class="eq-toolbar" role="search" data-eq-filters>
                 @if($statut !== 'tous')<input type="hidden" name="statut" value="{{ $statut }}">@endif
-                <label class="eq-search">
+                <label class="eq-search" data-eq-search>
                     <span class="sr-only">Rechercher un équipement</span>
                     <x-admin-icon name="search" size="16" />
-                    <input type="search" name="q" value="{{ $recherche }}" class="ca-input" placeholder="Rechercher un équipement…">
+                    <input type="search" name="q" value="{{ $recherche }}" class="ca-input" placeholder="Rechercher un équipement…" autocomplete="off">
                 </label>
                 <label class="sr-only" for="eq-filter-type">Type d’équipement</label>
-                <select id="eq-filter-type" name="type" class="ca-input" onchange="this.form.submit()">
+                <select id="eq-filter-type" name="type" class="ca-input" data-ca-select>
                     <option value="">Tous les types</option>
                     @foreach($type_equipement as $item)
                         <option value="{{ $item->id_type_equipement }}" @selected($type === (string) $item->id_type_equipement)>{{ $item->name }}</option>
                     @endforeach
                 </select>
-                <button type="submit" class="ca-btn ca-btn-outline">Rechercher</button>
-                @if($filtresActifs)
-                    <a href="{{ route('admin.hebergement.equipements.index') }}" class="ca-link-btn">Réinitialiser</a>
-                @endif
+                <a href="{{ route('admin.hebergement.equipements.index') }}" class="ca-link-btn" data-eq-reset @unless($filtresActifs) hidden @endunless>Réinitialiser</a>
             </form>
         </div>
 
+        <div data-eq-results aria-live="polite">
         <div class="ca-table-wrap">
             <table class="ca-table">
                 <thead>
@@ -197,7 +205,7 @@
                             @adminroute('admin.hebergement.equipements.update')
                             <button type="button" class="ca-icon-btn" title="Modifier" aria-label="Modifier {{ $equipement->name }}"
                                     data-eq-edit data-id="{{ $equipement->equipement_id }}" data-name="{{ $equipement->name }}"
-                                    data-type="{{ $equipement->type_equipement_id }}" data-threshold="{{ $equipement->threshold }}">
+                                    data-type="{{ $equipement->type_equipement_id }}" data-threshold="{{ $equipement->threshold }}" data-photo="{{ $equipement->photo }}">
                                 <x-admin-icon name="pencil" />
                             </button>
                             @endadminroute
@@ -234,6 +242,7 @@
                 {{ $equipements->onEachSide(1)->links() }}
             </div>
         @endif
+        </div>
     </div>
 
     {{-- Entrée de stock (nouvel équipement) --}}
@@ -253,7 +262,7 @@
                 <div class="ca-form-grid cols-2">
                     <div class="ca-field">
                         <label class="ca-label" for="eq-store-type">Type d’équipement <span class="req">*</span></label>
-                        <select class="ca-input" name="type_equipement_id" id="eq-store-type" required>
+                        <select class="ca-input" name="type_equipement_id" id="eq-store-type" required data-ca-select>
                             <option value="">Sélectionner le type</option>
                             @foreach($type_equipement as $item)
                                 <option value="{{ $item->id_type_equipement }}" @selected($formulaireOuvert === 'store' && old('type_equipement_id') == $item->id_type_equipement)>{{ $item->name }}</option>
@@ -286,8 +295,14 @@
                     </div>
                     <div class="ca-field ca-span-full">
                         <label class="ca-label" for="eq-store-photo">Photo</label>
-                        <input type="file" class="ca-input" name="photo" id="eq-store-photo" accept=".jpg,.jpeg,.png,.gif">
-                        <span class="ca-hint">Facultatif — JPG, PNG ou GIF.</span>
+                        <div class="ca-file" data-eq-file>
+                            <input type="file" name="photo" id="eq-store-photo" accept=".jpg,.jpeg,.png,.gif">
+                            <span class="ca-file-icon" aria-hidden="true"><x-admin-icon name="upload" size="20" /></span>
+                            <img class="eq-file-preview" alt="" data-eq-file-preview>
+                            <span class="ca-file-title"><strong>Choisir une photo</strong> ou la glisser ici</span>
+                            <span class="ca-hint">Facultatif — JPG, PNG ou GIF.</span>
+                            <span class="ca-file-name" data-eq-file-name></span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -397,7 +412,7 @@
                     </div>
                     <div class="ca-field">
                         <label class="ca-label" for="eq-edit-type">Type d’équipement <span class="req">*</span></label>
-                        <select class="ca-input" name="type_equipement_id" id="eq-edit-type" required>
+                        <select class="ca-input" name="type_equipement_id" id="eq-edit-type" required data-ca-select>
                             <option value="">Sélectionner le type</option>
                             @foreach($type_equipement as $item)
                                 <option value="{{ $item->id_type_equipement }}" @selected($formulaireOuvert === 'edit' && old('type_equipement_id') == $item->id_type_equipement)>{{ $item->name }}</option>
@@ -411,8 +426,15 @@
                     </div>
                     <div class="ca-field">
                         <label class="ca-label" for="eq-edit-photo">Nouvelle photo</label>
-                        <input type="file" class="ca-input" name="photo" id="eq-edit-photo" accept=".jpg,.jpeg,.png,.gif">
-                        <span class="ca-hint">Laisser vide pour conserver la photo actuelle.</span>
+                        <div class="ca-file" data-eq-file id="eq-edit-photo-zone">
+                            <input type="file" name="photo" id="eq-edit-photo" accept=".jpg,.jpeg,.png,.gif">
+                            <span class="ca-file-icon" aria-hidden="true"><x-admin-icon name="upload" size="20" /></span>
+                            <img class="eq-file-preview" alt="" data-eq-file-preview>
+                            <span class="eq-file-badge">Photo actuelle</span>
+                            <span class="ca-file-title"><strong>Choisir une nouvelle photo</strong> ou la glisser ici</span>
+                            <span class="ca-hint">Facultatif — JPG, PNG ou GIF. Laisser vide pour conserver la photo actuelle.</span>
+                            <span class="ca-file-name" data-eq-file-name></span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -449,6 +471,8 @@
 @endsection
 
 @push('scripts')
+    <script src="{{ asset('js/ca-select.js') }}"></script>
+    <script src="{{ asset('js/ca-datepicker.js') }}"></script>
     <script src="{{ asset('js/campagnes-admission.js') }}"></script>
     <script>
         (function () {
@@ -478,9 +502,14 @@
                 if (edit) {
                     document.getElementById('eq-edit-id').value = edit.dataset.id;
                     document.getElementById('eq-edit-name').value = edit.dataset.name;
-                    document.getElementById('eq-edit-type').value = edit.dataset.type || '';
+                    var editType = document.getElementById('eq-edit-type');
+                    editType.value = edit.dataset.type || '';
+                    editType.dispatchEvent(new Event('ca-select:refresh'));
                     document.getElementById('eq-edit-threshold').value = edit.dataset.threshold;
-                    document.getElementById('eq-edit-photo').value = '';
+                    var editPhoto = document.getElementById('eq-edit-photo');
+                    document.getElementById('eq-edit-photo-zone').dataset.current = edit.dataset.photo || '';
+                    editPhoto.value = '';
+                    editPhoto.dispatchEvent(new Event('change'));
                     open('eq-edit-form');
                     return;
                 }
@@ -491,6 +520,100 @@
                     setText(deleteDialog, '[data-eq-name]', del.dataset.name);
                     open('eq-delete-form');
                 }
+            });
+
+            // Recherche instantanée : recharge la liste et les compteurs sans bouton ni rechargement complet.
+            var filters = document.querySelector('[data-eq-filters]');
+            if (filters) {
+                var results = document.querySelector('[data-eq-results]');
+                var kpis = document.querySelector('[data-eq-kpis]');
+                var searchBox = filters.querySelector('[data-eq-search]');
+                var reset = filters.querySelector('[data-eq-reset]');
+                var timer = null;
+                var controller = null;
+
+                function refresh(url) {
+                    if (controller) controller.abort();
+                    controller = new AbortController();
+                    results.classList.add('is-loading');
+                    searchBox.classList.add('is-loading');
+                    fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: controller.signal })
+                        .then(function (response) {
+                            if (!response.ok) throw new Error('HTTP ' + response.status);
+                            return response.text();
+                        })
+                        .then(function (html) {
+                            var page = new DOMParser().parseFromString(html, 'text/html');
+                            var newResults = page.querySelector('[data-eq-results]');
+                            var newKpis = page.querySelector('[data-eq-kpis]');
+                            var newReset = page.querySelector('[data-eq-reset]');
+                            if (newResults) results.innerHTML = newResults.innerHTML;
+                            if (newKpis && kpis) kpis.innerHTML = newKpis.innerHTML;
+                            if (newReset && reset) reset.hidden = newReset.hidden;
+                            history.replaceState(null, '', url);
+                        })
+                        .catch(function (error) {
+                            if (error.name !== 'AbortError') window.location.href = url;
+                        })
+                        .finally(function () {
+                            results.classList.remove('is-loading');
+                            searchBox.classList.remove('is-loading');
+                        });
+                }
+
+                function currentUrl() {
+                    var params = new URLSearchParams();
+                    new FormData(filters).forEach(function (value, key) {
+                        if (String(value).trim() !== '') params.append(key, String(value).trim());
+                    });
+                    var query = params.toString();
+                    return filters.action + (query ? '?' + query : '');
+                }
+
+                filters.addEventListener('input', function (event) {
+                    if (event.target.name !== 'q') return;
+                    clearTimeout(timer);
+                    timer = setTimeout(function () { refresh(currentUrl()); }, 300);
+                });
+                filters.addEventListener('change', function (event) {
+                    if (event.target.name !== 'type') return;
+                    clearTimeout(timer);
+                    refresh(currentUrl());
+                });
+                filters.addEventListener('submit', function (event) {
+                    event.preventDefault();
+                    clearTimeout(timer);
+                    refresh(currentUrl());
+                });
+            }
+
+            // Zone de dépôt de la photo : nom du fichier, aperçu et glisser-déposer.
+            document.querySelectorAll('[data-eq-file]').forEach(function (zone) {
+                var input = zone.querySelector('input[type="file"]');
+                var name = zone.querySelector('[data-eq-file-name]');
+                var preview = zone.querySelector('[data-eq-file-preview]');
+                function update() {
+                    var file = input.files && input.files[0];
+                    var current = zone.dataset.current || '';
+                    zone.classList.toggle('has-file', !!file);
+                    zone.classList.toggle('has-current', current !== '');
+                    name.textContent = file ? file.name : '';
+                    if (preview.src.indexOf('blob:') === 0) URL.revokeObjectURL(preview.src);
+                    preview.removeAttribute('src');
+                    // Sans nouveau fichier, l'aperçu montre la photo actuelle (modification).
+                    if (file && file.type.indexOf('image/') === 0) preview.src = URL.createObjectURL(file);
+                    else if (!file && current) preview.src = current;
+                    zone.classList.toggle('has-preview', preview.hasAttribute('src'));
+                }
+                input.addEventListener('change', update);
+                ['dragenter', 'dragover'].forEach(function (type) {
+                    zone.addEventListener(type, function () { zone.classList.add('is-dragover'); });
+                });
+                ['dragleave', 'drop'].forEach(function (type) {
+                    zone.addEventListener(type, function () { zone.classList.remove('is-dragover'); });
+                });
+                var form = input.form;
+                if (form) form.addEventListener('reset', function () { setTimeout(update, 0); });
             });
         })();
     </script>
