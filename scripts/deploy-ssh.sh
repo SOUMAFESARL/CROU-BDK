@@ -48,6 +48,12 @@ if [[ -d "$stage/app/public/admin/assets/images" ]]; then
     mkdir -p public/admin/assets/images
     cp -an "$stage/app/public/admin/assets/images/." public/admin/assets/images/
 fi
+# Authentication artwork is versioned, unlike the other persistent public/files.
+# Install missing artwork without replacing files already managed on the server.
+if [[ -d "$stage/app/public/files/assets/images/auth" ]]; then
+    mkdir -p public/files/assets/images/auth
+    cp -an "$stage/app/public/files/assets/images/auth/." public/files/assets/images/auth/
+fi
 tar -C "$stage/app" --exclude='./storage' --exclude='./bootstrap/cache' \
     --exclude='./.env*' --exclude='./.git' --exclude='./public/storage' \
     --exclude='./public/files' --exclude='./public/admin/assets/images' \
