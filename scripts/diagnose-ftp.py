@@ -17,6 +17,24 @@ with ftplib.FTP_TLS(context=context, timeout=30) as ftp:
     ftp.prot_p()
     ftp.cwd(os.environ['FTP_SERVER_DIR'])
     root = ftp.pwd()
+    if '--repair-auth-configuration' in sys.argv:
+        # Keep credentials in memory; never include environment contents in logs.
+        environment = bytearray()
+        ftp.retrbinary('RETR .env', environment.extend)
+        content = environment.decode('utf-8-sig')
+        content, count = re.subn(r'^SESSION_DRIVER=[^\r\n]*', 'SESSION_DRIVER=file', content, flags=re.M)
+        if not count:
+            content = content.rstrip() + '\nSESSION_DRIVER=file\n'
+        ftp.storbinary('STOR .env', BytesIO(content.encode('utf-8')))
+        ftp.storbinary('STOR config/auth.php', BytesIO(Path('config/auth.php').read_bytes()))
+        # Only remove the generated config cache, never application data.
+        try:
+            ftp.size('bootstrap/cache/config.php')
+        except ftplib.error_perm:
+            pass
+        else:
+            ftp.delete('bootstrap/cache/config.php')
+        print('Configured file sessions and users provider; cleared generated config cache.')
     if '--repair-web-root' in sys.argv:
         ftp.storbinary('STOR .htaccess', BytesIO(Path('.htaccess').read_bytes()))
         print('Installed project-root routing to public/.')
