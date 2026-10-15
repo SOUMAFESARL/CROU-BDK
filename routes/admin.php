@@ -45,7 +45,8 @@ use App\Http\Controllers\admin\immobilier\ReportingHebergementController;
 use App\Http\Controllers\MapController;
 use App\Http\Controllers\admin\ActivityLogController;
 
-Route::get('/',[AuthController::class,'index'])->name('login');
+// « /admin » seul redirige vers la page de choix de connexion (routes/web.php).
+Route::get('/connexion',[AuthController::class,'index'])->name('login');
 Route::post('/login',[AuthController::class,'login'])->name('post.login');
 Route::get('/verification-2fa',[AuthController::class,'twoFactorForm'])->name('two-factor.form');
 Route::post('/verification-2fa',[AuthController::class,'twoFactorVerify'])->name('two-factor.verify');

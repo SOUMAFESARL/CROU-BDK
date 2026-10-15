@@ -8,6 +8,8 @@ use App\Http\Controllers\web\EtudiantPasswordResetController;
 use App\Http\Controllers\MapController;
 // Routes d'authentification admin
 Route::get('/admin/login', [AuthController::class, 'index'])->name('login');
+// « /admin » seul (ex. rafraîchissement après une coupure) renvoie vers la page de choix de connexion.
+Route::redirect('/admin', '/');
 
 // Routes publiques du site
 

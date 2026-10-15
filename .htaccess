@@ -13,6 +13,10 @@
     RewriteCond %{HTTP:x-xsrf-token} .
     RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
 
+    # « /admin » : le dossier admin/ (fichiers envoyés) ne doit pas masquer la route Laravel
+    # (sinon « Not Found » / « Forbidden » au lieu de la redirection vers l'accueil).
+    RewriteRule ^admin/?$ index.php [L]
+
     # Redirect Trailing Slashes If Not A Folder...
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_URI} (.+)/$

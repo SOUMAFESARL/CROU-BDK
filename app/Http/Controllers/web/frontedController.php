@@ -46,11 +46,16 @@ class  frontedController extends Controller
         $this->etudiantService = $etudiantService;
         $this->campagneService = $campagneService;
     }
-    public function index(){
-
-        $result = $this->campagneService->getListeCampagnesWithStats($this->etat );
-
-        return view('web.accueil.index',compact('result'));
+    // Page d'accueil : choix de l'espace de connexion (administration ou étudiant).
+    public function index(): InertiaResponse
+    {
+        return Inertia::render('Auth/Choix', [
+            'adminLoginUrl' => route('admin.login'),
+            'etudiantLoginUrl' => route('etudiant.login'),
+            'logoUrl' => asset('admin/assets/images/logos/crou_bdk.jpeg'),
+            'backgroundUrl' => asset('files/assets/images/auth/crou_bondoukou.jpg'),
+            'year' => now()->year,
+        ]);
     }
     public function about(){
         $result = $this->campagneService->getListeCampagnesWithStats($this->etat );
@@ -70,7 +75,6 @@ class  frontedController extends Controller
     {
         return Inertia::render('Etudiant/Auth/Login', [
             'loginUrl' => route('login.etudiant'),
-            'registerUrl' => route('etudiant.register'),
             'forgotUrl' => route('etudiant.password.request'),
             'csrfToken' => csrf_token(),
             'oldEmail' => old('email'),
