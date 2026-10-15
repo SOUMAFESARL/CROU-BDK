@@ -61,6 +61,10 @@ jobs:
           umask 077
           ssh_dir="$(mktemp -d)"
           cleanup() {
+            if [[ -n "${transfer_heartbeat:-}" ]]; then
+              kill "$transfer_heartbeat" 2>/dev/null || true
+              wait "$transfer_heartbeat" 2>/dev/null || true
+            fi
             if [[ -n "${SSH_AGENT_PID:-}" ]]; then
               ssh-agent -k >/dev/null 2>&1 || true
             fi
@@ -84,13 +88,27 @@ jobs:
             -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=20
             -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
           target="$SSH_USER@$SSH_HOST"
-          remote_stage="$(ssh -T "${ssh_options[@]}" "$target" 'mktemp -d /tmp/crou-release.XXXXXXXX')"
+          echo 'Preparing remote staging directory (maximum 60 seconds)...'
+          remote_stage="$(timeout 60s ssh -T "${ssh_options[@]}" "$target" 'mktemp -d /tmp/crou-release.XXXXXXXX')"
           [[ "$remote_stage" =~ ^/tmp/crou-release\.[a-zA-Z0-9]+$ ]]
           # The staging directory is private and outside the document root.
-          ssh -T "${ssh_options[@]}" "$target" "cat > '$remote_stage/release.tar.gz'" < "$RUNNER_TEMP/release.tar.gz"
+          echo "Uploading archive: $(du -h "$RUNNER_TEMP/release.tar.gz" | cut -f1) (maximum 10 minutes)..."
+          (while sleep 15; do echo 'SSH archive upload still running...'; done) &
+          transfer_heartbeat=$!
+          if timeout 10m ssh -T "${ssh_options[@]}" "$target" "cat > '$remote_stage/release.tar.gz'" < "$RUNNER_TEMP/release.tar.gz"; then
+            kill "$transfer_heartbeat" 2>/dev/null || true
+            wait "$transfer_heartbeat" 2>/dev/null || true
+            unset transfer_heartbeat
+          else
+            status=$?
+            echo "Archive upload failed (exit $status; 124 means timeout)." >&2
+            exit "$status"
+          fi
+          echo 'Archive uploaded. Preparing application deployment...'
           if [[ -n "$ENV_PRODUCTION" ]]; then
             printf '%s\n' "$ENV_PRODUCTION" | ssh -T "${ssh_options[@]}" "$target" "umask 077; cat > '$remote_stage/production.env'"
           fi
           unset ENV_PRODUCTION
+          echo 'Executing remote installation and migrations...'
           ssh -T "${ssh_options[@]}" "$target" \
             "bash -s -- '$encoded_path' '$GITHUB_SHA' '$remote_stage'" < scripts/deploy-ssh.sh
