@@ -62,6 +62,10 @@ def commands(env, vendor_only=False):
         '--exclude-glob public/storage/ --exclude-glob public/files/assets/images/ '
         '--exclude-glob public/admin/assets/images/ --exclude-glob public/hot '
         f'./deploy-package/ {quote(remote)}',
+        # Replace the invalid deployed controller in full, even when mirror
+        # considers its timestamp/size current. Do not resume this upload.
+        'put ./deploy-package/app/Http/Controllers/admin/immobilier/parc_immobilier/ParcImmobilierController.php '
+        f'-o {quote(remote + "app/Http/Controllers/admin/immobilier/parc_immobilier/ParcImmobilierController.php")}',
         # Static artwork is installed only when absent; keep customized logos.
         'mirror --reverse --only-missing --verbose --no-perms '
         f'./deploy-package/public/admin/assets/images/logos/ {quote(remote + "public/admin/assets/images/logos/")}',
