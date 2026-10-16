@@ -64,6 +64,9 @@ class dashboardController extends Controller
      */
 
 
+    /** Sections encore servies par la page Blade etudiant/index (`?section=`) ; sans section : tableau de bord React. */
+    private const SECTIONS_BLADE = ['chambre', 'demandes', 'etat-lieux', 'paiements', 'annonce', 'maintenance', 'incidents', 'carte-interactive'];
+
     public function index()
     {
         // Vérifier si l'étudiant est authentifié
@@ -116,6 +119,16 @@ class dashboardController extends Controller
             $result['data']['campagnes'] = $campagneTableauDeBord
                 ? collect([$campagneTableauDeBord])
                 : collect();
+
+            // Tableau de bord migré en React ; les autres sections restent sur la page Blade etudiant/index.
+            if (! in_array(request('section'), self::SECTIONS_BLADE, true)) {
+                return \Inertia\Inertia::render('Etudiant/TableauDeBord', app(\App\Services\EtudiantDashboard::class)->props(
+                    $etudiant,
+                    $campagneTableauDeBord,
+                    $this->getPaiementData($idEtudiant),
+                    $this->serviceOrdreTravail->getPaginated(['etudiant_id' => $idEtudiant], 10),
+                ))->toResponse(request())->header('Cache-Control', 'private, no-store');
+            }
 //dd($result['etudiant']);
             // Récupérer les statistiques des ordres de travail
             $result['statOT'] = $this->serviceOrdreTravail->getStats();
@@ -215,6 +228,47 @@ class dashboardController extends Controller
             ->with('success', 'Votre demande de sortie a été enregistrée.');
     }
 
+    public function profile(Request $request)
+    {
+        $student = $request->user('etudiant');
+        abort_unless($student, 401);
+        // Le libellé du genre est facultatif : la page reste disponible si la référence manque.
+        $genre = rescue(fn () => $student->genre?->name, null, false);
+        $onglet = (string) $request->query('onglet');
+
+        return \Inertia\Inertia::render('Etudiant/Profil', [
+            'onglet' => in_array($onglet, ['identite', 'coordonnees', 'securite'], true) ? $onglet : 'identite',
+            'etudiant' => [
+                'nom' => $student->name,
+                'initiales' => \App\Services\EtudiantMenu::initiales($student->name),
+                'matricule' => $student->matricule,
+                'numeroEtudiant' => $student->numero_etudiant,
+                'genre' => $genre,
+                'dateNaissance' => $student->date_naissance?->format('d/m/Y'),
+                'lieuNaissance' => $student->lieu_naissance,
+                'nationalite' => $student->nationalite ? mb_convert_case($student->nationalite, MB_CASE_TITLE) : null,
+                'faculte' => $student->faculte,
+                'email1' => $student->email1,
+            ],
+            'coordonnees' => [
+                'telephone1' => (string) $student->telephone1,
+                'telephone2' => (string) $student->telephone2,
+                'email2' => (string) $student->email2,
+            ],
+            // Mêmes règles que SystemSecurity::passwordRule(), affichées et vérifiées en direct (le serveur revérifie).
+            'reglesMotDePasse' => [
+                'min' => (int) systemConfig('password_min_length', 8),
+                'mixed' => (bool) systemConfig('password_require_uppercase', true),
+                'number' => (bool) systemConfig('password_require_number', true),
+                'symbol' => (bool) systemConfig('password_require_special', false),
+            ],
+            'urls' => [
+                'coordonnees' => route('etudiants.profile.update'),
+                'motDePasse' => route('etudiants.profile.password'),
+            ],
+        ])->toResponse($request)->header('Cache-Control', 'private, no-store');
+    }
+
     public function updatePassword(Request $request): RedirectResponse
     {
         $student = $request->user('etudiant');
@@ -229,8 +283,8 @@ class dashboardController extends Controller
         $student->setRememberToken(\Illuminate\Support\Str::random(60));
         $student->save();
         $request->session()->regenerate();
-        return redirect()->route('etudiants.dashboard', ['section' => 'dashboard'])
-            ->with('profile_success', 'Votre mot de passe a été modifié.');
+        return redirect()->route('etudiants.profile', ['onglet' => 'securite'])
+            ->with('success', 'Votre mot de passe a été modifié.');
     }
     public function updateProfile(Request $request): RedirectResponse
     {
@@ -247,8 +301,8 @@ class dashboardController extends Controller
         $student->update($data);
 
         return redirect()
-            ->route('etudiants.dashboard', ['section' => 'dashboard'])
-            ->with('profile_success', 'Vos informations personnelles ont été mises à jour.');
+            ->route('etudiants.profile', ['onglet' => 'coordonnees'])
+            ->with('success', 'Vos coordonnées ont été mises à jour.');
     }
 
     public function annonces(Request $request)
@@ -413,33 +467,28 @@ class dashboardController extends Controller
             $validated = $request->validate([
                 'action' => 'required|in:accepter,refuser',
                 'assignation_id' => 'required|string',
-                'motif_refus' => 'required_if:action,refuser|string|max:500',
+                'motif_refus' => 'required_if:action,refuser|nullable|string|max:500',
+            ], [
+                'motif_refus.required_if' => 'Indiquez le motif du refus.',
+                'motif_refus.max' => 'Le motif ne doit pas dépasser 500 caractères.',
             ]);
 
 
             // ÉTAPE 2: Vérifier que la demande appartient à l'étudiant
+            // Réponses en redirection + message (formulaire du tableau de bord React, via Inertia).
             $detailsResult = $this->etudiantService->getDetailsDemande($idEtudiantConnecte);
 
             if (!$detailsResult['success']) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Demande non trouvée'
-                ], 404);
+                return back()->with('error', 'Demande non trouvée.');
             }
 
             if ($detailsResult['data']['id_etudiant'] !== $idEtudiantConnecte) {
                Log::warning("Tentative de validation non autorisée: étudiant {$idEtudiantConnecte} sur demande {$idDemande}");
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Accès non autorisé'
-                ], 403);
+                return back()->with('error', 'Accès non autorisé.');
             }
 
             if (!$detailsResult['data']['peut_valider']) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Cette demande ne peut pas être validée (état: ' . $detailsResult['data']['statut_actuel'] . ')'
-                ], 400);
+                return back()->with('error', 'Cette proposition ne peut plus recevoir de réponse.');
             }
 
             // ÉTAPE 3: Préparer les données
@@ -459,25 +508,21 @@ class dashboardController extends Controller
            // dd($detailsResult,$data);
             // ÉTAPE 5: Retourner le résultat
             if (!$result['success']) {
-                return response()->json($result, 400);
+                return back()->with('error', $result['message'] ?? 'La réponse n’a pas pu être enregistrée.');
             }
 
             // Log l'action
          //   Log::info("Demande {$idDemande} {$validated['action']}e par l'étudiant {$idEtudiantConnecte}");
 
-            // Déterminer le message de succès
-            $message = $validated['action'] === 'accepter'
-                ? '✅ Votre demande a été acceptée avec succès!'
-                : '❌ Votre demande a été refusée.';
-
-              return back()->with('success', $message);
+            return back()->with('success', $result['message']);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
-            return  back()->withErrors(['error' => $message]);
+            // Erreurs de champ renvoyées au formulaire (motif du refus…).
+            throw $e;
 
         } catch (\Exception $e) {
             Log::error('Erreur lors de la validation de la demande: ' . $e->getMessage());
-            return  back()->withErrors(['error' => "Une erreur est survenue lors du traitement de votre demande"]);
+            return back()->with('error', 'Une erreur est survenue lors du traitement de votre réponse.');
 
         }
     }

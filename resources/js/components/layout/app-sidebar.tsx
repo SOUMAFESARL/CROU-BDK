@@ -2,6 +2,8 @@ import { usePage } from '@inertiajs/react';
 import {
     BedDouble,
     BookOpen,
+    CalendarCheck,
+    ClipboardCheck,
     Building,
     Building2,
     ChartColumn,
@@ -10,7 +12,10 @@ import {
     CreditCard,
     DoorOpen,
     FilePenLine,
+    FilePlus,
+    FileText,
     Flag,
+    FolderOpen,
     GraduationCap,
     History,
     Houses,
@@ -25,6 +30,7 @@ import {
     ShieldCheck,
     SlidersHorizontal,
     Toolbox,
+    TriangleAlert,
     UserCog,
     Users,
     Wallet,
@@ -63,7 +69,7 @@ import type { MenuItem, SharedProps } from '@/types/global';
 /** Réglages communs des icônes Lucide de l'espace admin : trait fin, 18px. */
 export const ICON = { size: 18, strokeWidth: 1.25 } as const;
 
-/** Icônes disponibles pour config/admin_menu.php (clé `icon`, sous-menus compris). */
+/** Icônes disponibles pour config/admin_menu.php (clé `icon`, sous-menus compris) et App\Services\EtudiantMenu. */
 const ICONS: Record<string, LucideIcon> = {
     'layout-dashboard': LayoutDashboard,
     users: Users,
@@ -93,6 +99,12 @@ const ICONS: Record<string, LucideIcon> = {
     'book-open': BookOpen,
     layers: Layers,
     'user-cog': UserCog,
+    'calendar-check': CalendarCheck,
+    'file-plus': FilePlus,
+    'clipboard-check': ClipboardCheck,
+    'triangle-alert': TriangleAlert,
+    'file-text': FileText,
+    'folder-open': FolderOpen,
 };
 
 const LOGO_URL = '/admin/assets/images/logos/crou_bdk.jpeg';
@@ -104,15 +116,7 @@ export function AppSidebar() {
 
     return (
         <Sidebar collapsible="icon">
-            <SidebarHeader className="border-b border-sidebar-border px-2 py-4 group-data-[collapsible=icon]:py-3">
-                {/* Logo au-dessus du nom ; replié : logo seul. */}
-                <div className="flex flex-col items-center">
-                    <a href={menu[0]?.href ?? '#'} className="flex max-w-full min-w-0 flex-col items-center gap-2 rounded-md px-1 group-data-[collapsible=icon]:px-0">
-                        <img src={LOGO_URL} alt="CROU Bondoukou" className="size-16 shrink-0 rounded-md object-contain group-data-[collapsible=icon]:size-9" />
-                        <span className="max-w-full truncate font-semibold text-primary group-data-[collapsible=icon]:hidden">CROU Bondoukou</span>
-                    </a>
-                </div>
-            </SidebarHeader>
+            <SidebarBrand href={menu[0]?.href ?? '#'} />
 
             <SidebarContent>
                 <SidebarGroup>
@@ -141,6 +145,20 @@ export function AppSidebar() {
 
             <SidebarRail />
         </Sidebar>
+    );
+}
+
+/** Logo et nom en tête de la barre latérale (admin et espace étudiant) ; replié : logo seul. */
+export function SidebarBrand({ href }: { href: string }) {
+    return (
+        <SidebarHeader className="border-b border-sidebar-border px-2 py-4 group-data-[collapsible=icon]:py-3">
+            <div className="flex flex-col items-center">
+                <a href={href} className="flex max-w-full min-w-0 flex-col items-center gap-2 rounded-md px-1 group-data-[collapsible=icon]:px-0">
+                    <img src={LOGO_URL} alt="CROU Bondoukou" className="size-16 shrink-0 rounded-md object-contain group-data-[collapsible=icon]:size-9" />
+                    <span className="max-w-full truncate font-semibold text-primary group-data-[collapsible=icon]:hidden">CROU Bondoukou</span>
+                </a>
+            </div>
+        </SidebarHeader>
     );
 }
 

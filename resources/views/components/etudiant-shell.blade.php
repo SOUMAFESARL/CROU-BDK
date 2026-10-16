@@ -13,51 +13,19 @@
      */
     $student = $student ?? auth('etudiant')->user();
     $collapsed = request()->cookie('sidebar_state') === 'false';
-    $surTableauDeBord = request()->routeIs('etudiants.dashboard');
-    $section = $surTableauDeBord ? (request('section') ?: 'dashboard') : null;
     $dashboard = route('etudiants.dashboard');
-    $sectionUrl = fn (string $page) => route('etudiants.dashboard', ['section' => $page]);
 
-    $groupes = [
-        'Principal' => [
-            ['label' => 'Tableau de bord', 'icon' => 'layout-dashboard', 'page' => 'dashboard', 'href' => $dashboard],
-            ['label' => 'Ma chambre', 'icon' => 'bed-double', 'page' => 'chambre', 'href' => $sectionUrl('chambre')],
-        ],
-        'Gestion' => [
-            ['label' => 'Mon entrée et notifications', 'icon' => 'calendar-check', 'href' => route('etudiants.housing-entry'), 'routes' => ['etudiants.housing-entry']],
-            ['label' => 'Réadmission', 'icon' => 'file-plus', 'href' => route('etudiants.readmission'), 'routes' => ['etudiants.readmission*']],
-            ['label' => 'Demandes', 'icon' => 'file-pen-line', 'page' => 'demandes', 'href' => $sectionUrl('demandes')],
-            ['label' => 'État des lieux', 'icon' => 'clipboard-check', 'page' => 'etat-lieux', 'href' => $sectionUrl('etat-lieux')],
-            ['label' => 'Paiements', 'icon' => 'credit-card', 'page' => 'paiements', 'href' => $sectionUrl('paiements')],
-            ['label' => 'Annonces', 'icon' => 'megaphone', 'page' => 'annonce', 'href' => $sectionUrl('annonce')],
-            ['label' => 'Maintenance', 'icon' => 'wrench', 'page' => 'maintenance', 'href' => $sectionUrl('maintenance')],
-            ['label' => 'Signaler un incident', 'icon' => 'triangle-alert', 'page' => 'incidents', 'href' => $sectionUrl('incidents')],
-            ['label' => 'Carte interactive', 'icon' => 'map', 'page' => 'carte-interactive', 'href' => $sectionUrl('carte-interactive')],
-            ['label' => 'Documents de la résidence', 'icon' => 'file-text', 'href' => route('etudiants.documents.index'), 'routes' => ['etudiants.documents.index']],
-            ['label' => 'Mes documents', 'icon' => 'folder-open', 'href' => route('etudiants.documents.personal'), 'routes' => ['etudiants.documents.personal', 'etudiants.contract.*']],
-        ],
-    ];
-
-    $actif = null;
-    foreach ($groupes as $nom => $items) {
-        foreach ($items as $i => $item) {
-            $estActif = isset($item['page'])
-                ? $section === $item['page']
-                : request()->routeIs(...$item['routes']);
-            $groupes[$nom][$i]['active'] = $estActif;
-            $actif ??= $estActif ? $item : null;
-        }
-    }
+    // Menu commun à la coque Blade et à la mise en page React (App\Services\EtudiantMenu).
+    $groupes = collect(app(\App\Services\EtudiantMenu::class)->groupes(request()))
+        ->mapWithKeys(fn ($groupe) => [$groupe['label'] => $groupe['items']])
+        ->all();
+    $actif = collect($groupes)->flatten(1)->firstWhere('active', true);
 
     $title = $title ?: ($actif['label'] ?? 'Espace étudiant');
     $surAccueil = ($actif['page'] ?? null) === 'dashboard';
 
     $nom = $student?->name ?? 'Étudiant';
-    $initiales = collect(preg_split('/\s+/', trim($nom)))
-        ->filter()
-        ->take(2)
-        ->map(fn ($mot) => mb_strtoupper(mb_substr($mot, 0, 1)))
-        ->implode('');
+    $initiales = \App\Services\EtudiantMenu::initiales($nom);
 @endphp
 
 <div class="admin-shell etudiant-shell" data-admin-shell data-state="{{ $collapsed ? 'collapsed' : 'expanded' }}">
@@ -81,7 +49,7 @@
                                class="as-menu-button"
                                data-active="{{ $item['active'] ? 'true' : 'false' }}"
                                data-tooltip="{{ $item['label'] }}"
-                               @isset($item['page']) data-page="{{ $item['page'] }}" @endisset
+                               @if ($item['page']) data-page="{{ $item['page'] }}" @endif
                                @if ($item['active']) aria-current="page" @endif>
                                 <x-admin-icon :name="$item['icon']" />
                                 <span>{{ $item['label'] }}</span>
@@ -127,8 +95,7 @@
                         <span class="as-user-role">Année académique {{ getAnneeUniversitaire(date('Y-m-d')) }}</span>
                     </div>
                     <div class="as-dropdown-sep"></div>
-                    {{-- Ouvre le modal « Mon profil » du tableau de bord (etudiant/index.blade.php). --}}
-                    <a href="{{ $dashboard }}#profil" class="as-dropdown-item" role="menuitem" data-student-profile>
+                    <a href="{{ route('etudiants.profile') }}" class="as-dropdown-item" role="menuitem">
                         <x-admin-icon name="user-round" />
                         Mon profil
                     </a>

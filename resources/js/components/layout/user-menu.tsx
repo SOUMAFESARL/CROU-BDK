@@ -1,7 +1,7 @@
 import { usePage } from '@inertiajs/react';
 import { ChevronDown, LogOut, UserRound } from 'lucide-react';
 import { useRef } from 'react';
-import { ICON } from '@/components/layout/app-sidebar';
+import { ICON, MenuIcon } from '@/components/layout/app-sidebar';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
     DropdownMenu,
@@ -22,13 +22,13 @@ function initiales(nom: string): string {
         .join('');
 }
 
-function csrfToken(): string {
+function metaCsrfToken(): string {
     return document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
 }
 
-/** Avatar circulaire et nom de l'admin connecté (barre du haut), avec profil et déconnexion. */
+/** Avatar circulaire et nom de l'utilisateur connecté (admin ou étudiant), avec profil et déconnexion. */
 export function UserMenu() {
-    const { auth } = usePage<SharedProps>().props;
+    const { auth, csrfToken } = usePage<SharedProps>().props;
     const logoutForm = useRef<HTMLFormElement>(null);
     const user = auth.user;
 
@@ -53,7 +53,7 @@ export function UserMenu() {
                 <DropdownMenuContent align="end" className="min-w-56">
                     <DropdownMenuLabel className="font-normal">
                         <span className="block truncate font-medium text-gray-900">{user.name}</span>
-                        <span className="block truncate text-xs text-muted">{user.email}</span>
+                        <span className="block truncate text-xs text-muted">{user.email ?? user.role}</span>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild>
@@ -62,15 +62,24 @@ export function UserMenu() {
                             Mon profil
                         </a>
                     </DropdownMenuItem>
+                    {auth.links?.map((lien) => (
+                        <DropdownMenuItem key={lien.href} asChild>
+                            <a href={lien.href}>
+                                <MenuIcon name={lien.icon} />
+                                {lien.label}
+                            </a>
+                        </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={() => logoutForm.current?.submit()}>
                         <LogOut {...ICON} className="size-[18px]" />
                         Déconnexion
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
-            {/* Déconnexion en POST classique (route admin.logout inchangée). */}
+            {/* Déconnexion en POST classique (routes admin.logout et etudiants.logout inchangées). */}
             <form ref={logoutForm} method="POST" action={auth.logoutUrl} hidden>
-                <input type="hidden" name="_token" value={csrfToken()} />
+                <input type="hidden" name="_token" value={csrfToken || metaCsrfToken()} />
             </form>
         </>
     );

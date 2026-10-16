@@ -35,7 +35,7 @@ type FormProps = {
 };
 
 const CHOIX: { type: TypeFormulaire; titre: string; description: string; icon: LucideIcon }[] = [
-    { type: 'cite', titre: 'Nouvelle cité', description: 'Identité, contacts, localisation et services.', icon: Building2 },
+    { type: 'cite', titre: 'Nouvelle cité ', description: 'Identité, contacts, localisation et services.', icon: Building2 },
     { type: 'batiment', titre: 'Nouveau bâtiment', description: 'Rattachement, structure (étages, ailes) et chambres prévues.', icon: Building },
     { type: 'chambre', titre: 'Nouvelles chambres', description: 'Numéros, types et lits des chambres d’un niveau.', icon: BedDouble },
 ];

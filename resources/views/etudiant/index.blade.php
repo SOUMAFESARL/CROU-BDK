@@ -17,10 +17,11 @@
     <!-- Pour SweetAlert2 (optionnel) -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <link rel="stylesheet" href="{{ asset('css/admin-shell.css') }}">
-    <link rel="stylesheet" href="{{ asset('files/assets/css/student-space.css') }}?v=20261014b">
+    <link rel="stylesheet" href="{{ asset('files/assets/css/student-space.css') }}?v=20261016b">
 
 </head>
-<body class="{{ systemConfig('force_dark_mode', false) ? 'app-dark-mode' : '' }}">
+{{-- as-refonte : DM Sans / Segoe UI au lieu d'Arial (imposé par typography.css via system-theme.css). --}}
+<body class="as-refonte {{ systemConfig('force_dark_mode', false) ? 'app-dark-mode' : '' }}">
 
 
 
@@ -51,7 +52,8 @@
 @endphp
 
 <x-etudiant-shell :student="$data['etudiant']">
-   @includeIf('etudiant.dashboard',$data)
+    {{-- Le tableau de bord est une page React (Etudiant/TableauDeBord) ; ici : fenêtres de réponse à la proposition. --}}
+    @include('etudiant.partials.proposition-modals', $data)
 
     <!-- ── Ma Chambre ── -->
 
@@ -92,7 +94,8 @@
     const shellCrumb = document.querySelector('[data-shell-crumb-current]');
     const shellCrumbHome = document.querySelectorAll('[data-shell-crumb-home]');
 
-    document.querySelectorAll('#nav a[data-page]').forEach(link => {
+    // « Tableau de bord » n'est plus une section : lien classique vers la page React.
+    document.querySelectorAll('#nav a[data-page]:not([data-page="dashboard"])').forEach(link => {
         link.addEventListener('click', (event) => {
             event.preventDefault();
             const page = link.dataset.page;
@@ -141,21 +144,6 @@
     @if($errors->hasAny(['departure', 'date_sortie_prevue', 'motif', 'observations', 'conditions_acceptees']))
         document.querySelector('nav a[data-scroll-target="departure-request-section"]')?.click();
     @endif
-
-    // « Mon profil » (menu de l'avatar) : ouvre le modal du tableau de bord quand il existe.
-    const profileModalAvailable = () => document.getElementById('studentProfileModal') && typeof openProfileModal === 'function';
-    document.querySelectorAll('[data-student-profile]').forEach(link => {
-        link.addEventListener('click', (event) => {
-            if (!profileModalAvailable()) return;
-            event.preventDefault();
-            link.closest('.as-dropdown').hidden = true;
-            document.querySelector('[data-shell-user-toggle]')?.setAttribute('aria-expanded', 'false');
-            openProfileModal();
-        });
-    });
-    if (window.location.hash === '#profil' && profileModalAvailable()) {
-        openProfileModal();
-    }
 
     function showToast(msg) {
         const t = document.getElementById('toast');

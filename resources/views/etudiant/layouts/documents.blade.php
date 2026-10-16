@@ -7,7 +7,7 @@
     <link rel="icon" href="{{ systemLogo('files/assets/logo/logo.jpg') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="{{ asset('css/admin-shell.css') }}">
-    <link rel="stylesheet" href="{{ asset('files/assets/css/student-space.css') }}?v=20261014b">
+    <link rel="stylesheet" href="{{ asset('files/assets/css/student-space.css') }}?v=20261016b">
     <link rel="stylesheet" href="{{ asset('files/assets/css/system-theme.css') }}">
     <link rel="stylesheet" href="{{ asset('files/assets/css/student-documents.css') }}?v=20261014">
 </head>

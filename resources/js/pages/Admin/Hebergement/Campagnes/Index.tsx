@@ -1,4 +1,4 @@
-import { Link } from '@inertiajs/react';
+ import { Link } from '@inertiajs/react';
 import { ClipboardList, Eye, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { CampagneDetailsSheet, StatutCampagneBadge } from '@/components/campagnes/details-sheet';

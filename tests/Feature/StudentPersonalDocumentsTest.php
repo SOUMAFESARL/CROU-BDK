@@ -13,6 +13,7 @@ class StudentPersonalDocumentsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->withoutVite();
         config(['database.default' => 'sqlite', 'database.connections.sqlite.database' => ':memory:']);
         DB::purge('sqlite');
         $settings = new \App\Models\ConfigApp(['app_name' => 'Residence test']);
@@ -48,18 +49,51 @@ class StudentPersonalDocumentsTest extends TestCase
         $this->get(route('etudiants.pdfContrat', ['id' => 'other']))->assertNotFound();
     }
 
+    /** Page Inertia : composant et props lus dans data-page (un middleware global reconstruit la réponse). */
+    private function inertiaPage(string $url): array
+    {
+        $html = $this->get($url)->assertOk()->getContent();
+        preg_match('/data-page="([^"]+)"/', $html, $matches);
+
+        return json_decode(html_entity_decode($matches[1] ?? ''), true) ?? [];
+    }
+
     public function test_personal_document_page_lists_categories_without_foreign_records(): void
     {
-        $this->get(route('etudiants.documents.personal'))->assertOk()
-            ->assertSee('Mes documents')->assertSee('Aucun contrat disponible.')
-            ->assertSee('Aucun état des lieux enregistré.')->assertDontSee('foreign');
+        $page = $this->inertiaPage(route('etudiants.documents.personal'));
+
+        $this->assertSame('Etudiant/MesDocuments', $page['component'] ?? null);
+        $this->assertNull($page['props']['contrat']);
+        foreach (['etatsDesLieux', 'recus', 'justificatifs', 'decomptes'] as $liste) {
+            $this->assertSame([], $page['props'][$liste]);
+        }
+        $this->assertStringNotContainsString('foreign', json_encode($page['props']));
+    }
+
+    public function test_profile_is_a_dedicated_page_with_contact_and_password_forms(): void
+    {
+        $page = $this->inertiaPage(route('etudiants.profile', ['onglet' => 'securite']));
+
+        $this->assertSame('Etudiant/Profil', $page['component'] ?? null);
+        $this->assertSame('securite', $page['props']['onglet']);
+        $this->assertSame('Étudiant test', $page['props']['etudiant']['nom']);
+        $this->assertSame(route('etudiants.profile.update'), $page['props']['urls']['coordonnees']);
+        $this->assertSame(route('etudiants.profile.password'), $page['props']['urls']['motDePasse']);
+        $this->assertSame('identite', $this->inertiaPage(route('etudiants.profile', ['onglet' => 'inconnu']))['props']['onglet']);
+
+        $documents = $this->inertiaPage(route('etudiants.documents.personal'));
+        $this->assertSame(route('etudiants.profile'), $documents['props']['auth']['profileUrl']);
     }
 
     public function test_student_shell_offers_logout_button(): void
     {
-        $this->get(route('etudiants.documents.personal'))->assertOk()
-            ->assertSee('action="'.route('etudiants.logout').'"', false)
-            ->assertSee('Déconnexion');
+        $page = $this->inertiaPage(route('etudiants.documents.personal'));
+
+        $this->assertSame(route('etudiants.logout'), $page['props']['auth']['logoutUrl']);
+        $this->assertSame('TEST', $page['props']['auth']['user']['role']);
+        $menu = collect($page['props']['menuEtudiant'])->flatMap(fn ($groupe) => $groupe['items']);
+        $this->assertTrue($menu->firstWhere('label', 'Mes documents')['active']);
+        $this->assertSame([], $page['props']['menu']);
     }
 
     public function test_student_can_log_out(): void
