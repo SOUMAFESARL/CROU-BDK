@@ -1,0 +1,115 @@
+name: Deploy via FTP
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-development
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: development
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Validate FTP settings
+        shell: bash
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
+        run: |
+          set -Eeuo pipefail
+          : "${FTP_SERVER:?Missing FTP_SERVER}"
+          : "${FTP_USERNAME:?Missing FTP_USERNAME}"
+          : "${FTP_PASSWORD:?Missing FTP_PASSWORD}"
+          : "${FTP_SERVER_DIR:?Missing FTP_SERVER_DIR}"
+          [[ "$FTP_SERVER_DIR" == */ && "$FTP_SERVER_DIR" != / && "$FTP_SERVER_DIR" != ./ ]]
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, dom, fileinfo, pdo_mysql, gd, zip
+          tools: composer:v2
+          coverage: none
+
+      - name: Install production PHP dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader --no-scripts
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Prepare application files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p deploy-package
+          rsync -a app bootstrap config database lang public resources routes vendor deploy-package/ \
+            --exclude='*.sql' --exclude='*.sqlite*' \
+            --exclude='/bootstrap/cache/***' \
+            --exclude='/public/storage/***' --exclude='/public/hot' \
+            --exclude='/public/files/***' --exclude='/public/admin/assets/images/***'
+          cp artisan composer.json composer.lock .htaccess index.php server.php robots.txt deploy-package/
+          # Include frontend dependencies without copying user-upload directories.
+          for static_dir in assets/css assets/css_web assets/js assets/js_web assets/fonts assets/icon assets/pages bower_components assets/images/auth assets/logo assets/img_web; do
+            if [[ -d "public/files/$static_dir" ]]; then
+              mkdir -p "deploy-package/public/files/$static_dir"
+              rsync -a "public/files/$static_dir/" "deploy-package/public/files/$static_dir/"
+            fi
+          done
+          mkdir -p deploy-package/public/admin/assets/images/logos
+          cp public/admin/assets/images/logos/crou_bdk.jpeg deploy-package/public/admin/assets/images/logos/
+          test -f deploy-package/vendor/autoload.php
+          test -f deploy-package/public/build/manifest.json
+          test ! -e deploy-package/.env
+
+      - name: Install FTP client
+        run: sudo apt-get update && sudo apt-get install --yes lftp
+
+      - name: Deploy application over FTPS with retries
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          LFTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
+          FTP_PROTOCOL: ${{ vars.FTP_PROTOCOL || 'ftps' }}
+        run: python3 scripts/deploy-ftp.py
+
+      - name: Migration instructions
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ## FTP transfer completed
+          Migrations have NOT been executed. In the cPanel terminal:
+          ```bash
+          cd /chemin/du/projet
+          php artisan config:clear
+          php artisan package:discover
+          php artisan migrate --force --no-interaction
+          php artisan config:cache
+          php artisan view:cache
+          php artisan queue:restart
+          php artisan up
+          ```
+          See docs/deploiement-ftp.md. FTP updates files in place; enable maintenance
+          manually before starting a deployment and keep it enabled if any step fails.
+          SUMMARY
