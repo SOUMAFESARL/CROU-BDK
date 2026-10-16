@@ -27,6 +27,15 @@ class DeploymentCommandsTest(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 deploy.commands({**self.env, 'FTP_SERVER_DIR': path})
 
+    def test_existing_directories_require_access_and_restore_login_directory(self):
+        for vendor_only in [False, True]:
+            commands = deploy.commands({**self.env, 'FTP_SERVER_DIR': 'project/'}, vendor_only)
+            self.assertIn('set cmd:fail-exit yes', commands)
+            self.assertIn('set cmd:verify-path yes', commands)
+            self.assertIn('mkdir -p "project/bootstrap/cache" || cd "project/bootstrap/cache"\ncd\n', commands)
+            self.assertEqual(commands.count(' || cd '), 7)
+            self.assertEqual(commands.count('\ncd\n'), 7)
+
     def test_vendor_transfer_is_separate_and_parallel(self):
         application = deploy.commands(self.env)
         vendor = deploy.commands(self.env, vendor_only=True)

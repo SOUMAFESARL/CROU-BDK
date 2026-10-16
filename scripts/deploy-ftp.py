@@ -26,6 +26,7 @@ def commands(env, vendor_only=False):
     tls = 'yes' if protocol == 'ftps' else 'no'
     return '\n'.join([
         'set cmd:fail-exit yes',
+        'set cmd:verify-path yes',
         'set net:timeout 30',
         'set net:max-retries 5',
         'set net:reconnect-interval-base 5',
@@ -40,7 +41,10 @@ def commands(env, vendor_only=False):
         f'open --user {quote(env["FTP_USERNAME"])} --env-password -p 21 {quote("ftp://" + host)}',
         # These persistent directories are excluded from the file mirror but
         # must exist on a first installation for Laravel to bootstrap.
-        *[f'mkdir -p {quote(remote + directory)}' for directory in [
+        # Some FTP servers return 550 even for mkdir -p on existing folders.
+        # Accept that only if CWD verifies access, then restore the login folder
+        # so relative FTP_SERVER_DIR values keep their original meaning.
+        *[f'mkdir -p {quote(remote + directory)} || cd {quote(remote + directory)}\ncd' for directory in [
             'bootstrap/cache', 'storage/framework/views', 'storage/framework/sessions',
             'storage/framework/cache/data', 'storage/logs', 'storage/app/public',
             'storage/app/private',
