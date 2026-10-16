@@ -5,8 +5,12 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void {
         Schema::table('legal_documents', function (Blueprint $table) {
-            $table->string('file_path')->nullable();
-            $table->string('file_name')->nullable();
+            if (! Schema::hasColumn('legal_documents', 'file_path')) {
+                $table->string('file_path')->nullable();
+            }
+            if (! Schema::hasColumn('legal_documents', 'file_name')) {
+                $table->string('file_name')->nullable();
+            }
         });
     }
     public function down(): void {

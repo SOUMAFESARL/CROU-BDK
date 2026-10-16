@@ -8,21 +8,30 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
-        Schema::create('permissions', function (Blueprint $table) {
-            $table->id();
-            $table->string('name', 120);
-            $table->string('slug', 160)->unique();
-            $table->string('module', 80)->index();
-            $table->text('description')->nullable();
-            $table->timestamps();
-        });
+        $permissionsExist = Schema::hasTable('permissions');
+        if (! Schema::hasTable('permissions')) {
+            Schema::create('permissions', function (Blueprint $table) {
+                $table->id();
+                $table->string('name', 120);
+                $table->string('slug', 160)->unique();
+                $table->string('module', 80)->index();
+                $table->text('description')->nullable();
+                $table->timestamps();
+            });
+        }
 
-        Schema::create('role_permission', function (Blueprint $table) {
-            $table->unsignedBigInteger('role_id');
-            $table->unsignedBigInteger('permission_id');
-            $table->timestamps();
-            $table->primary(['role_id', 'permission_id']);
-        });
+        if (! Schema::hasTable('role_permission')) {
+            Schema::create('role_permission', function (Blueprint $table) {
+                $table->unsignedBigInteger('role_id');
+                $table->unsignedBigInteger('permission_id');
+                $table->timestamps();
+                $table->primary(['role_id', 'permission_id']);
+            });
+        }
+
+        if ($permissionsExist) {
+            return;
+        }
 
         $now = now();
         DB::table('permissions')->insert([

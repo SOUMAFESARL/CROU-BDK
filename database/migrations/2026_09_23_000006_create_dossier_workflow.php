@@ -4,16 +4,27 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\{DB,Schema};
 return new class extends Migration {
     public function up(): void {
+        $dossierStateExists = Schema::hasColumn('demande', 'etat_dossier');
         Schema::table('demande', function(Blueprint $t) {
-            $t->string('etat_dossier',30)->default('soumis')->index();
-            $t->string('assignation_id',150)->nullable()->index();
+            if (! Schema::hasColumn('demande', 'etat_dossier')) {
+                $t->string('etat_dossier',30)->default('soumis')->index();
+            }
+            if (! Schema::hasColumn('demande', 'assignation_id')) {
+                $t->string('assignation_id',150)->nullable()->index();
+            }
         });
-        Schema::create('dossier_transitions', function(Blueprint $t) {
-            $t->id(); $t->string('demande_id',150)->index();
-            $t->string('ancien_etat',30)->nullable(); $t->string('nouvel_etat',30);
-            $t->string('acteur_type',30); $t->string('acteur_id',150)->nullable();
-            $t->text('motif')->nullable(); $t->json('details')->nullable(); $t->timestamp('created_at');
-        });
+        if (! Schema::hasTable('dossier_transitions')) {
+            Schema::create('dossier_transitions', function(Blueprint $t) {
+                $t->id(); $t->string('demande_id',150)->index();
+                $t->string('ancien_etat',30)->nullable(); $t->string('nouvel_etat',30);
+                $t->string('acteur_type',30); $t->string('acteur_id',150)->nullable();
+                $t->text('motif')->nullable(); $t->json('details')->nullable(); $t->timestamp('created_at');
+            });
+        }
+        if ($dossierStateExists) {
+            return;
+        }
+
         DB::table('demande')->orderBy('id_demande')->chunk(100, function($requests) {
             foreach($requests as $request) {
                 $legacy = mb_strtolower((string)$request->statut_demande);

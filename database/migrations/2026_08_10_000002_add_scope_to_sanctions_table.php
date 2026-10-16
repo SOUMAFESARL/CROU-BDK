@@ -8,9 +8,15 @@ return new class extends Migration {
     public function up(): void
     {
         Schema::table('sanctions', function (Blueprint $table) {
-            $table->string('scope_type', 20)->default('etudiant')->after('numero_sanction');
-            $table->string('batiment_id', 150)->nullable()->after('cite_id')->index();
-            $table->string('chambre_id', 150)->nullable()->after('batiment_id')->index();
+            if (! Schema::hasColumn('sanctions', 'scope_type')) {
+                $table->string('scope_type', 20)->default('etudiant')->after('numero_sanction');
+            }
+            if (! Schema::hasColumn('sanctions', 'batiment_id')) {
+                $table->string('batiment_id', 150)->nullable()->after('cite_id')->index();
+            }
+            if (! Schema::hasColumn('sanctions', 'chambre_id')) {
+                $table->string('chambre_id', 150)->nullable()->after('batiment_id')->index();
+            }
             $table->string('etudiant_id', 150)->nullable()->change();
         });
     }

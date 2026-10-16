@@ -1,14 +1,16 @@
 # Deploiement FTP vers LWS / cPanel
 
-Le workflow `.github/workflows/deploy.yml` deploie les push sur `dev` et peut etre
-lance manuellement sur cette branche. GitHub Actions installe les dependances PHP
+Le workflow `.github/workflows/deploy.yml` deploie les push sur `dev` et `main`
+et peut etre lance manuellement depuis ces branches. GitHub Actions installe les dependances PHP
 de production, compile le frontend puis transfere le code, `vendor` et
 `public/build`. Aucun acces SSH ni Node.js sur le serveur n'est necessaire.
 
 ## Secrets GitHub
 
 Le serveur de `dev` est distinct de celui de `main`. Dans Settings > Environments >
-development, ajouter les secrets FTP du serveur de developpement :
+development, ajouter les secrets FTP du serveur de developpement. Pour `main`,
+configurer ces memes secrets dans l'environnement `production`, avec les
+identifiants et le dossier du serveur de production :
 
 | Secret | Valeur |
 | --- | --- |
@@ -56,7 +58,7 @@ Retirer les eventuels anciens dumps SQL accessibles dans le dossier Web.
 ## Maintenance et migrations dans le terminal cPanel
 
 FTP met a jour les fichiers progressivement : ce deploiement n'est pas atomique.
-Avant de pousser sur `dev` ou de lancer le workflow, effectuer une sauvegarde de la
+Avant de pousser sur `dev` ou `main`, ou de lancer le workflow, effectuer une sauvegarde de la
 base, ouvrir le terminal web cPanel et executer :
 
 ```bash
@@ -69,7 +71,9 @@ Attendre le succes du transfert GitHub Actions. Puis, dans le meme dossier :
 ```bash
 php artisan config:clear
 php artisan package:discover
+php artisan migrate:status
 php artisan migrate --force --no-interaction
+php artisan migrate:status
 php artisan config:cache
 php artisan view:cache
 php artisan queue:restart
@@ -89,4 +93,26 @@ HTTP d'administration n'est installee. Le schema historique du projet repose aus
 sur un dump SQL : verifier la coherence de la base et de la table `migrations`
 avant le premier deploiement. Aucun import, seeder, reset ou rollback automatique.
 
-Reference : [configuration FTP Deploy Action](https://github.com/SamKirkland/FTP-Deploy-Action).
+## Tables deja presentes et migrations en attente
+
+Laravel consulte la table `migrations` et execute uniquement les migrations qui
+n'y sont pas encore enregistrees. Si elle n'existe pas, `migrate:status` le signale
+et `migrate` la cree. Les migrations de creation verifient chaque table separement :
+une table existante est conservee et les tables manquantes sont creees.
+Les ajouts de colonnes verifient chaque colonne pour permettre une reprise
+partielle. Les insertions initiales protegees ne dupliquent pas les donnees.
+
+Une table existante ne signifie pas que ses migrations de modification ont ete
+appliquees : les modifications en attente continuent a s'executer. Les erreurs
+de schema restent bloquantes. Les verifications d'existence ne valident pas la
+compatibilite complete d'un schema historique et ne corrigent pas ses types.
+Ne pas utiliser `migrate:fresh`, `migrate:refresh` ou `migrate:reset` au deploiement.
+Un rollback de migrations adoptees sur une base existante peut supprimer ces
+tables ; ne pas l'utiliser pour annuler ce deploiement.
+
+L'execution automatique exige un acces d'execution distant, par exemple SSH.
+Le workflow FTP ne peut pas interroger la base distante ni executer Artisan ;
+les commandes ci-dessus restent a lancer sur le serveur.
+
+References : [configuration FTP Deploy Action](https://github.com/SamKirkland/FTP-Deploy-Action),
+[migrations Laravel](https://laravel.com/docs/12.x/migrations).

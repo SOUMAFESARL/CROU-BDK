@@ -8,10 +8,18 @@ return new class extends Migration {
     public function up(): void
     {
         Schema::table('payment_providers', function (Blueprint $table) {
-            $table->text('api_user')->nullable();
-            $table->text('subscription_key')->nullable();
-            $table->text('request_signing_secret')->nullable();
-            $table->string('environment', 30)->default('sandbox');
+            if (! Schema::hasColumn('payment_providers', 'api_user')) {
+                $table->text('api_user')->nullable();
+            }
+            if (! Schema::hasColumn('payment_providers', 'subscription_key')) {
+                $table->text('subscription_key')->nullable();
+            }
+            if (! Schema::hasColumn('payment_providers', 'request_signing_secret')) {
+                $table->text('request_signing_secret')->nullable();
+            }
+            if (! Schema::hasColumn('payment_providers', 'environment')) {
+                $table->string('environment', 30)->default('sandbox');
+            }
         });
     }
 

@@ -8,29 +8,40 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
-        Schema::create('modules', function (Blueprint $table) {
-            $table->id();
-            $table->unsignedBigInteger('parent_id')->nullable()->index();
-            $table->string('name', 120);
-            $table->string('slug', 160)->unique();
-            $table->text('description')->nullable();
-            $table->string('icon', 100)->nullable();
-            $table->string('route_name', 180)->nullable();
-            $table->string('menu_key', 80)->nullable();
-            $table->string('submenu_key', 80)->nullable();
-            $table->unsignedInteger('position')->default(0);
-            $table->unsignedTinyInteger('level')->default(0);
-            $table->json('actions')->nullable();
-            $table->boolean('is_active')->default(true);
-            $table->boolean('show_in_menu')->default(true);
-            $table->boolean('is_system')->default(false);
-            $table->timestamps();
-        });
+        $modulesExist = Schema::hasTable('modules');
+        if (! Schema::hasTable('modules')) {
+            Schema::create('modules', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('parent_id')->nullable()->index();
+                $table->string('name', 120);
+                $table->string('slug', 160)->unique();
+                $table->text('description')->nullable();
+                $table->string('icon', 100)->nullable();
+                $table->string('route_name', 180)->nullable();
+                $table->string('menu_key', 80)->nullable();
+                $table->string('submenu_key', 80)->nullable();
+                $table->unsignedInteger('position')->default(0);
+                $table->unsignedTinyInteger('level')->default(0);
+                $table->json('actions')->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->boolean('show_in_menu')->default(true);
+                $table->boolean('is_system')->default(false);
+                $table->timestamps();
+            });
+        }
 
         Schema::table('permissions', function (Blueprint $table) {
-            $table->unsignedBigInteger('module_id')->nullable()->after('id')->index();
-            $table->string('action', 50)->nullable()->after('module');
+            if (! Schema::hasColumn('permissions', 'module_id')) {
+                $table->unsignedBigInteger('module_id')->nullable()->after('id')->index();
+            }
+            if (! Schema::hasColumn('permissions', 'action')) {
+                $table->string('action', 50)->nullable()->after('module');
+            }
         });
+
+        if ($modulesExist) {
+            return;
+        }
 
         $now = now();
         $parents = [

@@ -8,19 +8,39 @@ return new class extends Migration {
     public function up(): void
     {
         Schema::table('departure_requests', function (Blueprint $table) {
-            $table->string('decision', 30)->default('en_attente')->after('statut')->index();
-            $table->text('motif_decision')->nullable()->after('decision');
-            $table->timestamp('date_decision')->nullable()->after('motif_decision');
-            $table->string('traite_par', 150)->nullable()->after('date_decision');
+            if (! Schema::hasColumn('departure_requests', 'decision')) {
+                $table->string('decision', 30)->default('en_attente')->after('statut')->index();
+            }
+            if (! Schema::hasColumn('departure_requests', 'motif_decision')) {
+                $table->text('motif_decision')->nullable()->after('decision');
+            }
+            if (! Schema::hasColumn('departure_requests', 'date_decision')) {
+                $table->timestamp('date_decision')->nullable()->after('motif_decision');
+            }
+            if (! Schema::hasColumn('departure_requests', 'traite_par')) {
+                $table->string('traite_par', 150)->nullable()->after('date_decision');
+            }
         });
 
         Schema::table('departure_settlements', function (Blueprint $table) {
-            $table->decimal('caution_disponible', 12, 2)->default(0)->after('impute_caution');
-            $table->decimal('caution_a_restituer', 12, 2)->default(0)->after('caution_disponible');
-            $table->decimal('caution_restituee', 12, 2)->default(0)->after('caution_a_restituer');
-            $table->string('mode_restitution', 50)->nullable()->after('caution_restituee');
-            $table->string('paiement_restitution_id', 150)->nullable()->after('mode_restitution');
-            $table->timestamp('date_restitution')->nullable()->after('paiement_restitution_id');
+            if (! Schema::hasColumn('departure_settlements', 'caution_disponible')) {
+                $table->decimal('caution_disponible', 12, 2)->default(0)->after('impute_caution');
+            }
+            if (! Schema::hasColumn('departure_settlements', 'caution_a_restituer')) {
+                $table->decimal('caution_a_restituer', 12, 2)->default(0)->after('caution_disponible');
+            }
+            if (! Schema::hasColumn('departure_settlements', 'caution_restituee')) {
+                $table->decimal('caution_restituee', 12, 2)->default(0)->after('caution_a_restituer');
+            }
+            if (! Schema::hasColumn('departure_settlements', 'mode_restitution')) {
+                $table->string('mode_restitution', 50)->nullable()->after('caution_restituee');
+            }
+            if (! Schema::hasColumn('departure_settlements', 'paiement_restitution_id')) {
+                $table->string('paiement_restitution_id', 150)->nullable()->after('mode_restitution');
+            }
+            if (! Schema::hasColumn('departure_settlements', 'date_restitution')) {
+                $table->timestamp('date_restitution')->nullable()->after('paiement_restitution_id');
+            }
         });
     }
 

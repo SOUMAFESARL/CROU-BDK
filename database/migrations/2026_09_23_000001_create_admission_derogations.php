@@ -9,30 +9,34 @@ use Illuminate\Support\Str;
 return new class extends Migration {
     public function up(): void
     {
-        Schema::create('admission_derogations', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('etudiant_id')->index();
-            $table->string('demande_id')->index();
-            $table->string('campagne_id')->index();
-            $table->string('requested_by');
-            $table->string('requester_name');
-            $table->text('reason');
-            $table->json('eligibility');
-            $table->string('status')->default('pending');
-            $table->string('decided_by')->nullable();
-            $table->string('decider_name')->nullable();
-            $table->text('decision_reason')->nullable();
-            $table->timestamp('decided_at')->nullable();
-            $table->timestamps();
-        });
-        $moduleId = DB::table('modules')->insertGetId([
+        if (! Schema::hasTable('admission_derogations')) {
+            Schema::create('admission_derogations', function (Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->string('etudiant_id')->index();
+                $table->string('demande_id')->index();
+                $table->string('campagne_id')->index();
+                $table->string('requested_by');
+                $table->string('requester_name');
+                $table->text('reason');
+                $table->json('eligibility');
+                $table->string('status')->default('pending');
+                $table->string('decided_by')->nullable();
+                $table->string('decider_name')->nullable();
+                $table->text('decision_reason')->nullable();
+                $table->timestamp('decided_at')->nullable();
+                $table->timestamps();
+            });
+        }
+        $moduleId = DB::table('modules')->where('slug', 'hebergement.admissions.derogations')->value('id')
+            ?? DB::table('modules')->insertGetId([
             'parent_id' => DB::table('modules')->where('slug', 'hebergement.admissions')->value('id'),
             'name' => 'Dérogations d’admission', 'slug' => 'hebergement.admissions.derogations',
             'level' => 2, 'actions' => json_encode(['validate']),
             'is_active' => true, 'show_in_menu' => false, 'is_system' => true,
             'created_at' => now(), 'updated_at' => now(),
         ]);
-        $id = DB::table('permissions')->insertGetId([
+        $id = DB::table('permissions')->where('slug', 'hebergement.admissions.derogations.validate')->value('id')
+            ?? DB::table('permissions')->insertGetId([
             'module_id' => $moduleId, 'action' => 'validate',
             'name' => 'Valider les dérogations d’admission', 'slug' => 'hebergement.admissions.derogations.validate',
             'module' => 'Admissions', 'description' => 'Décider sur la dérogation demandée par un autre agent.',
@@ -45,7 +49,8 @@ return new class extends Migration {
         }
         foreach (DB::table('roles')->get() as $role) {
             $name = Str::lower(Str::ascii(trim($role->name)));
-            if (in_array($name, ['sous-dal', 'sous dal', "sous-directeur de l'accueil et des logements", 'chef du service logement', 'chef service logement'], true)) {
+            if (in_array($name, ['sous-dal', 'sous dal', "sous-directeur de l'accueil et des logements", 'chef du service logement', 'chef service logement'], true)
+                && ! DB::table('role_permission')->where('role_id', $role->id)->where('permission_id', $id)->exists()) {
                 DB::table('role_permission')->insert(['role_id' => $role->id, 'permission_id' => $id, 'created_at' => now(), 'updated_at' => now()]);
             }
         }

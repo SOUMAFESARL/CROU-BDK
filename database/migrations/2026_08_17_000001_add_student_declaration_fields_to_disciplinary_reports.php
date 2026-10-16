@@ -8,9 +8,15 @@ return new class extends Migration {
     public function up(): void
     {
         Schema::table('disciplinary_reports', function (Blueprint $table) {
-            $table->string('declarant_id', 150)->nullable()->index()->after('etudiant_id');
-            $table->string('source', 30)->default('administration')->after('declarant_id');
-            $table->boolean('confidentiel')->default(false)->after('temoins');
+            if (! Schema::hasColumn('disciplinary_reports', 'declarant_id')) {
+                $table->string('declarant_id', 150)->nullable()->index()->after('etudiant_id');
+            }
+            if (! Schema::hasColumn('disciplinary_reports', 'source')) {
+                $table->string('source', 30)->default('administration')->after('declarant_id');
+            }
+            if (! Schema::hasColumn('disciplinary_reports', 'confidentiel')) {
+                $table->boolean('confidentiel')->default(false)->after('temoins');
+            }
         });
     }
 

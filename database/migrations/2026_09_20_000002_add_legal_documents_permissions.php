@@ -7,7 +7,8 @@ return new class extends Migration {
     public function up(): void
     {
         $now = now();
-        $module = DB::table('modules')->insertGetId([
+        $module = DB::table('modules')->where('slug', 'parametrage.legal-documents')->value('id')
+            ?? DB::table('modules')->insertGetId([
             'parent_id' => DB::table('modules')->where('slug', 'parametrage')->value('id'),
             'name' => 'Signatures et documents', 'slug' => 'parametrage.legal-documents',
             'description' => 'Configurer les signataires et rédiger les documents de la résidence.',
@@ -17,12 +18,14 @@ return new class extends Migration {
             'is_system' => true, 'created_at' => $now, 'updated_at' => $now,
         ]);
         foreach (['manage' => 'Rédiger et valider les documents', 'signatures' => 'Configurer les signatures des responsables'] as $action => $name) {
-            $id = DB::table('permissions')->insertGetId([
+            $id = DB::table('permissions')->where('slug', 'parametrage.legal-documents.'.$action)->value('id')
+                ?? DB::table('permissions')->insertGetId([
                 'module_id' => $module, 'module' => 'Signatures et documents', 'action' => $action,
                 'slug' => 'parametrage.legal-documents.'.$action, 'name' => $name,
                 'description' => $name, 'created_at' => $now, 'updated_at' => $now,
             ]);
-            if (DB::table('roles')->where('id', 1)->exists()) {
+            if (DB::table('roles')->where('id', 1)->exists()
+                && ! DB::table('role_permission')->where('role_id', 1)->where('permission_id', $id)->exists()) {
                 DB::table('role_permission')->insert(['role_id' => 1, 'permission_id' => $id, 'created_at' => $now, 'updated_at' => $now]);
             }
         }

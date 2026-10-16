@@ -7,15 +7,19 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
-        Schema::create('lits', function (Blueprint $table) {
-            $table->id();
-            $table->string('chambre_id');
-            $table->unsignedInteger('numero');
-            $table->timestamps();
-            $table->unique(['chambre_id', 'numero']);
-        });
+        if (! Schema::hasTable('lits')) {
+            Schema::create('lits', function (Blueprint $table) {
+                $table->id();
+                $table->string('chambre_id');
+                $table->unsignedInteger('numero');
+                $table->timestamps();
+                $table->unique(['chambre_id', 'numero']);
+            });
+        }
         Schema::table('assignation_chambres', function (Blueprint $table) {
-            $table->foreignId('lit_id')->nullable()->constrained('lits')->restrictOnDelete();
+            if (! Schema::hasColumn('assignation_chambres', 'lit_id')) {
+                $table->foreignId('lit_id')->nullable()->constrained('lits')->restrictOnDelete();
+            }
         });
     }
 

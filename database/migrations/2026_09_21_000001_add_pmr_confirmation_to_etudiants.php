@@ -8,9 +8,15 @@ return new class extends Migration {
     public function up(): void
     {
         Schema::table('etudiants', function (Blueprint $table) {
-            $table->boolean('pmr_confirme')->default(false);
-            $table->string('pmr_confirme_by')->nullable();
-            $table->timestamp('pmr_confirme_at')->nullable();
+            if (! Schema::hasColumn('etudiants', 'pmr_confirme')) {
+                $table->boolean('pmr_confirme')->default(false);
+            }
+            if (! Schema::hasColumn('etudiants', 'pmr_confirme_by')) {
+                $table->string('pmr_confirme_by')->nullable();
+            }
+            if (! Schema::hasColumn('etudiants', 'pmr_confirme_at')) {
+                $table->timestamp('pmr_confirme_at')->nullable();
+            }
         });
     }
 
