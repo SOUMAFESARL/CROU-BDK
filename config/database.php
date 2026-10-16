@@ -57,7 +57,8 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
-            'engine' => null,
+            // Avoid inheriting MyISAM and its 1000-byte index limit on hosts.
+            'engine' => 'InnoDB',
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 constant(defined('Pdo\\Mysql::ATTR_SSL_CA')
                     ? 'Pdo\\Mysql::ATTR_SSL_CA'
@@ -79,7 +80,7 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
-            'engine' => null,
+            'engine' => 'InnoDB',
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 constant(defined('Pdo\\Mysql::ATTR_SSL_CA')
                     ? 'Pdo\\Mysql::ATTR_SSL_CA'
