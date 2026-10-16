@@ -65,7 +65,7 @@ class dashboardController extends Controller
 
 
     /** Sections encore servies par la page Blade etudiant/index (`?section=`) ; les autres sont des pages React (EtudiantMenu::SECTIONS_REACT). */
-    private const SECTIONS_BLADE = ['demandes', 'annonce', 'incidents', 'carte-interactive'];
+    private const SECTIONS_BLADE = ['annonce', 'incidents', 'carte-interactive'];
 
     public function index()
     {
@@ -125,6 +125,7 @@ class dashboardController extends Controller
                 'paiements' => ['Etudiant/MesPaiements', fn () => app(\App\Services\EtudiantPaiements::class)->props($etudiant, request())],
                 'maintenance' => ['Etudiant/Maintenance', fn () => app(\App\Services\EtudiantMaintenance::class)->props($etudiant, request())],
                 'etat-lieux' => ['Etudiant/EtatDesLieux', fn () => app(\App\Services\EtudiantEtatDesLieux::class)->props($etudiant)],
+                'demandes' => ['Etudiant/MesDemandes', fn () => app(\App\Services\EtudiantDemandes::class)->props($etudiant, request('focus') === 'departure')],
                 default => null,
             };
             if ($pageReact) {
@@ -148,14 +149,6 @@ class dashboardController extends Controller
                 ->where('declarant_id', $idEtudiant)
                 ->latest('date_incident')
                 ->limit(10)
-                ->get();
-            $result['departureRequests'] = DepartureRequest::with([
-                    'chambre.cite',
-                    'chambre.batiment',
-                    'settlement',
-                ])
-                ->where('etudiant_id', $idEtudiant)
-                ->latest('date_demande')
                 ->get();
 
 //dd($result);

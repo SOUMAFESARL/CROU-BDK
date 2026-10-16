@@ -4,6 +4,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Services\ReadmissionService;
 use App\Models\{Campagne,NiveauEtude};
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 
 class ReadmissionController extends Controller
 {
@@ -19,7 +20,15 @@ class ReadmissionController extends Controller
         $campagnes=Campagne::where('statut','active')->get();
         $niveaux=NiveauEtude::orderBy('name')->get();
         if ($request->expectsJson()) return response()->json(['data'=>compact('campagnes','niveaux')]);
-        return view('etudiant.readmission',compact('student','campagnes','niveaux'));
+        return Inertia::render('Etudiant/Readmission',[
+            'campagnes'=>$campagnes->map(fn($campagne)=>[
+                'id'=>$campagne->getKey(),
+                'libelle'=>$campagne->annee_campagne ?: 'Campagne en cours',
+                'dateLimite'=>$campagne->date_echeance_demande ? \Carbon\Carbon::parse($campagne->date_echeance_demande)->format('d/m/Y') : null,
+            ])->values(),
+            'niveaux'=>$niveaux->map(fn($niveau)=>['id'=>$niveau->getKey(),'libelle'=>$niveau->name])->values(),
+            'liens'=>['envoyer'=>route('etudiants.readmission.store'),'demandes'=>route('etudiants.dashboard',['section'=>'demandes'])],
+        ]);
     }
     public function store(Request $request, ReadmissionService $service)
     {

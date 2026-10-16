@@ -121,10 +121,22 @@ class DocumentController extends Controller
             ->with('versions')->orderBy('type')->get()->map(function ($document) {
                 $version = $document->versions->firstWhere('id', $document->published_version_id);
                 if (!$version || ($version->snapshot['draft'] ?? true)) return null;
-                return ['id' => $document->id, 'snapshot' => $version->snapshot];
-            })->filter();
-        return response()->view('etudiant.documents', compact('documents'))
-            ->header('Cache-Control', 'private, no-store');
+                $snapshot = $version->snapshot;
+                return [
+                    'id' => $document->id,
+                    'type' => $snapshot['type_label'] ?? 'Document',
+                    'titre' => $snapshot['title'] ?? 'Document',
+                    'portee' => $snapshot['scope_label'] ?? null,
+                    'annee' => $snapshot['academic_year'] ?? null,
+                    'reference' => $snapshot['reference'] ?? null,
+                    'version' => $snapshot['version_label'] ?? null,
+                    'dateApplication' => $snapshot['effective_date'] ?? null,
+                    'url' => route('etudiants.documents.pdf', $document->id),
+                ];
+            })->filter()->values();
+
+        return \Inertia\Inertia::render('Etudiant/DocumentsResidence', ['documents' => $documents])
+            ->toResponse(request())->header('Cache-Control', 'private, no-store');
     }
 
     public function pdf(LegalDocument $document)

@@ -54,6 +54,15 @@ body {
     background: var(--color-accent);
 }
 
+/* Espace étudiant : onglet sélectionné (soulignement + contour de focus) en orange, comme la bordure droite du menu actif */
+.espace-etudiant [data-slot='tabs-indicator'] {
+    background: var(--color-accent);
+}
+
+.espace-etudiant [data-slot='tabs-trigger']:focus-visible {
+    --tw-ring-color: var(--color-accent);
+}
+
 /* Entrée en zoom doux de la carte de connexion */
 @keyframes login-card-enter {
     from {

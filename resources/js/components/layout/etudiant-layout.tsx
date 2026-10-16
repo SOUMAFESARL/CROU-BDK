@@ -102,7 +102,7 @@ export function EtudiantLayout({ title, children }: EtudiantLayoutProps) {
                         <UserMenu />
                     </div>
                 </header>
-                <main className="flex-1 p-4 md:p-6">{children}</main>
+                <main className="espace-etudiant flex-1 p-4 md:p-6">{children}</main>
             </SidebarInset>
         </SidebarProvider>
     );

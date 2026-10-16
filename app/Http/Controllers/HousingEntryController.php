@@ -1,6 +1,8 @@
 <?php
 namespace App\Http\Controllers;
-use App\Models\{HousingEntrySetting,HousingEntryMessage,HousingEntryAppointment};
+use App\Models\{HousingEntrySetting,HousingEntryMessage,HousingEntryAppointment,StudentContractApproval};
+use App\Services\EtudiantMaintenance;
+use Inertia\Inertia;
 use App\Http\Services\ContractTerms;
 use Illuminate\Http\Request;
 class HousingEntryController extends Controller
@@ -59,6 +61,38 @@ class HousingEntryController extends Controller
         $messages=HousingEntryMessage::where('student_id',$student->getKey())->latest()->paginate(20);
         $appointments=HousingEntryAppointment::where('student_id',$student->getKey())->orderByDesc('starts_at')->get();
         if ($request->expectsJson()) return response()->json(['messages'=>$messages,'appointments'=>$appointments]);
-        return view('etudiant.housing-entry',compact('student','messages','appointments'));
+
+        $contract=StudentContractApproval::where('student_id',$student->getKey())->latest()->first();
+        $next=$appointments->first(fn($item)=>$item->status==='scheduled' && $item->ends_at?->isFuture());
+        $appointment=fn($item)=>[
+            'id'=>$item->getKey(),
+            'date'=>$item->starts_at?->locale('fr')->translatedFormat('l j F Y'),
+            'debut'=>$item->starts_at?->format('H:i'),
+            'fin'=>$item->ends_at?->format('H:i'),
+            'lieu'=>$item->location,
+            'statut'=>$item->status==='scheduled' ? ($item->ends_at?->isPast() ? 'passe' : 'programme') : 'annule',
+        ];
+
+        return Inertia::render('Etudiant/EntreeLogement',[
+            'prochainRendezVous'=>$next ? $appointment($next) : null,
+            'rendezVous'=>$appointments->map($appointment)->values(),
+            'contrat'=>$contract ? [
+                'approuve'=>(bool)$contract->approved_at,
+                'date'=>$contract->approved_at?->format('d/m/Y à H:i'),
+            ] : null,
+            'notifications'=>collect($messages->items())->map(fn($item)=>[
+                'id'=>$item->getKey(),
+                'type'=>in_array($item->kind,['proposal','contract','appointment'],true) ? $item->kind : 'autre',
+                'objet'=>$item->subject,
+                'message'=>$item->body,
+                'date'=>$item->created_at?->format('d/m/Y à H:i'),
+                'annule'=>$item->status==='cancelled',
+            ])->values(),
+            'pagination'=>EtudiantMaintenance::pagination($messages),
+            'liens'=>[
+                'contrat'=>route('etudiants.contract.approval'),
+                'demandes'=>route('etudiants.dashboard',['section'=>'demandes']),
+            ],
+        ]);
     }
 }

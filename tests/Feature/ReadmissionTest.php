@@ -101,6 +101,29 @@ class ReadmissionTest extends \Tests\Support\DossierTestCase
             'campagne_id'=>'campaign','niveau'=>'L2','etudiant_id'=>'other',
         ])->assertCreated()->assertJsonPath('data.etudiant_id','student')->assertJsonPath('data.etat_dossier','soumis');
     }
+    public function test_readmission_page_lists_active_campaigns_and_levels(): void
+    {
+        $this->withoutVite();
+        $settings=new \App\Models\ConfigApp(['app_name'=>'Residence test']);
+        $settings->setRelation('region',null)->setRelation('ville',null);
+        $this->mock(\App\Repositories\Interfaces\ConfigAppRepositoryInterface::class)->shouldReceive('getConfig')->andReturn($settings);
+        $this->withoutMiddleware([\App\Http\Middleware\EnforceSystemSecurity::class,\App\Http\Middleware\LogUserActivity::class]);
+        $this->actingAs(Etudiant::findOrFail('student'),'etudiant');
+        preg_match('/data-page="([^"]+)"/',$this->get(route('etudiants.readmission'))->assertOk()->getContent(),$matches);
+        $page=json_decode(html_entity_decode($matches[1]??''),true);
+        $this->assertSame('Etudiant/Readmission',$page['component']);
+        $this->assertSame([['id'=>'campaign','libelle'=>'2026-2027','dateLimite'=>now()->addMonth()->format('d/m/Y')]],$page['props']['campagnes']);
+        $this->assertSame([['id'=>'L2','libelle'=>'Licence 2']],$page['props']['niveaux']);
+    }
+    public function test_react_form_submission_redirects_to_the_requests_section(): void
+    {
+        $this->actingAs(Etudiant::findOrFail('student'),'etudiant');
+        $this->withHeaders(['X-Inertia'=>'true'])->post(route('etudiants.readmission.store'),[
+            'campagne_id'=>'campaign','niveau'=>'L2','moyenne'=>'12.5','credit_valider'=>'60','boursier'=>0,'cas_social'=>'',
+        ])->assertRedirect(route('etudiants.dashboard',['section'=>'demandes']));
+        $this->assertSame('soumis',DemandeEtudiant::firstOrFail()->etat_dossier);
+        $this->assertSame('Votre demande de réadmission a été soumise avec votre compte existant.',session('success'));
+    }
     public function test_admin_import_associates_existing_student_without_creating_an_account(): void
     {
         $controller=app(\App\Http\Controllers\admin\Etudiant\etudiantController::class);

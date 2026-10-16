@@ -1,0 +1,103 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Etudiant;
+use App\Services\EtudiantDemandes;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
+/** Props de la page React « Mes demandes » (Etudiant/MesDemandes). */
+class StudentRequestsPageTest extends \Tests\Support\DossierTestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Schema::create('document_etudiant', function (Blueprint $t) {
+            $t->string('id_document')->primary(); $t->string('etudiant_id'); $t->string('statut')->nullable(); $t->softDeletes(); $t->timestamps();
+        });
+        Schema::create('departure_requests', function (Blueprint $t) {
+            $t->string('id_demande_sortie')->primary(); $t->string('etudiant_id'); $t->string('assignation_id')->nullable();
+            $t->string('chambre_id')->nullable(); $t->string('statut'); $t->string('decision')->nullable(); $t->string('motif')->nullable();
+            $t->string('motif_decision')->nullable(); $t->date('date_demande')->nullable(); $t->date('date_sortie_prevue')->nullable();
+            $t->timestamp('date_decision')->nullable(); $t->timestamps();
+        });
+        Schema::table('campagne', function (Blueprint $t) {
+            $t->string('annee_campagne')->nullable(); $t->date('date_echeance_demande')->nullable();
+        });
+        DB::table('campagne')->update(['annee_campagne' => '2026-2027']);
+    }
+
+    private function props(): array
+    {
+        return app(EtudiantDemandes::class)->props(Etudiant::findOrFail('student'));
+    }
+
+    public function test_student_without_request_gets_empty_state_and_no_departure_form(): void
+    {
+        $props = $this->props();
+
+        $this->assertNull($props['dossier']);
+        $this->assertSame([], $props['autres']);
+        $this->assertNull($props['sortie']['formulaire']);
+        $this->assertSame(route('etudiants.readmission'), $props['liens']['readmission']);
+    }
+
+    public function test_submitted_dossier_can_only_be_cancelled_with_a_reason(): void
+    {
+        $this->dossier();
+
+        $dossier = $this->props()['dossier'];
+
+        $this->assertSame('soumis', $dossier['etat']['code']);
+        $this->assertSame([['etat' => 'annule', 'libelle' => 'Annuler mon dossier', 'motifObligatoire' => true]], $dossier['actions']);
+        $this->assertSame('en_cours', $dossier['etapes'][0]['statut']);
+        $this->assertNull($dossier['decision']);
+    }
+
+    public function test_pre_allocated_dossier_exposes_proposal_answer_and_history(): void
+    {
+        $dossier = $this->eligibleRequest();
+        $assignment = $this->allocate();
+        $this->assertSame('pre_attribue', $dossier->fresh()->etat_dossier);
+
+        $props = $this->props()['dossier'];
+
+        $this->assertSame('pre_attribue', $props['etat']['code']);
+        $this->assertSame([], $props['actions']);
+        $this->assertSame((string) $assignment->getKey(), $props['decision']['assignationId']);
+        $this->assertSame(route('etudiants.validation-demande', ['idDemande' => $dossier->getKey()]), $props['decision']['url']);
+        $this->assertStringContainsString('Chambre room', $props['proposition']['chambre']);
+        $this->assertSame(['fait', 'fait', 'fait', 'en_cours', 'a_venir', 'a_venir'], array_column($props['etapes'], 'statut'));
+        $this->assertSame('Critères vérifiés.', collect($props['historique'])->firstWhere('etat', 'Éligible')['motif']);
+    }
+
+    public function test_departure_form_needs_an_active_room_and_no_pending_request(): void
+    {
+        DB::table('assignation_chambres')->insert(['id_assignation' => 'stay', 'etudiant_id' => 'student', 'chambre_id' => 'room',
+            'campagne_id' => 'campaign', 'statut' => 'confirmee', 'date_assignation' => now()->subMonth()]);
+
+        $formulaire = $this->props()['sortie']['formulaire'];
+        $this->assertSame('room', $formulaire['chambre']);
+        $this->assertSame(today()->addDays(15)->toDateString(), $formulaire['dateMin']);
+        $this->assertSame(route('etudiants.departure-requests.store'), $formulaire['url']);
+
+        DB::table('departure_requests')->insert([
+            ['id_demande_sortie' => 'pending', 'etudiant_id' => 'student', 'chambre_id' => 'room', 'statut' => 'en_attente', 'decision' => 'approuvee',
+                'motif' => 'stage', 'date_demande' => today(), 'date_sortie_prevue' => today()->addMonth(), 'motif_decision' => null],
+            ['id_demande_sortie' => 'old', 'etudiant_id' => 'student', 'chambre_id' => 'room', 'statut' => 'annulee', 'decision' => 'refusee',
+                'motif' => 'autre', 'date_demande' => today()->subYear(), 'date_sortie_prevue' => today()->subYear(), 'motif_decision' => 'Préavis insuffisant'],
+            ['id_demande_sortie' => 'foreign', 'etudiant_id' => 'other', 'chambre_id' => 'room', 'statut' => 'en_attente', 'decision' => null,
+                'motif' => 'stage', 'date_demande' => today(), 'date_sortie_prevue' => today(), 'motif_decision' => null],
+        ]);
+
+        $sortie = $this->props()['sortie'];
+        $this->assertNull($sortie['formulaire']);
+        $this->assertSame('pending', $sortie['enCours']['id']);
+        $this->assertTrue($sortie['enCours']['approuvee']);
+        $this->assertSame('Stage', $sortie['enCours']['motif']);
+        $this->assertSame([['libelle' => 'Refusée', 'ton' => 'danger']], array_column($sortie['historique'], 'statut'));
+        $this->assertSame('Préavis insuffisant', $sortie['historique'][0]['motifDecision']);
+    }
+}

@@ -52,11 +52,8 @@
 @endphp
 
 <x-etudiant-shell :student="$data['etudiant']">
-    {{-- Tableau de bord, Ma chambre, Paiements et Maintenance sont des pages React (EtudiantMenu::SECTIONS_REACT) ; ici : fenêtres de réponse à la proposition. --}}
+    {{-- Tableau de bord, Ma chambre, Paiements, Maintenance, État des lieux et Demandes sont des pages React (EtudiantMenu::SECTIONS_REACT). Ce partial ne garde ici que les styles communs aux sections Blade restantes. --}}
     @include('etudiant.partials.proposition-modals', $data)
-
-    <!-- ── Demandes ── -->
-    @include('etudiant.demandes',$data)
 
     @include('etudiant.incidents', ['reports' => $result['disciplinaryReports'] ?? collect(), 'assignment' => $data['derniereAssignation']])
 
@@ -116,16 +113,9 @@
 
     const requestedSection = new URLSearchParams(window.location.search).get('section');
     if (requestedSection) {
-        const focus = new URLSearchParams(window.location.search).get('focus');
-        const selector = focus === 'departure'
-            ? 'nav a[data-scroll-target="departure-request-section"]'
-            : `nav a[data-page="${requestedSection}"]`;
-        document.querySelector(selector)?.click();
+        document.querySelector(`nav a[data-page="${requestedSection}"]`)?.click();
     }
 
-    @if($errors->hasAny(['departure', 'date_sortie_prevue', 'motif', 'observations', 'conditions_acceptees']))
-        document.querySelector('nav a[data-scroll-target="departure-request-section"]')?.click();
-    @endif
 
     function showToast(msg) {
         const t = document.getElementById('toast');

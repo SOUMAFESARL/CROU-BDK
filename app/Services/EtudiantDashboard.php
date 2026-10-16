@@ -171,7 +171,7 @@ class EtudiantDashboard
      * Réponse à la proposition de chambre : seulement à l'état `pre_attribue`, avec la pré-attribution
      * exigée par DossierWorkflow (`assignation_id`), comme le vérifie AcceptOrRefuseDemande.
      */
-    private function decision($demande, ?Campagne $campagne): ?array
+    public function decision($demande, ?Campagne $campagne): ?array
     {
         if (! $demande || $demande->etat_dossier !== 'pre_attribue' || ! $demande->assignation_id) {
             return null;

@@ -48,6 +48,7 @@ function TabsList({ className, indicator = true, children, ...props }: TabsListP
             {indicator && position && (
                 <span
                     aria-hidden
+                    data-slot="tabs-indicator"
                     className="pointer-events-none absolute bottom-0 left-0 h-0.5 bg-primary transition-[transform,width] duration-300 ease-out motion-reduce:transition-none"
                     style={{ width: position.width, transform: `translateX(${position.left}px)` }}
                 />
