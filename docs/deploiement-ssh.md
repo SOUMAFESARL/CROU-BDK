@@ -11,12 +11,11 @@ une archive par SSH sur le port 5022 et installe les dependances PHP sur le serv
 Le serveur ne requiert ni npm, ni Node.js, ni checkout Git. Le workflow FTP de dev
 reste independant, avec ses secrets dans `development`.
 
-Le domaine doit idealement servir le dossier `public` du projet. Pour les
-hebergements qui servent sa racine et ignorent les reecritures des fichiers
-statiques, le deploiement cree des liens relatifs `build`, `css`, `js`, `fonts`
-et `files` vers leurs dossiers sous `public`. Les URL `/build/assets/...`
-fonctionnent ainsi aussi pour les imports des modules Vite. Les liens sont
-verifies a chaque deploiement ; aucun dossier existant n'est remplace.
+Si l'hebergement expose les fichiers sous `/public/build` plutot que `/build`,
+Laravel detecte le manifeste sous la racine Web et prefixe les URL des assets
+avec `/public`. Une configuration explicite `ASSET_URL` reste prioritaire.
+Vite compile les imports et les polices avec des chemins relatifs pour supporter
+ces deux dispositions. Le domaine peut aussi servir directement le dossier `public`.
 
 ## Secrets de production
 

@@ -67,7 +67,6 @@ tar -C "$stage/app" --exclude='./storage' --exclude='./bootstrap/cache' \
     --exclude='./.env*' --exclude='./.git' --exclude='./public/storage' \
     --exclude='./public/files' --exclude='./public/admin/assets/images' \
     -cf - . | tar -xf -
-bash scripts/prepare-public-assets.sh
 # Composer runs without Laravel scripts until dependencies are complete.
 "${composer_command[@]}" install --no-dev --prefer-dist --no-interaction --optimize-autoloader --no-scripts
 # The historical sessions table cannot store Laravel string IDs and user UUIDs.

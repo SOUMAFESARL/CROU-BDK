@@ -171,6 +171,16 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Some hosts expose public/ below the domain root and bypass .htaccess
+        // for static files. Respect an explicit CDN/ASSET_URL configuration.
+        $request = $this->app['request'];
+        $documentRoot = $request->server('DOCUMENT_ROOT');
+        if (! config('app.asset_url') && $documentRoot
+            && realpath($documentRoot) !== realpath(public_path())
+            && is_file(rtrim($documentRoot, '/\\').'/public/build/manifest.json')) {
+            $this->app['url']->useAssetOrigin($request->getSchemeAndHttpHost().$request->getBasePath().'/public');
+        }
+
         Blade::if('adminroute', fn (string $route) => app(\App\Services\AdminAccess::class)->allows(auth('admin')->user(), $route));
         Blade::if('adminpermission', fn (string ...$permissions) => app(\App\Services\AdminViewAccess::class)->any(auth('admin')->user(), $permissions));
         Blade::if('adminblock', fn (string $block) => app(\App\Services\AdminViewAccess::class)->allows(auth('admin')->user(), $block));
