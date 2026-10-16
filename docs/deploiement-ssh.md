@@ -11,6 +11,13 @@ une archive par SSH sur le port 5022 et installe les dependances PHP sur le serv
 Le serveur ne requiert ni npm, ni Node.js, ni checkout Git. Le workflow FTP de dev
 reste independant, avec ses secrets dans `development`.
 
+Le domaine doit idealement servir le dossier `public` du projet. Pour les
+hebergements qui servent sa racine et ignorent les reecritures des fichiers
+statiques, le deploiement cree des liens relatifs `build`, `css`, `js`, `fonts`
+et `files` vers leurs dossiers sous `public`. Les URL `/build/assets/...`
+fonctionnent ainsi aussi pour les imports des modules Vite. Les liens sont
+verifies a chaque deploiement ; aucun dossier existant n'est remplace.
+
 ## Secrets de production
 
 Configurer dans GitHub > Settings > Environments > production :
