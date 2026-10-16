@@ -119,7 +119,88 @@ class LegalDocumentsTest extends TestCase
     public function test_signature_module_is_removed_and_editor_is_replaced(): void
     {
         $this->assertFalse(\Illuminate\Support\Facades\Route::has('admin.parametrage.legal-signatories.index'));
-        $this->get($this->route('create'))->assertOk()->assertSee('name="file"', false)->assertDontSee('name="body"', false)->assertDontSee('summernote', false);
-        $this->get($this->route('index'))->assertOk()->assertDontSee('Configurer les signatures');
+        $page = $this->page($this->route('create', ['type' => 'guide_resident']));
+        $this->assertSame('Admin/Parametrage/DocumentsLegaux/Edit', $page['component']);
+        $this->assertNull($page['props']['document']['id']);
+        $this->assertSame('Guide du résident', $page['props']['document']['type_label']);
+        $this->assertArrayNotHasKey('body', $page['props']['document']);
+        $this->assertSame($this->route('store'), $page['props']['urls']['submit']);
+        $this->assertNull($page['props']['urls']['publish']);
+        $this->get($this->route('create', ['type' => 'inconnu']))->assertNotFound();
+    }
+
+    public function test_index_page_lists_documents_with_counters_and_filters(): void
+    {
+        $this->post($this->route('store'), $this->uploadData())->assertSessionHasNoErrors();
+        $this->post($this->route('store'), ['type' => 'guide_resident'] + $this->uploadData('guide.pdf'))->assertSessionHasNoErrors();
+        $document = LegalDocument::where('type', 'reglement_interieur')->firstOrFail();
+        $this->post($this->route('publish', $document), ['lock_version' => $document->lock_version])->assertSessionHasNoErrors();
+
+        $page = $this->page($this->route('index'));
+        $this->assertSame('Admin/Parametrage/DocumentsLegaux/Index', $page['component']);
+        $this->assertSame(['total' => 2, 'valides' => 1, 'brouillons' => 1, 'types_sans_version' => 3], $page['props']['kpis']);
+        $this->assertCount(4, $page['props']['types']);
+        $this->assertSame(2, $page['props']['documents']['total']);
+        $this->assertSame($this->route('edit', $document), collect($page['props']['documents']['data'])->firstWhere('id', (string) $document->id)['urls']['edit']);
+
+        $filtre = $this->page($this->route('index', ['statut' => 'published']))['props'];
+        $this->assertSame(1, $filtre['documents']['total']);
+        $this->assertSame('published', $filtre['documents']['data'][0]['status']);
+        $this->assertSame(1, $this->page($this->route('index', ['type' => 'guide_resident']))['props']['documents']['total']);
+        // Valeurs inconnues ignorées.
+        $ignore = $this->page($this->route('index', ['type' => 'x', 'statut' => 'y']))['props'];
+        $this->assertSame(['type' => '', 'statut' => ''], $ignore['filters']);
+        $this->assertSame(2, $ignore['documents']['total']);
+    }
+
+    public function test_edit_page_exposes_versions_and_publish_action(): void
+    {
+        $this->post($this->route('store'), $this->uploadData())->assertSessionHasNoErrors();
+        $document = LegalDocument::firstOrFail();
+
+        $brouillon = $this->page($this->route('edit', $document))['props'];
+        $this->assertSame('reglement.pdf', $brouillon['document']['file_name']);
+        $this->assertSame($this->route('publish', $document), $brouillon['urls']['publish']);
+        $this->assertSame($this->route('update', $document), $brouillon['urls']['submit']);
+        $this->assertArrayNotHasKey('file_path', $brouillon['document']);
+
+        $this->post($this->route('publish', $document), ['lock_version' => $document->lock_version])->assertSessionHasNoErrors();
+        $valide = $this->page($this->route('edit', $document))['props'];
+        $this->assertSame('published', $valide['document']['status']);
+        $this->assertNull($valide['urls']['publish']);
+        $this->assertCount(1, $valide['versions']);
+        $this->assertSame(1, $valide['versions'][0]['revision']);
+    }
+
+    public function test_document_can_be_removed_with_its_history_and_files(): void
+    {
+        $this->post($this->route('store'), $this->uploadData())->assertSessionHasNoErrors();
+        $document = LegalDocument::firstOrFail();
+        $this->post($this->route('publish', $document), ['lock_version' => $document->lock_version])->assertSessionHasNoErrors();
+        $document->refresh();
+        $this->put($this->route('update', $document), $this->uploadData('nouveau.pdf') + ['lock_version' => $document->lock_version])->assertSessionHasNoErrors();
+        $this->assertCount(2, Storage::disk('local')->allFiles('legal-documents'));
+        $this->assertSame($this->route('destroy', $document), $this->page($this->route('edit', $document))['props']['urls']['destroy']);
+
+        $this->admin(2);
+        $this->delete($this->route('destroy', $document))->assertForbidden();
+        $this->admin();
+
+        $this->delete($this->route('destroy', $document))->assertRedirect($this->route('index'));
+        $this->assertSame(0, LegalDocument::count());
+        $this->assertSame(0, DB::table('legal_document_versions')->count());
+        $this->assertCount(0, Storage::disk('local')->allFiles('legal-documents'));
+        $this->actingAs(new Etudiant(['id_etudiant' => 'student']), 'etudiant');
+        $this->get(route('etudiants.documents.pdf', $document->id))->assertNotFound();
+    }
+
+    /** Page Inertia rendue (lue dans `data-page` : un middleware global reconstruit la réponse). */
+    private function page(string $url): array
+    {
+        $this->withoutVite();
+        $html = $this->get($url)->assertOk()->getContent();
+        preg_match('/data-page="([^"]+)"/', $html, $matches);
+
+        return json_decode(html_entity_decode($matches[1] ?? ''), true) ?? [];
     }
 }

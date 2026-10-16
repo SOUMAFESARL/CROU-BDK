@@ -6,20 +6,70 @@ use App\Http\Controllers\Controller;
 use App\Http\Services\LegalDocumentService;
 use App\Models\LegalDocument;
 use App\Models\LegalDocumentVersion;
-use App\Models\LegalSignatory;
+use App\Services\AdminAccess;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Inertia\Inertia;
 
 class LegalDocumentController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return view('admin.parametrage.legal_documents.index', [
-            'documents' => LegalDocument::latest('updated_at')->paginate(20),
-            'types' => LegalDocument::TYPES,
+        $type = array_key_exists((string) $request->query('type'), LegalDocument::TYPES) ? (string) $request->query('type') : '';
+        $statut = in_array($request->query('statut'), ['published', 'draft'], true) ? (string) $request->query('statut') : '';
+        $url = $this->urlSiAutorise($request);
+
+        $documents = LegalDocument::query()
+            ->when($type, fn ($query) => $query->where('type', $type))
+            ->when($statut === 'published', fn ($query) => $query->where('status', 'published'))
+            ->when($statut === 'draft', fn ($query) => $query->where('status', '!=', 'published'))
+            ->latest('updated_at')
+            ->paginate(10)
+            ->withQueryString();
+
+        $parType = LegalDocument::query()
+            ->selectRaw("type, count(*) as total, sum(case when status = 'published' then 1 else 0 end) as valides")
+            ->groupBy('type')->get()->keyBy('type');
+        $total = (int) $parType->sum('total');
+        $valides = (int) $parType->sum('valides');
+
+        return Inertia::render('Admin/Parametrage/DocumentsLegaux/Index', [
+            'documents' => $documents->through(fn (LegalDocument $document) => [
+                'id' => (string) $document->id,
+                'title' => $document->title,
+                'type' => $document->type,
+                'type_label' => LegalDocument::TYPES[$document->type] ?? $document->type,
+                'reference' => $document->reference,
+                'version_label' => $document->version_label,
+                'file_name' => $document->file_name,
+                'status' => $document->status === 'published' ? 'published' : 'draft',
+                'updated_at' => $document->updated_at?->format('Y-m-d H:i'),
+                'urls' => [
+                    'edit' => $url('admin.parametrage.legal-documents.edit', $document),
+                    'pdf' => $url('admin.parametrage.legal-documents.pdf', $document),
+                    'destroy' => $url('admin.parametrage.legal-documents.destroy', $document),
+                ],
+            ]),
+            'types' => collect(LegalDocument::TYPES)->map(fn (string $label, string $code) => [
+                'value' => $code,
+                'label' => $label,
+                'total' => (int) ($parType[$code]->total ?? 0),
+                'valides' => (int) ($parType[$code]->valides ?? 0),
+                'create' => $url('admin.parametrage.legal-documents.create', ['type' => $code]),
+            ])->values(),
+            'kpis' => [
+                'total' => $total,
+                'valides' => $valides,
+                'brouillons' => $total - $valides,
+                'types_sans_version' => collect(LegalDocument::TYPES)->keys()
+                    ->filter(fn (string $code) => (int) ($parType[$code]->valides ?? 0) === 0)->count(),
+            ],
+            'filters' => ['type' => $type, 'statut' => $statut],
+            'urls' => ['index' => route('admin.parametrage.legal-documents.index')],
         ]);
     }
 
@@ -47,16 +97,67 @@ class LegalDocumentController extends Controller
         return redirect()->route('admin.parametrage.legal-documents.edit', $document)->with('success', 'Brouillon enregistré.');
     }
 
-    public function edit(LegalDocument $document) { return $this->editor($document); }
+    public function edit(LegalDocument $document)
+    {
+        return $this->editor($document);
+    }
 
     private function editor(LegalDocument $document)
     {
-        return response()->view('admin.parametrage.legal_documents.edit', [
-            'document' => $document, 'types' => LegalDocument::TYPES,
-            'versions' => $document->exists
+        $request = request();
+        $url = $this->urlSiAutorise($request);
+        $existe = $document->exists;
+
+        return Inertia::render('Admin/Parametrage/DocumentsLegaux/Edit', [
+            'document' => [
+                'id' => $existe ? (string) $document->id : null,
+                'type' => $document->type,
+                'type_label' => LegalDocument::TYPES[$document->type] ?? $document->type,
+                'title' => (string) $document->title,
+                'reference' => (string) $document->reference,
+                'version_label' => (string) $document->version_label,
+                'institution' => (string) $document->institution,
+                'scope_label' => (string) $document->scope_label,
+                'academic_year' => (string) $document->academic_year,
+                'effective_date' => $document->effective_date?->format('Y-m-d') ?? '',
+                'lock_version' => (int) $document->lock_version,
+                'status' => $document->status === 'published' ? 'published' : 'draft',
+                'file_name' => $document->file_path ? ($document->file_name ?: 'document.pdf') : null,
+                // Document rédigé avec l'ancien éditeur : il faut téléverser sa version PDF.
+                'ancien_editeur' => $existe && !$document->file_path,
+                'updated_at' => $existe ? $document->updated_at?->format('Y-m-d H:i') : null,
+            ],
+            'versions' => $existe
                 ? $document->versions()->orderByDesc('revision')->get(['id', 'legal_document_id', 'revision', 'created_at'])
-                : collect(),
-        ])->header('Cache-Control', 'private, no-store');
+                    ->map(fn (LegalDocumentVersion $version) => [
+                        'id' => (string) $version->id,
+                        'revision' => (int) $version->revision,
+                        'created_at' => $version->created_at?->format('Y-m-d H:i'),
+                        'pdf' => $url('admin.parametrage.legal-documents.versions.pdf', [$document, $version]),
+                    ])->values()
+                : [],
+            'urls' => [
+                'index' => route('admin.parametrage.legal-documents.index'),
+                'submit' => $existe
+                    ? $url('admin.parametrage.legal-documents.update', $document)
+                    : $url('admin.parametrage.legal-documents.store'),
+                'pdf' => $existe && $document->file_path ? $url('admin.parametrage.legal-documents.pdf', $document) : null,
+                'publish' => $existe && $document->file_path && $document->status !== 'published'
+                    ? $url('admin.parametrage.legal-documents.publish', $document) : null,
+                'destroy' => $existe ? $url('admin.parametrage.legal-documents.destroy', $document) : null,
+            ],
+        ])->toResponse($request)->header('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * URL d'une route admin, ou null si l'administrateur connecté n'y a pas accès (remplace `@adminroute`).
+     */
+    private function urlSiAutorise(Request $request): \Closure
+    {
+        $access = app(AdminAccess::class);
+        $admin = $request->user('admin');
+
+        return fn (string $route, mixed $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
     }
 
     public function update(Request $request, LegalDocument $document)
@@ -93,6 +194,31 @@ class LegalDocumentController extends Controller
         });
         return redirect()->route('admin.parametrage.legal-documents.edit', $document)
             ->with('success', 'Version validée : le fichier est conservé dans l’historique.');
+    }
+
+    /**
+     * Retire le document : il disparaît de l'espace des résidents, avec son historique et ses fichiers PDF.
+     */
+    public function destroy(LegalDocument $document)
+    {
+        $fichiers = DB::transaction(function () use ($document) {
+            $locked = LegalDocument::whereKey($document->id)->lockForUpdate()->firstOrFail();
+            $fichiers = $locked->versions()->get()
+                ->map(fn (LegalDocumentVersion $version) => $version->snapshot['file_path'] ?? null)
+                ->push($locked->file_path);
+            $locked->versions()->delete();
+            $locked->delete();
+
+            return $fichiers;
+        });
+
+        // Fichiers privés propres à ce document (chaque téléversement a son propre chemin).
+        $chemins = $fichiers->filter(fn ($chemin) => is_string($chemin) && str_starts_with($chemin, 'legal-documents/') && !str_contains($chemin, '..'))
+            ->unique()->values()->all();
+        if ($chemins) Storage::disk('local')->delete($chemins);
+
+        return redirect()->route('admin.parametrage.legal-documents.index')
+            ->with('success', 'Document retiré : il n’est plus disponible pour les résidents.');
     }
 
     public function preview(LegalDocument $document, LegalDocumentService $service)

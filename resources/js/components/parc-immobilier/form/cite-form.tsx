@@ -144,7 +144,7 @@ type CiteFormProps = {
 export function CiteForm({ item, campusId, typesCite, users, reglements, submitUrl, cancelUrl }: CiteFormProps) {
     const isEdit = item !== null;
     const { errors: serverErrors } = usePage<SharedProps>().props;
-    const wizard = useWizard(STEPS.length);
+    const wizard = useWizard(STEPS.length, { toutesAccessibles: isEdit });
     const [submitting, setSubmitting] = useState(false);
     const [plan, setPlan] = useState<File | null>(null);
     const [planError, setPlanError] = useState<string | null>(null);

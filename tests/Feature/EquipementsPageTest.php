@@ -34,12 +34,17 @@ class EquipementsPageTest extends TestCase
         }
     }
 
+    /** Props de la page Inertia `Admin/Hebergement/Equipements/Index`. */
     private function page(array $query): array
     {
         $request = Request::create('/admin/gestion-hebergement/equipements', 'GET', $query);
+        $request->headers->set('X-Inertia', 'true');
         $this->app->instance('request', $request);
 
-        return app(EquipementController::class)->index($request)->getData();
+        $page = app()->call([app(EquipementController::class), 'index'], ['request' => $request])->toResponse($request)->getData(true);
+        $this->assertSame('Admin/Hebergement/Equipements/Index', $page['component']);
+
+        return $page['props'];
     }
 
     public function test_indicateurs_et_pagination_par_dix(): void
@@ -47,19 +52,23 @@ class EquipementsPageTest extends TestCase
         $data = $this->page([]);
 
         $this->assertSame(['tous' => 13, 'disponible' => 11, 'faible' => 1, 'rupture' => 1], $data['stats']);
-        $this->assertSame(13, $data['equipements']->total());
-        $this->assertCount(10, $data['equipements']->items());
+        $this->assertSame(13, $data['equipements']['total']);
+        $this->assertCount(10, $data['equipements']['data']);
         $this->assertEquals(253, $data['stockTotal']);
+        // Sans admin connecté, aucune action n'est proposée.
+        $this->assertNull($data['urls']['store']);
+        $this->assertNull($data['equipements']['data'][0]['urls']['destroy']);
     }
 
     public function test_filtres_statut_type_et_recherche_sans_accents(): void
     {
-        $this->assertSame(['Oreiller'], collect($this->page(['statut' => 'faible'])['equipements']->items())->pluck('name')->all());
-        $this->assertSame(['Chaise'], collect($this->page(['statut' => 'rupture'])['equipements']->items())->pluck('name')->all());
-        $this->assertSame(2, $this->page(['type' => 'lit'])['equipements']->total());
-        $this->assertSame(2, $this->page(['q' => 'LITERIE'])['equipements']->total());
-        $this->assertSame('tous', $this->page(['statut' => 'inconnu'])['statut']);
-        $this->assertSame('', $this->page(['type' => 'inconnu'])['type']);
+        $this->assertSame(['Oreiller'], array_column($this->page(['statut' => 'faible'])['equipements']['data'], 'name'));
+        $this->assertSame('faible', $this->page(['statut' => 'faible'])['equipements']['data'][0]['statut']);
+        $this->assertSame(['Chaise'], array_column($this->page(['statut' => 'rupture'])['equipements']['data'], 'name'));
+        $this->assertSame(2, $this->page(['type' => 'lit'])['equipements']['total']);
+        $this->assertSame(2, $this->page(['q' => 'LITERIE'])['equipements']['total']);
+        $this->assertSame('tous', $this->page(['statut' => 'inconnu'])['filters']['statut']);
+        $this->assertSame('', $this->page(['type' => 'inconnu'])['filters']['type']);
     }
 
     public function test_suppression_depuis_le_formulaire_redirige_avec_un_message(): void
@@ -71,11 +80,5 @@ class EquipementsPageTest extends TestCase
         $this->assertTrue($response->isRedirect());
         $this->assertSame('Équipement supprimé avec succès.', session('success'));
         $this->assertNull(Equipement::find('e2'));
-    }
-
-    public function test_la_vue_compile(): void
-    {
-        $compiled = app('blade.compiler')->compileString(file_get_contents(resource_path('views/admin/hebergement/equipements/index.blade.php')));
-        $this->assertNotEmpty(token_get_all($compiled, TOKEN_PARSE));
     }
 }

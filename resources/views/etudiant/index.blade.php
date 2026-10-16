@@ -17,10 +17,11 @@
     <!-- Pour SweetAlert2 (optionnel) -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <link rel="stylesheet" href="{{ asset('css/admin-shell.css') }}">
-    <link rel="stylesheet" href="{{ asset('files/assets/css/student-space.css') }}?v=20261014b">
+    <link rel="stylesheet" href="{{ asset('files/assets/css/student-space.css') }}?v=20261016b">
 
 </head>
-<body class="{{ systemConfig('force_dark_mode', false) ? 'app-dark-mode' : '' }}">
+{{-- as-refonte : DM Sans / Segoe UI au lieu d'Arial (imposé par typography.css via system-theme.css). --}}
+<body class="as-refonte {{ systemConfig('force_dark_mode', false) ? 'app-dark-mode' : '' }}">
 
 
 
@@ -51,28 +52,11 @@
 @endphp
 
 <x-etudiant-shell :student="$data['etudiant']">
-   @includeIf('etudiant.dashboard',$data)
+    {{-- Tableau de bord, Ma chambre, Paiements et Maintenance sont des pages React (EtudiantMenu::SECTIONS_REACT) ; ici : fenêtres de réponse à la proposition. --}}
+    @include('etudiant.partials.proposition-modals', $data)
 
-    <!-- ── Ma Chambre ── -->
-
-    @include('etudiant.chambre',$data)
     <!-- ── Demandes ── -->
     @include('etudiant.demandes',$data)
-
-    @include('etudiant.etat-lieux',$data)
-    <!-- ── Paiements ── -->
-  @include('etudiant.paiements', [
-    'paymentProviders' => $result['paymentProviders'] ?? collect(),
-    'etudiant' => $result['paiementData']['etudiant'] ?? null,
-    'loyers' => $result['paiementData']['loyers'] ?? collect(),
-    'paiements' => $result['paiementData']['paiements'] ?? collect(),
-    'stats' => $result['paiementData']['stats'] ?? [],
-    'impayes' => $result['paiementData']['impayes'] ?? collect(),
-    'prochainPaiement' => $result['paiementData']['prochainPaiement'] ?? null,
-])
-
-    <!-- ── Maintenance ── -->
-    @include('etudiant.maintenance',$data)
 
     @include('etudiant.incidents', ['reports' => $result['disciplinaryReports'] ?? collect(), 'assignment' => $data['derniereAssignation']])
 
@@ -92,6 +76,7 @@
     const shellCrumb = document.querySelector('[data-shell-crumb-current]');
     const shellCrumbHome = document.querySelectorAll('[data-shell-crumb-home]');
 
+    // Les sections migrées en React (EtudiantMenu::SECTIONS_REACT) n'ont pas de data-page : lien classique.
     document.querySelectorAll('#nav a[data-page]').forEach(link => {
         link.addEventListener('click', (event) => {
             event.preventDefault();
@@ -142,21 +127,6 @@
         document.querySelector('nav a[data-scroll-target="departure-request-section"]')?.click();
     @endif
 
-    // « Mon profil » (menu de l'avatar) : ouvre le modal du tableau de bord quand il existe.
-    const profileModalAvailable = () => document.getElementById('studentProfileModal') && typeof openProfileModal === 'function';
-    document.querySelectorAll('[data-student-profile]').forEach(link => {
-        link.addEventListener('click', (event) => {
-            if (!profileModalAvailable()) return;
-            event.preventDefault();
-            link.closest('.as-dropdown').hidden = true;
-            document.querySelector('[data-shell-user-toggle]')?.setAttribute('aria-expanded', 'false');
-            openProfileModal();
-        });
-    });
-    if (window.location.hash === '#profil' && profileModalAvailable()) {
-        openProfileModal();
-    }
-
     function showToast(msg) {
         const t = document.getElementById('toast');
         t.textContent = msg;
@@ -177,12 +147,6 @@
         document.getElementById('badge-dem1').textContent = 'Refusée';
         document.getElementById('actions-dem1').innerHTML = '<span style="font-size:var(--app-font-min, 15px);color:var(--red-400);font-weight:600;">Offre refusée. Une nouvelle proposition vous sera envoyée.</span>';
         showToast('Offre refusée.');
-    }
-
-    function submitMaintenance() {
-        const sel = document.querySelector('.form-select').value;
-        if (sel === '— Sélectionner —') { showToast('Veuillez choisir une catégorie.'); return; }
-        showToast('Demande soumise avec succès !');
     }
 
     function AcceptOrRefuseDemande(demandeId, action) {

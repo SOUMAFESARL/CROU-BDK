@@ -15,13 +15,46 @@ class DocumentController extends Controller
     public function personal()
     {
         $id = $this->student()->getKey();
+        $date = fn ($valeur) => $valeur?->format('d/m/Y');
         $receipts = \App\Models\Paiement::where('resident_id', $id)->whereIn('statut_paiement', ['valide', 'rembourse'])->latest('date_paiement')->get();
         $inventories = \App\Models\EtatDesLieux::where('id_etudiant', $id)->latest('date_etat')->get();
         $attachments = \App\Models\DocumentEtudiant::where('etudiant_id', $id)->latest()->get();
         $departures = \App\Models\DepartureRequest::where('etudiant_id', $id)->whereHas('settlement')->latest('date_demande')->get();
         $hasContract = $this->student()->assignationsChambre()->where('statut', 'confirmee')->exists();
-        return response()->view('etudiant.personal-documents', compact('receipts', 'inventories', 'attachments', 'departures', 'hasContract'))
-            ->header('Cache-Control', 'private, no-store');
+
+        return \Inertia\Inertia::render('Etudiant/MesDocuments', [
+            'contrat' => $hasContract ? [
+                'pdfUrl' => route('etudiants.pdfContrat'),
+                'approbationUrl' => route('etudiants.contract.approval'),
+            ] : null,
+            'etatsDesLieux' => $inventories->map(fn ($item) => [
+                'id' => $item->getKey(),
+                'type' => $item->type_etat === 'entree' ? 'entree' : 'sortie',
+                'date' => $date($item->date_etat),
+                'url' => route('etudiants.documents.inventory', $item->getKey()),
+            ])->values(),
+            'recus' => $receipts->map(fn ($item) => [
+                'id' => $item->getKey(),
+                'restitution' => $item->statut_paiement === 'rembourse',
+                'date' => $date($item->date_paiement),
+                'numero' => $item->numero_paiement ?? $item->getKey(),
+                'montant' => number_format((float) $item->montant, 0, ',', ' ').' '.($item->devise ?? 'XOF'),
+                'url' => route('etudiants.documents.receipt', $item->getKey()),
+            ])->values(),
+            'justificatifs' => $attachments->map(fn ($item) => [
+                'id' => $item->getKey(),
+                'type' => $item->type_document ?: 'Document',
+                'date' => $date($item->created_at),
+                'statut' => $item->statut,
+                'statutLibelle' => $item->statut_libelle,
+                'url' => route('etudiants.documents.attachment', $item->getKey()),
+            ])->values(),
+            'decomptes' => $departures->map(fn ($item) => [
+                'id' => $item->getKey(),
+                'date' => $date($item->date_demande),
+                'url' => route('etudiants.documents.settlement', $item->getKey()),
+            ])->values(),
+        ])->toResponse(request())->header('Cache-Control', 'private, no-store');
     }
 
     public function receipt(string $id)

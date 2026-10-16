@@ -10,7 +10,10 @@ use App\Models\AssignationChambre;
 use App\Models\Etudiant;
 use App\Models\Sanction;
 use App\Models\SanctionHistory;
+use App\Http\Services\DisciplinaryImpactService;
+use App\Services\AdminAccess;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -18,11 +21,50 @@ class SanctionController extends Controller
 {
     public function index(Request $request)
     {
+        $filtres = [
+            'type' => in_array($request->query('type'), array_keys(DisciplinaryImpactService::LABELS), true) ? $request->query('type') : '',
+            'statut' => in_array($request->query('statut'), ['active', 'levee', 'annulee'], true) ? $request->query('statut') : '',
+            'cite' => (string) $request->query('cite', ''),
+        ];
         $sanctions = Sanction::query()->with(['etudiant:id_etudiant,name,matricule', 'cite:id_cite,name', 'batiment:id_batiment,name', 'chambre:id_chambre,numero_chambre', 'historique'])
-            ->when($request->filled('type'), fn ($query) => $query->where('type', $request->string('type')))
-            ->when($request->filled('statut'), fn ($query) => $query->where('statut', $request->string('statut')))
-            ->when($request->filled('cite'), fn ($query) => $query->where('cite_id', $request->string('cite')))
-            ->latest('date_decision')->paginate(15)->withQueryString();
+            ->when($filtres['type'], fn ($query, $type) => $query->where('type', $type))
+            ->when($filtres['statut'], fn ($query, $statut) => $query->where('statut', $statut))
+            ->when($filtres['cite'], fn ($query, $cite) => $query->where('cite_id', $cite))
+            ->latest('date_decision')->paginate(10)->withQueryString();
+
+        $access = app(AdminAccess::class);
+        $admin = $request->user('admin');
+        $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+        $peutChanger = $access->allows($admin, 'admin.hebergement.vie_residentielle.sanctions.status');
+
+        $sanctions->through(fn (Sanction $sanction) => [
+            'id' => $sanction->id_sanction,
+            'numero' => $sanction->numero_sanction,
+            'date_decision' => $sanction->date_decision?->toDateString(),
+            'portee' => $sanction->scope_type,
+            'cible' => match ($sanction->scope_type) {
+                'cite' => ['titre' => 'Toute la cité '.($sanction->cite?->name ?? ''), 'detail' => 'Tous les résidents de la cité'],
+                'batiment' => ['titre' => 'Tout le bâtiment '.($sanction->batiment?->name ?? ''), 'detail' => $sanction->cite?->name],
+                'chambre' => ['titre' => 'Toute la chambre '.($sanction->chambre?->numero_chambre ?? ''), 'detail' => trim(($sanction->cite?->name ?? '').' · '.($sanction->batiment?->name ?? ''), ' ·')],
+                default => ['titre' => $sanction->etudiant?->name ?? 'Résident inconnu', 'detail' => trim(($sanction->etudiant?->matricule ?? '').' · Chambre '.($sanction->chambre?->numero_chambre ?? '—'), ' ·')],
+            },
+            'type' => $sanction->type,
+            'type_label' => DisciplinaryImpactService::LABELS[$sanction->type] ?? ucfirst((string) $sanction->type),
+            'motif' => $sanction->motif,
+            'faits' => $sanction->faits_reproches,
+            'date_debut' => $sanction->date_debut?->toDateString(),
+            'date_fin' => $sanction->date_fin?->toDateString(),
+            'statut' => $sanction->statut,
+            'historique' => $sanction->historique->sortByDesc('created_at')->map(fn ($item) => [
+                'id' => $item->getKey(),
+                'action' => $item->action,
+                'details' => $item->details,
+                'ancien_statut' => $item->ancien_statut,
+                'nouveau_statut' => $item->nouveau_statut,
+                'date' => $item->created_at ? \Carbon\Carbon::parse($item->created_at)->format('Y-m-d H:i') : null,
+            ])->values(),
+            'url_statut' => $peutChanger ? route('admin.hebergement.vie_residentielle.sanctions.status', $sanction) : null,
+        ]);
 
         $cites = Cite::query()->orderBy('name')->get(['id_cite', 'name']);
         $buildings = Batiment::query()->orderBy('name')->get(['id_batiment', 'cite_id', 'name']);
@@ -39,14 +81,28 @@ class SanctionController extends Controller
             'matricule' => $assignment->etudiant->matricule,
             'chambre_id' => $assignment->chambre_id,
         ])->values();
-        $stats = [
-            'total' => Sanction::count(),
-            'active' => Sanction::where('statut', 'active')->count(),
-            'avertissements' => Sanction::where('type', 'avertissement')->where('statut', 'active')->count(),
-            'suspensions' => Sanction::where('type', 'suspension')->where('statut', 'active')->count(),
-        ];
 
-        return view('admin.hebergement.vie_residentielle.sanctions.index', compact('sanctions', 'residents', 'cites', 'buildings', 'rooms', 'stats'));
+        return Inertia::render('Admin/Hebergement/Discipline/Sanctions', [
+            'sanctions' => $sanctions,
+            'stats' => [
+                'total' => Sanction::count(),
+                'active' => Sanction::where('statut', 'active')->count(),
+                'avertissements' => Sanction::where('type', 'avertissement')->where('statut', 'active')->count(),
+                'suspensions' => Sanction::where('type', 'suspension')->where('statut', 'active')->count(),
+            ],
+            'filters' => $filtres,
+            'structure' => [
+                'cites' => $cites->map(fn ($cite) => ['id' => $cite->id_cite, 'name' => $cite->name])->values(),
+                'batiments' => $buildings->map(fn ($batiment) => ['id' => $batiment->id_batiment, 'cite_id' => $batiment->cite_id, 'name' => $batiment->name])->values(),
+                'chambres' => $rooms->map(fn ($chambre) => ['id' => $chambre->id_chambre, 'batiment_id' => $chambre->batiment_id, 'numero' => $chambre->numero_chambre])->values(),
+                'residents' => $residents,
+            ],
+            'urls' => [
+                'index' => route('admin.hebergement.vie_residentielle.sanctions.index'),
+                'store' => $url('admin.hebergement.vie_residentielle.sanctions.store'),
+                'incidents' => $url('admin.hebergement.vie_residentielle.incidents.index'),
+            ],
+        ]);
     }
 
     public function store(Request $request)

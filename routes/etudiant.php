@@ -44,6 +44,7 @@ Route::middleware(['etudiants'])->group(function () {
         Route::post('/demande/{idDemande}/accepter', 'AcceptOrRefuseDemande')->name('accepter-demande');
         Route::post('/demande/{idDemande}/refuser', 'AcceptOrRefuseDemande')->name('refuser-demande');
         Route::post('/demandes-sortie', 'storeDepartureRequest')->name('departure-requests.store');
+        Route::get('/profil', 'profile')->name('profile');
         Route::patch('/profil', 'updateProfile')->name('profile.update');
         Route::put('/profil/mot-de-passe', 'updatePassword')->middleware([\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class, 'throttle:6,1'])->name('profile.password');
 
@@ -53,7 +54,6 @@ Route::middleware(['etudiants'])->group(function () {
         Route::post('/demande/ot',  'storeOrdreTravail')->name('store_ot');
         Route::get('/contrat/{id?}',  'pdfContrat')->name('pdfContrat');
         Route::get('/annonce',  'annonces')->name('annonces');
-        Route::get('/paiements/ajax', 'getPaiementsAjax')->name('paiements.ajax');
     });
 
 

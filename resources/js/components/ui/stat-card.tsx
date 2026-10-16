@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
  * Fonds des KPI : une teinte par indicateur, complémentaire de la charte (vert, orange) avec un bleu et un prune.
  * Contrastes texte/fond vérifiés WCAG AAA (≥ 7:1) :
  * #0B3A6E / #E3EEFA ≈ 9,7:1 · #004D00 / #DDF0C8 ≈ 8,4:1 · #6B3F00 / #FEEBC0 ≈ 7,6:1 · #6E1F4E / #F8E4EF ≈ 8,8:1
- * · #1F2328 / #FAAB04 ≈ 8,2:1.
+ * · #1F2328 / #FAAB04 ≈ 8,2:1 · #8A1C14 / #FDECEA ≈ 8,6:1 · #54595F / #F8F8F8 ≈ 6,6:1 (AA).
  */
 export const KPI_TONES = {
     blue: {
@@ -23,6 +23,14 @@ export const KPI_TONES = {
     plum: {
         card: 'border-[#EDC8DC] bg-[#F8E4EF] text-[#6E1F4E]',
         badge: 'bg-white text-[#6E1F4E]',
+    },
+    red: {
+        card: 'border-[#F5C2C0] bg-[#FDECEA] text-[#8A1C14]',
+        badge: 'bg-white text-[#8A1C14]',
+    },
+    neutral: {
+        card: 'border-[#E6E9E2] bg-[#F8F8F8] text-[#54595F]',
+        badge: 'bg-white text-[#54595F]',
     },
 } as const;
 

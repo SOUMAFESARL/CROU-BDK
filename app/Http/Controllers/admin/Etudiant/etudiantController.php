@@ -62,13 +62,41 @@ class etudiantController extends Controller
             ->get()
             ->filter(fn (Chambre $chambre) => $chambre->peutAccueillir());
 
-        return view('admin.etudiant.admission-directe', [
-            'campagnes' => $campagnes,
-            'campagneActuelle' => $campagneActuelle,
-            'genres' => Genre::query()->orderBy('name')->get(),
-            'chambres' => $chambres,
-            'cites' => Cite::query()->where('statut', '!=', 'ferme')->orderBy('name')->get(),
-            'batiments' => Batiment::query()->where('is_valid', 1)->orderBy('name')->get(),
+        $admin = request()->user('admin');
+        $access = app(\App\Services\AdminAccess::class);
+        $url = fn (string $route) => $access->allows($admin, $route) ? route($route) : null;
+        // Rapport d'import : les lignes refusées sont renvoyées dans le message « warning », séparées par « | ».
+        $avertissement = session('warning');
+        $lignesRefusees = is_string($avertissement) && str_contains($avertissement, 'enregistrées : ')
+            ? array_values(array_filter(array_map('trim', explode('|', \Illuminate\Support\Str::after($avertissement, 'enregistrées : ')))))
+            : [];
+
+        return \Inertia\Inertia::render('Admin/Hebergement/Admissions/AdmissionDirecte', [
+            'campagnes' => $campagnes->map(fn (Campagne $campagne) => [
+                'id' => (string) $campagne->id_campagne,
+                'label' => $campagne->annee_campagne.($campagne->statut === 'active' ? ' — Active' : ''),
+            ])->values(),
+            'campagneActuelle' => $campagneActuelle ? (string) $campagneActuelle->id_campagne : null,
+            'genres' => Genre::query()->orderBy('name')->get()->map(fn ($genre) => ['id' => (string) $genre->id, 'name' => $genre->name])->values(),
+            'cites' => Cite::query()->where('statut', '!=', 'ferme')->orderBy('name')->get()
+                ->map(fn ($cite) => ['id' => (string) $cite->id_cite, 'name' => $cite->name])->values(),
+            'batiments' => Batiment::query()->where('is_valid', 1)->orderBy('name')->get()
+                ->map(fn ($batiment) => ['id' => (string) $batiment->id_batiment, 'name' => $batiment->name, 'cite_id' => (string) $batiment->cite_id])->values(),
+            'chambres' => $chambres->map(fn (Chambre $chambre) => [
+                'id' => (string) $chambre->id_chambre,
+                'numero' => $chambre->numero_chambre,
+                'cite_id' => (string) $chambre->cite_id,
+                'batiment_id' => (string) $chambre->batiment_id,
+                'libres' => max(0, (int) $chambre->capacite_max - (int) $chambre->places_occupees),
+            ])->values(),
+            'aujourdhui' => today()->toDateString(),
+            'import' => $avertissement ? ['message' => \Illuminate\Support\Str::before((string) $avertissement, ' Certaines lignes'), 'lignes' => $lignesRefusees] : null,
+            'urls' => [
+                'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
+                'store' => $url('admin.etudiant.admission_directe.store'),
+                'template' => $url('admin.etudiant.admission_directe.template'),
+                'import' => $url('admin.etudiant.admission_directe.import'),
+            ],
         ]);
     }
 

@@ -16,6 +16,7 @@ use App\Models\DepartureSettlement;
 use App\Models\Loyer;
 use App\Http\Services\OrdreTravailService;
 use Carbon\Carbon;
+use Inertia\Inertia;
 
 class VieResidentielleController extends Controller
 {
@@ -75,10 +76,12 @@ class VieResidentielleController extends Controller
         // Initialisation des compteurs globaux de maintenance
         $globalOTTotal = $ordresTravail->count();
         $globalOTResolus = $ordresTravail->where('statut', 'termine')->count();
-        $globalOTUrgents = $ordresTravail->where('priorite', 'urgente')
-            ->whereIn('statut', ['en_attente', 'en_cours'])
+        // Ordres ouverts : en attente, en cours ou en attente de pièces ; « urgent » = priorité critique (seule valeur de OrdreTravail::PRIORITES).
+        $statutsOuverts = ['en_attente', 'en_cours', 'en_attente_pieces'];
+        $globalOTUrgents = $ordresTravail->where('priorite', 'critique')
+            ->whereIn('statut', $statutsOuverts)
             ->count();
-        $globalOTEnCours = $ordresTravail->whereIn('statut', ['en_attente', 'en_cours'])->count();
+        $globalOTEnCours = $ordresTravail->whereIn('statut', $statutsOuverts)->count();
 
         foreach ($cites as $cite) {
             $chambres = $viewAccess['occupation'] || $viewAccess['departures']
@@ -121,7 +124,7 @@ class VieResidentielleController extends Controller
                 ? round(($otResidenceResolus / $otResidenceTotal) * 100, 1) 
                 : 0;
             
-            $otEnCours = $otResidence->whereIn('statut', ['en_attente', 'en_cours'])->count();
+            $otEnCours = $otResidence->whereIn('statut', $statutsOuverts)->count();
             // Une répétition concerne le même équipement, ou la même chambre et catégorie.
             $recurrenceCandidates = $otResidence->where('statut', '!=', 'annule');
             $recurrences = $recurrenceCandidates
@@ -173,7 +176,7 @@ class VieResidentielleController extends Controller
             $degradations = $edlResidence->flatMap->pieces->flatMap->elements->where('etat', 'mauvais')->count();
             $photos = $edlResidence->flatMap->pieces->flatMap->images->count()
                 + $edlResidence->flatMap->pieces->flatMap->elements->filter(fn ($element) => filled($element->photo))->count();
-            $contractsResidence = $contractApprovals->whereIn('assignment_id', $assignationsResidence->modelKeys());
+            $contractsResidence = $contractApprovals->whereIn('assignment_id', $assignationsResidence->map(fn ($a) => $a->getKey())->all());
             $preavisNonRespectes = $decomptesResidence->filter(fn ($d) => $d->preavis_effectif_jours < $d->preavis_requis_jours)->count();
 
             $residences[] = [
@@ -258,56 +261,16 @@ class VieResidentielleController extends Controller
             ? round(($globalOTResolus / $globalOTTotal) * 100, 1) 
             : 0;
 
-        $kpis = [
-            [
-                'label' => "Taux d'occupation",
-                'value' => $globalOccupationRate . '%',
-                'trend' => $globalOccupationRate >= 90 ? '▲ tendance stable' : '▼ à surveiller',
-                'trend_class' => $globalOccupationRate >= 90 ? 'up' : 'danger',
-                'type' => 'success',
-            ],
-            [
-                'label' => 'Taux de recouvrement',
-                'value' => $globalRecoveryRate . '%',
-                'trend' => $globalRecoveryRate >= 90 ? '● stable' : '▲ à suivre',
-                'trend_class' => $globalRecoveryRate >= 90 ? 'stable' : 'warning',
-                'type' => 'info',
-            ],
-            [
-                'label' => "Taux d'impayés",
-                'value' => $globalImpayes . '%',
-                'trend' => $globalImpayes >= 10 ? '▲ à corriger' : '● sous contrôle',
-                'trend_class' => $globalImpayes >= 10 ? 'danger' : 'stable',
-                'type' => 'danger',
-            ],
-            [
-                'label' => 'Taux de réadmission',
-                'value' => $globalReadmissionRate . '%',
-                'trend' => $globalReadmissionRate >= 70 ? '▲ en hausse' : '● stable',
-                'trend_class' => $globalReadmissionRate >= 70 ? 'up' : 'stable',
-                'type' => 'success',
-            ],
-            [
-                'label' => 'OT en cours',
-                'value' => $globalOTEnCours,
-                'trend' => $globalOTEnCours > 3 ? '⚠️ à surveiller' : '● OK',
-                'trend_class' => $globalOTEnCours > 3 ? 'warning' : 'stable',
-                'type' => 'warning',
-            ],
-            [
-                'label' => 'Taux résolution OT',
-                'value' => $globalOTResolutionRate . '%',
-                'trend' => $globalOTResolutionRate >= 85 ? '● performant' : '▲ à améliorer',
-                'trend_class' => $globalOTResolutionRate >= 85 ? 'up' : 'warning',
-                'type' => 'purple',
-            ],
-        ];
+        // Indicateurs : un par bloc autorisé (les tendances codées en dur de l'ancien écran ne sont plus affichées).
+        $kpis = array_values(array_filter([
+            $viewAccess['occupation'] ? ['key' => 'occupation', 'label' => "Taux d'occupation", 'value' => $globalOccupationRate, 'unit' => '%', 'extra' => $globalOccupied.' lit(s) occupé(s)', 'tone' => 'green', 'highlight' => $globalOccupationRate < 90] : null,
+            $viewAccess['finance'] ? ['key' => 'recouvrement', 'label' => 'Taux de recouvrement', 'value' => $globalRecoveryRate, 'unit' => '%', 'extra' => 'Objectif ≥ 90 %', 'tone' => 'blue', 'highlight' => $globalRecoveryRate < 90] : null,
+            $viewAccess['finance'] ? ['key' => 'impayes', 'label' => "Taux d'impayés", 'value' => $globalImpayes, 'unit' => '%', 'extra' => $globalImpayes >= 10 ? 'À corriger' : 'Sous contrôle', 'tone' => 'amber', 'highlight' => $globalImpayes >= 10] : null,
+            $viewAccess['occupation'] ? ['key' => 'readmission', 'label' => 'Taux de réadmission', 'value' => $globalReadmissionRate, 'unit' => '%', 'extra' => $globalReaffectations.' réaffectation(s)', 'tone' => 'plum', 'highlight' => false] : null,
+            $viewAccess['maintenance'] ? ['key' => 'ot_en_cours', 'label' => 'OT en cours', 'value' => $globalOTEnCours, 'unit' => '', 'extra' => $globalOTUrgents.' urgent(s)', 'tone' => 'amber', 'highlight' => $globalOTUrgents > 0] : null,
+            $viewAccess['maintenance'] ? ['key' => 'ot_resolution', 'label' => 'Résolution des OT', 'value' => $globalOTResolutionRate, 'unit' => '%', 'extra' => 'Objectif ≥ 85 %', 'tone' => 'green', 'highlight' => $globalOTResolutionRate < 85] : null,
+        ]));
 
-        $periodLabel = now()->year . '-' . (now()->year + 1);
-        $lastUpdated = now()->translatedFormat('d/m/Y');
-
-        $kpiPermissions = ['occupation', 'finance', 'finance', 'occupation', 'maintenance', 'maintenance'];
-        $kpis = array_filter($kpis, fn ($index) => $viewAccess[$kpiPermissions[$index]], ARRAY_FILTER_USE_KEY);
         $residences = array_map(function ($residence) use ($viewAccess) {
             $fields = [
                 'occupation' => ['occupation_rate', 'rotation_rate', 'total_chambres', 'available', 'maintenance', 'hors_service', 'reserved', 'occupied_status', 'occupied_lits', 'reaffectations'],
@@ -326,17 +289,61 @@ class VieResidentielleController extends Controller
             }
             return $residence;
         }, $residences);
-        
-        return view('admin.hebergement.vie_residentielle.index', compact(
-            'residences', 'viewAccess',
-            'kpis', 
-            'periodLabel', 
-            'lastUpdated',
-            'ordresTravail',
-            'globalOTUrgents',
-            'globalOTEnCours',
-            'globalOTResolutionRate'
-            ,'paiementsGlobaux', 'sanctions', 'rapportsDisciplinaires', 'demandesSortie', 'decomptesSortie'
-        ));
+
+        // Dernières demandes d'intervention (tableau explicite, jamais de modèle brut).
+        $ordresRecents = $viewAccess['maintenance']
+            ? $ordresTravail->sortByDesc('created_at')->take(10)->map(fn ($ot) => [
+                'id' => $ot->id_ordres_travail,
+                'numero' => $ot->numero_ot,
+                'residence' => $ot->residence?->name,
+                'categorie' => $ot->categorie_label,
+                'priorite' => $ot->priorite,
+                'priorite_label' => $ot->priorite_label,
+                'statut' => $ot->statut,
+                'statut_label' => $ot->statut_label,
+                'assigne' => $ot->assigneA?->name,
+                'date_creation' => $ot->created_at?->toDateString(),
+                'date_resolution' => $ot->date_resolution?->toDateString(),
+            ])->values()->all()
+            : [];
+
+        $access = app(\App\Services\AdminAccess::class);
+        $admin = auth('admin')->user();
+        $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+        $aTraiter = $rapportsDisciplinaires->whereIn('statut', ['transmis', 'en_cours'])->count();
+
+        // Raccourcis : lien seulement si la route est autorisée, compteur seulement si le bloc de données l'est.
+        $raccourcis = array_values(array_filter([
+            ['key' => 'paiements', 'label' => 'Paiements des loyers', 'description' => 'Encaissements et suivi des impayés', 'icon' => 'wallet', 'href' => $url('admin.hebergement.paiements.index'),
+                'badge' => $viewAccess['finance'] ? $paiementsGlobaux->where('created_at', '>=', now()->startOfMonth())->count().' paiement(s) ce mois' : null, 'alerte' => false],
+            ['key' => 'maintenance', 'label' => 'Maintenance', 'description' => 'Ordres de travail et interventions', 'icon' => 'wrench', 'href' => $url('admin.hebergement.maintenance.index'),
+                'badge' => $viewAccess['maintenance'] ? $globalOTUrgents.' OT urgent(s)' : null, 'alerte' => $viewAccess['maintenance'] && $globalOTUrgents > 0],
+            ['key' => 'annonces', 'label' => 'Annonces', 'description' => 'Diffuser une information aux résidents', 'icon' => 'megaphone', 'href' => $url('admin.hebergement.annonce.index'), 'badge' => null, 'alerte' => false],
+            ['key' => 'incidents', 'label' => 'Rapports disciplinaires', 'description' => 'Transmission et décision du Service Sécurité', 'icon' => 'shield-alert', 'href' => $url('admin.hebergement.vie_residentielle.incidents.index'),
+                'badge' => $viewAccess['discipline'] ? $aTraiter.' à traiter' : null, 'alerte' => $viewAccess['discipline'] && $aTraiter > 0],
+            ['key' => 'sanctions', 'label' => 'Sanctions disciplinaires', 'description' => 'Avertissements, blâmes, suspensions', 'icon' => 'gavel', 'href' => $url('admin.hebergement.vie_residentielle.sanctions.index'),
+                'badge' => $viewAccess['discipline'] ? $sanctions->where('statut', 'active')->count().' active(s)' : null, 'alerte' => false],
+            ['key' => 'departs', 'label' => 'Départs & états des lieux', 'description' => 'Sorties, contrats et états des lieux', 'icon' => 'door-open', 'href' => $url('admin.hebergement.depart_etat_des_lieux.depart'),
+                'badge' => $viewAccess['contracts'] ? collect($residences)->sum('contrats.sejours_confirmes').' séjour(s) confirmé(s)' : null, 'alerte' => false],
+        ], fn ($raccourci) => $raccourci['href'] !== null));
+
+        return Inertia::render('Admin/Hebergement/VieResidentielle/Index', [
+            'viewAccess' => $viewAccess,
+            'kpis' => $kpis,
+            'residences' => $residences,
+            'raccourcis' => $raccourcis,
+            'ordresRecents' => $ordresRecents,
+            'synthese' => [
+                'ot_urgents' => $viewAccess['maintenance'] ? $globalOTUrgents : null,
+                'ot_en_cours' => $viewAccess['maintenance'] ? $globalOTEnCours : null,
+                'ot_resolution' => $viewAccess['maintenance'] ? $globalOTResolutionRate : null,
+                'readmission' => $viewAccess['occupation'] ? $globalReadmissionRate : null,
+                'sejours_confirmes' => $viewAccess['contracts'] ? collect($residences)->sum('contrats.sejours_confirmes') : null,
+                'departs_clotures' => $viewAccess['departures'] ? $demandesSortie->where('statut', 'cloturee')->count() : null,
+                'departs_total' => $viewAccess['departures'] ? $demandesSortie->count() : null,
+            ],
+            'periode' => now()->year.'-'.(now()->year + 1),
+            'miseAJour' => now()->format('d/m/Y H:i'),
+        ]);
     }
 }

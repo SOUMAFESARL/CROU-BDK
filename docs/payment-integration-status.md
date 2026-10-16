@@ -4,7 +4,7 @@ Le parcours est raccordé pour **Wave Checkout, MTN Collection Côte d’Ivoire 
 
 ## Parcours
 
-Depuis l’espace étudiant, ouvrir **Payer un loyer et suivre mes paiements** (`/etudiant/paiements-en-ligne`). Seuls les réseaux actifs, raccordés et munis des identifiants requis sont proposés. La chambre occupée et son plus ancien loyer restant à régler sont présentés automatiquement, sans liste de loyers ni champ de montant modifiable. Le montant vient du solde facturé (paiements déjà enregistrés et pénalités compris) ; les montants et identifiants étudiant envoyés par le navigateur ne sont jamais utilisés. Au lancement, le serveur recontrôle l’affectation confirmée en cours, la chambre et le propriétaire du loyer. Un loyer d’un autre étudiant, d’une autre chambre ou d’une ancienne affectation est refusé. Sans affectation active ou sans loyer établi, aucun encaissement n’est lancé.
+Depuis l’espace étudiant, ouvrir **Paiements** (`/etudiant/dashboard?section=paiements`, page React `Etudiant/MesPaiements`) puis **Payer mon loyer** : assistant en 3 étapes (moyen de paiement, montant et numéro, vérification) qui appelle `POST /etudiant/paiements-en-ligne` en JSON. La page autonome `/etudiant/paiements-en-ligne` reste disponible pour le suivi. Seuls les réseaux actifs, raccordés et munis des identifiants requis sont proposés. La chambre occupée et son plus ancien loyer restant à régler sont présentés automatiquement, sans liste de loyers à choisir ; le montant proposé est le solde restant, que l’étudiant peut réduire (paiement partiel) sans jamais le dépasser. Le montant vient du solde facturé (paiements déjà enregistrés et pénalités compris) ; les montants et identifiants étudiant envoyés par le navigateur ne sont jamais utilisés. Au lancement, le serveur recontrôle l’affectation confirmée en cours, la chambre et le propriétaire du loyer. Un loyer d’un autre étudiant, d’une autre chambre ou d’une ancienne affectation est refusé. Sans affectation active ou sans loyer établi, aucun encaissement n’est lancé.
 
 Wave et CinetPay ouvrent leur page de paiement. MTN demande une validation sur le téléphone. La page de suivi vérifie périodiquement l’état et permet une vérification manuelle. Un retour navigateur ou une notification ne constitue jamais une preuve de règlement : l’application interroge l’API authentifiée.
 
@@ -14,7 +14,7 @@ Une confirmation avec référence, montant et devise XOF concordants crée atomi
 
 1. Appliquer les migrations de paiement `2026_09_19_000001` à `000004` dans l’ordre, si elles ne sont pas déjà appliquées. La dernière ajoute `online_payments` et le secret des notifications Wave.
 2. Configurer `APP_URL` avec l’adresse publique **HTTPS** réelle de l’application. Les URL de retour/notification sont construites à partir de cette configuration. Mettre à jour le cache de configuration si utilisé.
-3. Dans **Paramétrage → API de paiement**, renseigner les identifiants du contrat marchand et activer le réseau.
+3. Dans **Paramétrage → API de paiement**, bouton **Configurer** du réseau : assistant en 3 étapes (Connexion : environnement MTN et lien API, avec l’adresse attendue proposée ; Identifiants : clés du contrat marchand, laisser vide pour conserver une clé enregistrée ; Activation : activer le réseau et relire). Les valeurs des clés ne sont jamais renvoyées au navigateur : la page indique seulement si chaque clé est enregistrée.
 4. Configurer les notifications chez les opérateurs et l’ordonnanceur ci-dessous.
 5. Effectuer une recette avec les comptes marchands, vérifier réception des notifications et rapprochement du règlement dans l’application. Les tests automatisés utilisent des réponses simulées et ne prouvent pas l’activation d’un contrat marchand réel.
 
@@ -57,7 +57,7 @@ Une réponse de création incertaine conserve la transaction en attente, sans re
 
 ## Administration et comptabilité
 
-Le bas de la page **API de paiement** affiche les transactions, références, loyers, étudiants, états et codes de diagnostic. Les transactions en revue (`payment_mismatch`, `loyer_unavailable`, `amount_out_of_range`) nécessitent un rapprochement par le service financier ; elles ne sont pas validées automatiquement.
+Le bas de la page **API de paiement** affiche les transactions (10 par page), références, loyers, étudiants, états et codes de diagnostic, avec quatre indicateurs qui servent de filtres (`?statut=confirmes|en_attente|a_verifier|echoues`). Les transactions en revue (`payment_mismatch`, `loyer_unavailable`, `amount_out_of_range`) nécessitent un rapprochement par le service financier ; elles ne sont pas validées automatiquement.
 
 La désactivation empêche les nouvelles demandes mais permet de terminer les transactions déjà engagées. Chaque transaction conserve ses identifiants chiffrés pour continuer la vérification même après modification du paramétrage. Conserver l’APP_KEY Laravel et les anciennes clés opérateur valides jusqu’au rapprochement des transactions en cours. Ne jamais journaliser les identifiants ni les URL de notification individuelles contenant un jeton.
 

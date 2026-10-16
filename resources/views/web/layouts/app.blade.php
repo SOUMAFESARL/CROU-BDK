@@ -9,7 +9,7 @@
 
     <title>@yield('title', systemConfig('app_name', config('app.name', 'CROU')))</title>
 
-    <link rel="icon" href="{{ systemLogo('assets/img/favicon.png') }}" sizes="20x20" type="image/png">
+    <link rel="icon" href="{{ systemLogo() }}">
     <style>:root { --app-brand-color: {{ systemConfig('brand_color', '#1F7C43') }}; }</style>
 
     <!-- Stylesheet -->

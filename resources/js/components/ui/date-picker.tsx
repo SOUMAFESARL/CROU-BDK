@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 
 type DatePickerProps = {
+    id?: string;
     /** Date au format `aaaa-mm-jj` (valeur échangée avec Laravel), chaîne vide si aucune. */
     value: string;
     onChange: (value: string) => void;
@@ -15,6 +16,7 @@ type DatePickerProps = {
     invalid?: boolean;
     className?: string;
     'aria-label'?: string;
+    'aria-describedby'?: string;
 };
 
 /** `aaaa-mm-jj` → Date locale (sans décalage de fuseau). */
@@ -29,7 +31,7 @@ const toIso = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}
 const toDisplay = (date: Date) => `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 
 /** Sélecteur de date shadcn/ui (Popover + Calendar), affiché au format jj/mm/aaaa. */
-export function DatePicker({ value, onChange, placeholder = 'jj/mm/aaaa', min, max, invalid, className, ...props }: DatePickerProps) {
+export function DatePicker({ id, value, onChange, placeholder = 'jj/mm/aaaa', min, max, invalid, className, ...props }: DatePickerProps) {
     const [open, setOpen] = useState(false);
     const selected = parse(value);
     const fromDate = parse(min);
@@ -40,7 +42,9 @@ export function DatePicker({ value, onChange, placeholder = 'jj/mm/aaaa', min, m
             <PopoverTrigger asChild>
                 <button
                     type="button"
+                    id={id}
                     aria-label={props['aria-label']}
+                    aria-describedby={props['aria-describedby']}
                     aria-invalid={invalid || undefined}
                     className={cn(
                         'flex h-11 w-full cursor-pointer items-center gap-2 rounded-brand border border-gray-300 bg-white px-3 text-left text-sm whitespace-nowrap transition-colors',

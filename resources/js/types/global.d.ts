@@ -2,7 +2,7 @@ import type { Errors, PageProps as InertiaPageProps } from '@inertiajs/core';
 
 export interface AdminUser {
     name: string;
-    email: string;
+    email: string | null;
     role: string | null;
     avatar: string | null;
 }
@@ -20,14 +20,39 @@ export interface MenuItem extends MenuLink {
     children: MenuLink[];
 }
 
+/** Lien supplémentaire du menu de l'avatar (ex. « Mes documents » de l'espace étudiant). */
+export interface UserMenuLink {
+    label: string;
+    icon: string;
+    href: string;
+}
+
+/** Entrée du menu de l'espace étudiant (App\Services\EtudiantMenu). */
+export interface EtudiantMenuItem extends MenuLink {
+    /** Section du tableau de bord (`?section=`), null pour une page à part. */
+    page: string | null;
+    /** Section servie par une page Inertia (EtudiantMenu::SECTIONS_REACT). */
+    react: boolean;
+}
+
+export interface EtudiantMenuGroup {
+    label: string;
+    items: EtudiantMenuItem[];
+}
+
 export interface SharedProps extends InertiaPageProps {
     errors: Errors;
     auth: {
+        /** Espace étudiant : `role` contient le matricule et `avatar` est null. */
         user: AdminUser | null;
         profileUrl: string;
         logoutUrl: string;
+        links: UserMenuLink[];
     };
     menu: MenuItem[];
+    /** Vide hors de l'espace étudiant. */
+    menuEtudiant: EtudiantMenuGroup[];
+    csrfToken: string;
     sidebarOpen: boolean;
     flash: {
         success?: string | null;

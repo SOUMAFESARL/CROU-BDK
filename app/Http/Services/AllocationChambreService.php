@@ -320,7 +320,7 @@ class AllocationChambreService
                 'total'       => Chambre::parType($type->id_type_chambre)->count(),
                 'occupees'    => $assignations->filter(function ($a) use ($type) {
                     return $a->chambre
-                        && $a->chambre->type_chambre_code === $type->id_type_chambre;
+                        && (string) $a->chambre->type_chambre_id === (string) $type->id_type_chambre;
                 })->count(),
                 'disponibles' => Chambre::parType($type->id_type_chambre)->disponibles($campagneId)->count(),
             ];

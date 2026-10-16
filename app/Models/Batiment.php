@@ -118,6 +118,31 @@ class Batiment extends Model
             'chambresDisponibles'
         ]);
     }
+    /**
+     * Valeur de la colonne enum `niveau_aile_batiment.type_occupation` ('hommes', 'femmes', 'mixte').
+     * Le formulaire envoie le nom normalisé du type de cité (« uniquement homme », « uniquement femme », « mixte »)
+     * ou son identifiant : on le ramène à l'enum, sinon MySQL refuse l'insertion du niveau.
+     */
+    public static function typeOccupationNiveau($valeur, $batiment = null): string
+    {
+        $valeur = trim((string) $valeur);
+        if ($valeur === '' && $batiment?->type_occupation_id) {
+            $valeur = (string) $batiment->type_occupation_id;
+        }
+        if ($valeur !== '' && ($type = TypeCite::find($valeur))) {
+            $valeur = (string) $type->name;
+        }
+
+        $valeur = mb_strtolower(Str::ascii($valeur));
+
+        return match (true) {
+            str_contains($valeur, 'mixte') => 'mixte',
+            str_contains($valeur, 'femme'), str_contains($valeur, 'fille') => 'femmes',
+            str_contains($valeur, 'homme'), str_contains($valeur, 'garcon') => 'hommes',
+            default => 'mixte',
+        };
+    }
+
     // ========================
     // CRÉATION STRUCTURE SIMPLE
     // ========================
@@ -162,7 +187,7 @@ class Batiment extends Model
             foreach ($etages as $etage) {
                 $niveauNumero   = (int)($etage['etage_numero']   ?? 0);
                 $chambresNiveau = (int)($etage['chambres']        ?? 0);  // clé envoyée par le frontend
-                $typeOccupation = $etage['type_occupation']        ?? $batiment->type_occupation;
+                $typeOccupation = self::typeOccupationNiveau($etage['type_occupation'] ?? null, $batiment);
 
                 Niveau_Aile_Batiment::create([
                     'code_aile'       => $aile->code_aile,
@@ -188,7 +213,7 @@ class Batiment extends Model
                     'code_aile'       => $aile->code_aile,
                     'niveau_aile_code'=> generate('niveau_aile_batiment', 'niveau_aile_code', 150, 'a-zA-Z0-9'),
                     'niveau_numero'   => 0,
-                    'type_occupation' => $batiment->type_occupation,
+                    'type_occupation' => self::typeOccupationNiveau(null, $batiment),
                     'total_chambres'  => $chambresRDC,
                     'created_by'      => getInfoAdmin()->users->id_user,
                 ]);
@@ -207,7 +232,7 @@ class Batiment extends Model
                     'code_aile'       => $aile->code_aile,
                     'niveau_aile_code'=> generate('niveau_aile_batiment', 'niveau_aile_code', 150, 'a-zA-Z0-9'),
                     'niveau_numero'   => $i,
-                    'type_occupation' => $batiment->type_occupation,
+                    'type_occupation' => self::typeOccupationNiveau(null, $batiment),
                     'total_chambres'  => $chambresPourCetEtage,
                     'created_by'      => getInfoAdmin()->users->id_user,
                 ]);
@@ -252,7 +277,7 @@ class Batiment extends Model
                         'code_aile'        => $aile->code_aile,
                         'niveau_aile_code' => generate('niveau_aile_batiment', 'niveau_aile_code', 150, 'a-zA-Z0-9'),
                         'niveau_numero'    => $etageData['niveau_numero']  ?? 0,
-                        'type_occupation'  => $etageData['type_occupation'] ?? $batiment->type_occupation,
+                        'type_occupation'  => self::typeOccupationNiveau($etageData['type_occupation'] ?? null, $batiment),
                         'total_chambres'   => $etageData['total_chambres'] ?? 0, // ✅ clé correcte pour complexe
                         'chambres_nord'    => $etageData['chambres_par_cote']['nord']  ?? 0,
                         'chambres_sud'     => $etageData['chambres_par_cote']['sud']   ?? 0,
@@ -371,6 +396,133 @@ class Batiment extends Model
                 'created_by'       => getInfoAdmin()->users->id_user,
             ]);
         }
+    }
+
+    // ========================
+    // STRUCTURE EXISTANTE (formulaire de modification)
+    // ========================
+
+    /**
+     * Ailes et niveaux d'un bâtiment existant, avec le nombre de chambres déjà créées et occupées par niveau
+     * (le formulaire de modification ne permet ni d'en retirer, ni de changer l'occupation d'un niveau occupé).
+     */
+    public static function structureExistante($batiment): array
+    {
+        $ailes = Aile_Batiment::where('batiment_id', $batiment->id_batiment)->orderBy('numero')->get();
+        $niveaux = Niveau_Aile_Batiment::whereIn('code_aile', $ailes->pluck('code_aile'))
+            ->orderBy('niveau_numero')
+            ->get()
+            ->groupBy('code_aile');
+        $chambres = self::chambresParNiveau($batiment);
+
+        return $ailes->map(fn ($aile) => [
+            'code' => $aile->code_aile,
+            'nom' => $aile->name,
+            'niveaux' => ($niveaux[$aile->code_aile] ?? collect())->map(fn ($niveau) => [
+                'code' => $niveau->niveau_aile_code,
+                'numero' => (int) $niveau->niveau_numero,
+                'type_occupation' => $niveau->type_occupation,
+                'chambres' => $chambres[$niveau->niveau_aile_code]['total'] ?? 0,
+                'occupees' => $chambres[$niveau->niveau_aile_code]['occupees'] ?? 0,
+            ])->values()->all(),
+        ])->values()->all();
+    }
+
+    /** Chambres existantes (non supprimées) et chambres occupées, par code de niveau. */
+    public static function chambresParNiveau($batiment): array
+    {
+        return Chambre::where('batiment_id', $batiment->id_batiment)
+            ->selectRaw("niveau_aile_code, count(*) as total, sum(case when occupants_actuels > 0 or etat = 'occupee' then 1 else 0 end) as occupees")
+            ->groupBy('niveau_aile_code')
+            ->get()
+            ->mapWithKeys(fn ($ligne) => [(string) $ligne->niveau_aile_code => ['total' => (int) $ligne->total, 'occupees' => (int) $ligne->occupees]])
+            ->all();
+    }
+
+    /**
+     * Applique la structure modifiée : renomme les ailes, retire les niveaux demandés (`niveaux_retires`), met à jour
+     * l'occupation des niveaux, ajoute les chambres manquantes et les nouveaux niveaux/ailes.
+     * Les contrôles (niveaux du bâtiment, retrait par le haut, pas de diminution, niveau occupé) sont faits par le contrôleur.
+     */
+    public static function appliquerStructureModifiee($batiment, array $ailesData): void
+    {
+        $admin = getInfoAdmin()->users->id_user ?? null;
+
+        foreach (array_values($ailesData) as $aileData) {
+            $aile = !empty($aileData['code'])
+                ? Aile_Batiment::where('batiment_id', $batiment->id_batiment)->where('code_aile', $aileData['code'])->first()
+                : null;
+            $nom = trim((string) ($aileData['nom'] ?? ''));
+
+            if (!$aile) {
+                $numero = (int) Aile_Batiment::where('batiment_id', $batiment->id_batiment)->max('numero') + 1;
+                $aile = Aile_Batiment::create([
+                    'batiment_id' => $batiment->id_batiment,
+                    'numero' => $numero,
+                    'code_aile' => generate('aile_batiment', 'code_aile', 150, 'a-zA-Z0-9'),
+                    'name' => $nom !== '' ? $nom : 'Aile ' . $numero,
+                    'nombre_niveaux' => 0,
+                    'total_chambres' => 0,
+                    'ordre_display' => $numero,
+                    'created_by' => $admin,
+                ]);
+            } elseif ($nom !== '' && $aile->name !== $nom) {
+                $aile->update(['name' => $nom]);
+            }
+
+            // Niveaux retirés (contrôlés par le contrôleur : niveaux supérieurs sans occupant) : chambres supprimées (corbeille) puis niveau.
+            $retires = array_values(array_filter((array) ($aileData['niveaux_retires'] ?? []), 'is_string'));
+            if ($retires) {
+                $codes = Niveau_Aile_Batiment::where('code_aile', $aile->code_aile)->whereIn('niveau_aile_code', $retires)->pluck('niveau_aile_code');
+                Chambre::whereIn('niveau_aile_code', $codes)->get()->each->delete();
+                Niveau_Aile_Batiment::whereIn('niveau_aile_code', $codes)->delete();
+            }
+
+            foreach ($aileData['niveaux'] ?? [] as $niveauData) {
+                $voulues = (int) ($niveauData['chambres'] ?? 0);
+                $type = self::typeOccupationNiveau($niveauData['type_occupation'] ?? null, $batiment);
+                $niveau = !empty($niveauData['code'])
+                    ? Niveau_Aile_Batiment::where('code_aile', $aile->code_aile)->where('niveau_aile_code', $niveauData['code'])->first()
+                    : null;
+
+                if ($niveau) {
+                    $existantes = Chambre::where('niveau_aile_code', $niveau->niveau_aile_code)->count();
+                    $niveau->update(['type_occupation' => $type, 'total_chambres' => max($voulues, $existantes)]);
+                } else {
+                    $existantes = 0;
+                    $niveau = Niveau_Aile_Batiment::create([
+                        'code_aile' => $aile->code_aile,
+                        'niveau_aile_code' => generate('niveau_aile_batiment', 'niveau_aile_code', 150, 'a-zA-Z0-9'),
+                        'niveau_numero' => (int) ($niveauData['numero'] ?? 0),
+                        'type_occupation' => $type,
+                        'total_chambres' => $voulues,
+                        'created_by' => $admin,
+                    ]);
+                }
+
+                // Chambres créées vides, comme à la création du bâtiment (numéro, type et lits configurés ensuite).
+                for ($i = $existantes; $i < $voulues; $i++) {
+                    Chambre::create([
+                        'niveau_aile_code' => $niveau->niveau_aile_code,
+                        'code_aile' => $aile->code_aile,
+                        'batiment_id' => $batiment->id_batiment,
+                        'cite_id' => $batiment->cite_id,
+                        'type_occupation_id' => $batiment->type_occupation_id,
+                        'etat' => 'disponible',
+                        'capacite_max' => 1,
+                        'occupants_actuels' => 0,
+                        'created_by' => $admin,
+                    ]);
+                }
+            }
+
+            $aile->update([
+                'nombre_niveaux' => Niveau_Aile_Batiment::where('code_aile', $aile->code_aile)->count(),
+                'total_chambres' => Chambre::where('code_aile', $aile->code_aile)->count(),
+            ]);
+        }
+
+        self::updateBatimentTotals($batiment);
     }
 
     // ========================

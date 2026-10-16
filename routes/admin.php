@@ -237,6 +237,7 @@ Route::middleware(['admin'])->group(function () {
         ->group(function () {
 
             Route::get('/liste/{etat?}', 'liste')->name('admission');
+            Route::get('/campagnes/nouvelle', 'createCampagne')->name('create_campagne');
             Route::get('/campagnes/{etat?}', 'campagnes')->name('campagnes');
             Route::post('/campagnes', 'storeCampagne')->name('post_campagnes');
             Route::get('/validateDocument/{documentId}/{statut}/{message?}', 'valideDocument')->name('validate_document');
@@ -281,10 +282,6 @@ Route::middleware(['admin'])->group(function () {
         ->group(function () {
 
             Route::get('/', 'index')->name('index');
-            Route::get('/annonce', 'annonce')->name('annonce');
-
-
-
         });
 
     Route::prefix('gestion-hebergement/vie-residentielle/annonce')
@@ -297,7 +294,8 @@ Route::middleware(['admin'])->group(function () {
             Route::post('/store', 'store')->name('store');
             Route::get('{id}',  'show')->name('show');
             Route::get('{id}/edit',  'edit')->name('edit');
-            Route::get('{id}/update', 'update')->name('update');
+            // PUT : l'écran envoie la modification avec `_method=PUT` (l'ancienne route GET la rendait impossible).
+            Route::put('{id}', 'update')->name('update');
             Route::post('{id}/publish', 'publish')->name('publish');
             Route::delete('{id}','destroy')->name('destroy');
 
@@ -380,8 +378,11 @@ Route::middleware(['admin'])->group(function () {
 
 
 
-    Route::get('/gestion-hebergement', function () {
-        return view('admin.hebergement.index');
+    // Accueil du module : modules du sous-menu « Gestion Hébergement » (config/admin_menu.php), filtrés par droits.
+    Route::get('/gestion-hebergement', function (\Illuminate\Http\Request $request) {
+        return \Inertia\Inertia::render('Admin/Hebergement/Index', [
+            'modules' => app(\App\Services\AdminMenu::class)->childrenOf($request->user('admin'), 'admin.hebergement.index', $request),
+        ]);
     })->name('hebergement.index');
 
     Route::get('/gestion-hebergement/reporting', [ReportingHebergementController::class, 'index'])
@@ -516,6 +517,7 @@ Route::middleware(['admin'])->group(function () {
                 Route::get('/{document}/edit', 'edit')->name('edit');
                 Route::put('/{document}', 'update')->name('update');
                 Route::post('/{document}/publish', 'publish')->name('publish');
+                Route::delete('/{document}', 'destroy')->name('destroy');
                 Route::get('/{document}/preview', 'preview')->name('preview');
                 Route::get('/{document}/pdf', 'pdf')->name('pdf');
                 Route::get('/{document}/versions/{version}/pdf', 'versionPdf')->name('versions.pdf');

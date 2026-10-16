@@ -214,4 +214,76 @@ class AnnonceDiffusionTest extends TestCase
         $this->putJson(route('admin.hebergement.annonce.update', $annonce->id_annonce), array_replace($data, ['titre' => 'Modifié']))->assertSuccessful();
         $this->assertDatabaseCount('annonce_deliveries', 1);
     }
+
+    /** Page React : création, modification et suppression reviennent à la liste avec un message (plus de JSON brut). */
+    public function test_page_actions_redirect_back_with_a_message(): void
+    {
+        $this->student('a');
+        $data = ['titre' => 'Coupure d’eau', 'contenu' => '<p>Demain matin.</p>', 'canaux' => ['email'], 'audience' => 'specific', 'etudiants' => ['a'], 'statut' => 'brouillon', 'priorite' => 'haute'];
+        $liste = route('admin.hebergement.annonce.index');
+
+        $this->from($liste)->post(route('admin.hebergement.annonce.store'), $data)->assertRedirect($liste)->assertSessionHas('success', 'Brouillon enregistré.');
+        $annonce = Annonce::firstOrFail();
+        $this->assertSame(['etudiants' => ['a']], $annonce->audience_cible);
+        $this->assertDatabaseCount('annonce_deliveries', 0);
+
+        $this->from($liste)->put(route('admin.hebergement.annonce.update', $annonce->id_annonce), array_replace($data, ['titre' => 'Coupure d’eau prolongée']))
+            ->assertRedirect($liste)->assertSessionHas('success');
+        $this->assertSame('Coupure d’eau prolongée', $annonce->fresh()->titre);
+
+        $this->from($liste)->post(route('admin.hebergement.annonce.store'), array_replace($data, ['statut' => 'planifie', 'date_planifiee' => now()->subDay()->toDateTimeString()]))
+            ->assertRedirect($liste)->assertSessionHasErrors(['date_planifiee' => 'La date de publication doit être dans le futur.']);
+
+        $this->from($liste)->delete(route('admin.hebergement.annonce.destroy', $annonce->id_annonce))->assertRedirect($liste)->assertSessionHas('success', 'Annonce supprimée.');
+        $this->assertSoftDeleted('annonces', ['id_annonce' => $annonce->id_annonce]);
+    }
+
+    public function test_index_page_sends_explicit_props_and_action_urls(): void
+    {
+        Schema::table('etudiants', function (Blueprint $t) {
+            $t->string('name')->nullable();
+            $t->string('matricule')->nullable();
+            $t->string('statut_inscription')->nullable();
+        });
+        Schema::table('batiment', function (Blueprint $t) {
+            $t->string('cite_id')->nullable();
+            $t->string('name')->nullable();
+            $t->softDeletes();
+        });
+        Schema::table('chambre', fn (Blueprint $t) => $t->string('numero_chambre')->nullable());
+        Schema::create('users', function (Blueprint $t) {
+            $t->string('id_user')->primary();
+            $t->string('code')->nullable();
+            $t->string('name')->nullable();
+            $t->softDeletes();
+        });
+        $this->mock(\App\Http\Services\CiteService::class)->shouldReceive('getCites')
+            ->andReturn(new \Illuminate\Database\Eloquent\Collection([(new \App\Models\Cite)->forceFill(['id_cite' => 'c1', 'name' => 'Cité Bondoukou'])]));
+        $this->student('a', ['name' => 'Awa Koné', 'matricule' => 'M001', 'statut_inscription' => 'residents']);
+        $this->student('b', ['name' => 'Non résident', 'statut_inscription' => 'demande']);
+        $publiee = $this->annonce(['audience' => 'specific', 'audience_cible' => ['etudiants' => ['a']], 'canaux' => ['email'], 'contenu' => '<p>Bonjour <strong>à tous</strong></p>']);
+        $brouillon = $this->annonce(['titre' => 'Brouillon', 'statut' => 'brouillon']);
+
+        $request = \Illuminate\Http\Request::create(route('admin.hebergement.annonce.index'), 'GET', ['statut' => 'inconnu', 'canal' => 'push', 'date_debut' => '15/10/2026']);
+        $request->headers->set('X-Inertia', 'true');
+        $request->setUserResolver(fn () => auth('admin')->user());
+        $page = app()->call([app(\App\Http\Controllers\admin\immobilier\vie_residentielle\AnnonceController::class), 'index'], ['request' => $request])
+            ->toResponse($request)->getData(true);
+
+        $this->assertSame('Admin/Hebergement/Annonces/Index', $page['component']);
+        $props = $page['props'];
+        // Valeurs de filtre inconnues ignorées.
+        $this->assertSame(['statut' => '', 'canal' => '', 'search' => '', 'date_debut' => '', 'date_fin' => ''], $props['filters']);
+        $this->assertSame(2, $props['stats']['total']);
+        $lignes = collect($props['annonces']['data'])->keyBy('id');
+        $this->assertSame('Bonjour à tous', $lignes[$publiee->id_annonce]['extrait']);
+        $this->assertSame(['etudiants' => ['a']], $lignes[$publiee->id_annonce]['cibles']);
+        $this->assertNull($lignes[$publiee->id_annonce]['urls']['publish']);
+        $this->assertNotNull($lignes[$brouillon->id_annonce]['urls']['publish']);
+        $this->assertNotNull($lignes[$brouillon->id_annonce]['urls']['update']);
+        // Seuls les résidents sont proposés pour une diffusion ciblée.
+        $this->assertSame([['id' => 'a', 'name' => 'Awa Koné', 'matricule' => 'M001']], $props['cibles']['etudiants']);
+        $this->assertSame([['id' => 'c1', 'name' => 'Cité Bondoukou']], $props['cibles']['cites']);
+        $this->assertNotNull($props['urls']['store']);
+    }
 }

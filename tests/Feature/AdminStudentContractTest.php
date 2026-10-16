@@ -112,12 +112,4 @@ class AdminStudentContractTest extends TestCase
         $pdf->shouldReceive('stream')->once()->with('contrat-b002.pdf')->andReturn(response('%PDF-test', 200, ['Content-Type' => 'application/pdf']));
         $this->get($this->url('student-b'))->assertOk();
     }
-
-    public function test_contract_link_targets_admin_route_in_new_tab(): void
-    {
-        $html = view('admin.etudiant.contract-link', ['student' => Etudiant::findOrFail('student-a')])->render();
-        $this->assertStringContainsString($this->url(), $html);
-        $this->assertStringContainsString('target="_blank"', $html);
-        $this->assertStringContainsString('Consulter le contrat', $html);
-    }
 }

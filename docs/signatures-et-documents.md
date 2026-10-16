@@ -5,7 +5,7 @@ La configuration est **commune à l’application**, conformément au choix rete
 ## Accès depuis le paramétrage
 
 - **Signatures des responsables** : nom du titulaire, image PNG/JPEG, activation, remplacement ou retrait.
-- **Documents de la résidence** : rédaction, signataires choisis, aperçu, export PDF et historique.
+- **Documents de la résidence** : téléversement du PDF (assistant en 4 étapes : identification, application, fichier, vérification), validation de la version, consultation du PDF, historique des versions validées et retrait du document. Le module de signatures et l’ancien éditeur de texte ont été retirés ; les documents rédigés avec l’ancien éditeur doivent être téléversés en PDF.
 
 Les fonctions sont Sous-DAL, Chef de service logement, Directeur de cité et Concierge principal. Elles définissent les blocs de signature ; leur configuration ne crée ni ne modifie les rôles de connexion des utilisateurs.
 
@@ -56,12 +56,14 @@ Après vérification du contenu, « Valider la version enregistrée » conserve 
 
 Une modification ultérieure remet le document en brouillon ; les anciennes révisions restent consultables dans l’historique. Un remplacement ou une désactivation de signature n’altère jamais une révision déjà validée. Les modifications concurrentes depuis plusieurs onglets sont détectées.
 
+« Retirer le document » (liste des documents ou fiche du document, après confirmation) supprime définitivement le document, son historique de versions et ses fichiers PDF privés : il n’est plus proposé aux résidents (espace web et API mobile). Cette action est irréversible.
+
 La validation enregistre le document dans l’application ; elle ne l’envoie ni aux étudiants ni à un service externe. Les PDF contiennent les images des signatures configurées, sans certificat de signature électronique.
 
 ## Permissions
 
 Deux permissions distinctes sont disponibles dans la gestion des rôles :
-- `parametrage.legal-documents.manage` : rédiger, consulter, valider et exporter les documents ;
+- `parametrage.legal-documents.manage` : rédiger, consulter, valider, exporter et retirer les documents ;
 - `parametrage.legal-documents.signatures` : modifier les titulaires et les images de signature.
 
 L’administrateur possède ces permissions. Autoriser la rédaction ne donne pas automatiquement le droit de modifier les signatures. Un rédacteur autorisé peut sélectionner les signatures déjà configurées pour ses documents.

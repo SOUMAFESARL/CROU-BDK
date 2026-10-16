@@ -1,12 +1,11 @@
-
 {{-- resources/views/etudiant/index.blade.php --}}
 
 @php
-    $campagne = $data['campagne'] ?? null;
-    $dateEcheanceDemande = optional($campagne)->date_echeance_demande;
-    $dateEcheanceDemandeIso = $dateEcheanceDemande
-        ? \Illuminate\Support\Carbon::parse($dateEcheanceDemande)->format('Y-m-d')
-        : '';
+$campagne = $data['campagne'] ?? null;
+$dateEcheanceDemande = optional($campagne)->date_echeance_demande;
+$dateEcheanceDemandeIso = $dateEcheanceDemande
+? \Illuminate\Support\Carbon::parse($dateEcheanceDemande)->format('Y-m-d')
+: '';
 @endphp
 
 {{-- Titre, fil d'Ariane et avatar : barre du haut de <x-etudiant-shell>. --}}
@@ -43,10 +42,10 @@
                         <span class="detail-value">{{ $dateEcheanceDemandeIso ? formatDateFr($dateEcheanceDemandeIso, true) : 'N/A' }}</span>
                     </div>
                     @if(isset($data['derniere_demande']->chambre_proposee))
-                        <div class="detail-row">
-                            <span class="detail-label">🏠 Chambre proposée</span>
-                            <span class="detail-value">{{ $data['derniere_demande']->chambre_proposee }}</span>
-                        </div>
+                    <div class="detail-row">
+                        <span class="detail-label">🏠 Chambre proposée</span>
+                        <span class="detail-value">{{ $data['derniere_demande']->chambre_proposee }}</span>
+                    </div>
                     @endif
                 </div>
             </div>
@@ -56,8 +55,8 @@
                     <span class="btn-text">✅ Confirmer l'acceptation</span>
                     <span class="btn-loader">
                         <svg class="spinner" width="16" height="16" viewBox="0 0 24 24">
-                            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/>
-                            <path d="M22 12a10 10 0 01-5 8.65" fill="none" stroke="currentColor" stroke-width="2"/>
+                            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
+                            <path d="M22 12a10 10 0 01-5 8.65" fill="none" stroke="currentColor" stroke-width="2" />
                         </svg>
                     </span>
                 </button>
@@ -102,8 +101,8 @@
                     <span class="btn-text">❌ Confirmer le refus</span>
                     <span class="btn-loader">
                         <svg class="spinner" width="16" height="16" viewBox="0 0 24 24">
-                            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/>
-                            <path d="M22 12a10 10 0 01-5 8.65" fill="none" stroke="currentColor" stroke-width="2"/>
+                            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
+                            <path d="M22 12a10 10 0 01-5 8.65" fill="none" stroke="currentColor" stroke-width="2" />
                         </svg>
                     </span>
                 </button>
@@ -125,34 +124,39 @@
     Styles : section « Tableau de bord » de student-space.css (.sd-*).
     ============================================ --}}
 @php
-    $estResident = $data['has_accepted_demande'] && !empty($data['derniereAssignation']);
-    $anneeAcademique = $data['campagne']->annee_campagne ?? getAnneeUniversitaire(date('Y-m-d'));
-    $libelleStatut = fn (?string $statut) => match ($statut) {
-        null, '' => 'Aucune demande',
-        'En_attente' => 'En attente',
-        default => ucfirst(str_replace('_', ' ', $statut)),
-    };
+$estResident = $data['has_accepted_demande'] && !empty($data['derniereAssignation']);
+$anneeAcademique = $data['campagne']->annee_campagne ?? getAnneeUniversitaire(date('Y-m-d'));
+$libelleStatut = fn (?string $statut) => match ($statut) {
+null, '' => 'Aucune demande',
+'En_attente' => 'En attente',
+'En_verification' => 'En vérification',
+default => ucfirst(str_replace('_', ' ', $statut)),
+};
+// Couleur du KPI « État de la demande » selon le statut (legacy, synchronisé par DossierWorkflow).
+$toneStatut = fn (?string $statut) => match ($statut) {
+'Acceptée' => 'sd-tone-green',
+'En_verification' => 'sd-tone-blue',
+'En_attente' => 'sd-tone-amber',
+'Refusée' => 'sd-tone-red',
+default => 'sd-tone-neutral',
+};
 @endphp
 
 <div id="page-dashboard" class="content active">
     <div class="sd">
-@if($estResident)
+        @if($estResident)
         @php
-            $assignation = $data['derniereAssignation'];
-            $chambre = $assignation->chambre;
-            $statsPaiement = $result['paiementData']['stats'] ?? [];
-            $resteAPayer = (float) ($statsPaiement['total_impayes'] ?? 0);
-            $nbImpayes = (int) ($statsPaiement['nb_impayes'] ?? 0);
-            $prochainPaiement = $result['paiementData']['prochainPaiement']['libelle'] ?? null;
+        $assignation = $data['derniereAssignation'];
+        $chambre = $assignation->chambre;
+        $statsPaiement = $result['paiementData']['stats'] ?? [];
+        $resteAPayer = (float) ($statsPaiement['total_impayes'] ?? 0);
+        $nbImpayes = (int) ($statsPaiement['nb_impayes'] ?? 0);
+        $prochainPaiement = $result['paiementData']['prochainPaiement']['libelle'] ?? null;
         @endphp
 
         <div class="sd-head">
             <div>
                 <h1 class="page-title sd-h1">Mon tableau de bord</h1>
-                <p class="sd-lead">
-                    Bienvenue, {{ $data['etudiant']->prenom ?? 'Étudiant' }}. Vous êtes résident à la
-                    <strong>{{ $chambre?->cite?->name ?? 'résidence' }}</strong>.
-                </p>
             </div>
             <span class="sd-pill sd-pill-success">
                 <x-admin-icon name="circle-check" size="16" />
@@ -174,7 +178,7 @@
                 <div class="sd-kpi-row">
                     <strong>{{ $chambre?->numero_chambre ?? '—' }}</strong>
                     @if($chambre?->batiment?->name)
-                        <span class="sd-kpi-badge">{{ $chambre->batiment->name }}</span>
+                    <span class="sd-kpi-badge">{{ $chambre->batiment->name }}</span>
                     @endif
                 </div>
             </article>
@@ -193,7 +197,7 @@
                     </span>
                 </div>
             </article>
-            <article class="sd-kpi sd-tone-plum">
+            <article class="sd-kpi {{ $toneStatut($data['statut_demande']) }}">
                 <small>État de la demande</small>
                 <div class="sd-kpi-row">
                     <strong>{{ $libelleStatut($data['statut_demande']) }}</strong>
@@ -203,81 +207,81 @@
 
         {{-- Activité récente + informations pratiques --}}
         @php
-            $recentActivities = collect();
+        $recentActivities = collect();
 
-            $paymentSource = $result['paiementData']['paiements'] ?? collect();
-            $paymentItems = is_object($paymentSource) && method_exists($paymentSource, 'getCollection')
-                ? $paymentSource->getCollection()
-                : collect($paymentSource)->filter(fn ($item) => is_object($item));
+        $paymentSource = $result['paiementData']['paiements'] ?? collect();
+        $paymentItems = is_object($paymentSource) && method_exists($paymentSource, 'getCollection')
+        ? $paymentSource->getCollection()
+        : collect($paymentSource)->filter(fn ($item) => is_object($item));
 
-            $paymentItems->each(function ($payment) use ($recentActivities) {
-                $valide = $payment->statut_paiement === 'valide';
-                $recentActivities->push([
-                    'date' => $payment->date_paiement ?? $payment->created_at,
-                    'icon' => 'credit-card',
-                    'done' => $valide,
-                    'text' => 'Paiement de '.number_format((float) ($payment->montant ?? 0), 0, ',', ' ').' '.systemCurrencySymbol(),
-                    'status' => $valide ? 'Confirmé' : 'En attente',
-                ]);
-            });
+        $paymentItems->each(function ($payment) use ($recentActivities) {
+        $valide = $payment->statut_paiement === 'valide';
+        $recentActivities->push([
+        'date' => $payment->date_paiement ?? $payment->created_at,
+        'icon' => 'credit-card',
+        'done' => $valide,
+        'text' => 'Paiement de '.number_format((float) ($payment->montant ?? 0), 0, ',', ' ').' '.systemCurrencySymbol(),
+        'status' => $valide ? 'Confirmé' : 'En attente',
+        ]);
+        });
 
-            $orderSource = $result['ordres'] ?? collect();
-            $orderItems = is_object($orderSource) && method_exists($orderSource, 'getCollection')
-                ? $orderSource->getCollection()
-                : collect($orderSource)->filter(fn ($item) => is_object($item));
+        $orderSource = $result['ordres'] ?? collect();
+        $orderItems = is_object($orderSource) && method_exists($orderSource, 'getCollection')
+        ? $orderSource->getCollection()
+        : collect($orderSource)->filter(fn ($item) => is_object($item));
 
-            $orderItems->each(function ($order) use ($recentActivities) {
-                $status = strtolower((string) ($order->statut ?? ''));
-                $recentActivities->push([
-                    'date' => $order->created_at,
-                    'icon' => 'wrench',
-                    'done' => in_array($status, ['termine', 'terminee', 'cloture', 'resolu']),
-                    'text' => 'Demande de maintenance'.($order->numero_ordre ? ' '.$order->numero_ordre : ''),
-                    'status' => (string) str($status ?: 'soumise')->replace('_', ' ')->ucfirst(),
-                ]);
-            });
+        $orderItems->each(function ($order) use ($recentActivities) {
+        $status = strtolower((string) ($order->statut ?? ''));
+        $recentActivities->push([
+        'date' => $order->created_at,
+        'icon' => 'wrench',
+        'done' => in_array($status, ['termine', 'terminee', 'cloture', 'resolu']),
+        'text' => 'Demande de maintenance'.($order->numero_ordre ? ' '.$order->numero_ordre : ''),
+        'status' => (string) str($status ?: 'soumise')->replace('_', ' ')->ucfirst(),
+        ]);
+        });
 
-            collect($data['demandes'] ?? [])
-                ->filter(fn ($item) => is_object($item))
-                ->each(function ($request) use ($recentActivities) {
-                    $status = (string) ($request->statut_demande ?? 'en attente');
-                    $recentActivities->push([
-                        'date' => $request->date_demande ?? $request->created_at,
-                        'icon' => 'file-pen-line',
-                        'done' => str($status)->ascii()->lower()->contains('accept'),
-                        'text' => 'Demande d’hébergement',
-                        'status' => (string) str($status)->replace('_', ' ')->ucfirst(),
-                    ]);
-                });
+        collect($data['demandes'] ?? [])
+        ->filter(fn ($item) => is_object($item))
+        ->each(function ($request) use ($recentActivities) {
+        $status = (string) ($request->statut_demande ?? 'en attente');
+        $recentActivities->push([
+        'date' => $request->date_demande ?? $request->created_at,
+        'icon' => 'file-pen-line',
+        'done' => str($status)->ascii()->lower()->contains('accept'),
+        'text' => 'Demande d’hébergement',
+        'status' => (string) str($status)->replace('_', ' ')->ucfirst(),
+        ]);
+        });
 
-            collect($data['assignationsChambre'] ?? [])
-                ->filter(fn ($item) => is_object($item))
-                ->each(function ($assignment) use ($recentActivities) {
-                    $recentActivities->push([
-                        'date' => $assignment->date_assignation ?? $assignment->created_at,
-                        'icon' => 'bed-double',
-                        'done' => true,
-                        'text' => 'Attribution de la chambre '.($assignment->chambre?->numero_chambre ?? 'non renseignée'),
-                        'status' => 'Effectuée',
-                    ]);
-                });
+        collect($data['assignationsChambre'] ?? [])
+        ->filter(fn ($item) => is_object($item))
+        ->each(function ($assignment) use ($recentActivities) {
+        $recentActivities->push([
+        'date' => $assignment->date_assignation ?? $assignment->created_at,
+        'icon' => 'bed-double',
+        'done' => true,
+        'text' => 'Attribution de la chambre '.($assignment->chambre?->numero_chambre ?? 'non renseignée'),
+        'status' => 'Effectuée',
+        ]);
+        });
 
-            $recentActivities = $recentActivities
-                ->filter(fn ($activity) => !empty($activity['date']))
-                ->sortByDesc(fn ($activity) => \Carbon\Carbon::parse($activity['date'])->timestamp)
-                ->take(5)
-                ->values();
+        $recentActivities = $recentActivities
+        ->filter(fn ($activity) => !empty($activity['date']))
+        ->sortByDesc(fn ($activity) => \Carbon\Carbon::parse($activity['date'])->timestamp)
+        ->take(5)
+        ->values();
 
-            $quickAssignment = $data['etudiant']->assignationActive ?? $assignation;
-            $quickRoom = $quickAssignment?->chambre;
-            $quickBuilding = $quickRoom?->batiment;
-            $quickResidence = $quickRoom?->cite ?? $quickBuilding?->cite;
-            $quickManager = $quickResidence?->responsable ?? $quickBuilding?->responsable;
-            $quickContact = $quickResidence?->telephone1
-                ?? $quickResidence?->telephone2
-                ?? $quickManager?->telephone1
-                ?? $quickManager?->telephone
-                ?? null;
+        $quickAssignment = $data['etudiant']->assignationActive ?? $assignation;
+        $quickRoom = $quickAssignment?->chambre;
+        $quickBuilding = $quickRoom?->batiment;
+        $quickResidence = $quickRoom?->cite ?? $quickBuilding?->cite;
+        $quickManager = $quickResidence?->responsable ?? $quickBuilding?->responsable;
+        $quickContact = $quickResidence?->telephone1
+        ?? $quickResidence?->telephone2
+        ?? $quickManager?->telephone1
+        ?? $quickManager?->telephone
+        ?? null;
         @endphp
 
         <div class="sd-grid sd-grid-main">
@@ -290,22 +294,22 @@
                     <span class="sd-count">{{ $recentActivities->count() }} {{ $recentActivities->count() > 1 ? 'événements' : 'événement' }}</span>
                 </div>
                 @if($recentActivities->isEmpty())
-                    <p class="sd-empty">Aucune activité récente.</p>
+                <p class="sd-empty">Aucune activité récente.</p>
                 @else
-                    <ul class="sd-list">
-                        @foreach($recentActivities as $activity)
-                            <li class="sd-row">
-                                <span class="sd-row-icon {{ $activity['done'] ? 'is-done' : '' }}">
-                                    <x-admin-icon :name="$activity['icon']" />
-                                </span>
-                                <div class="sd-row-text">
-                                    <strong>{{ $activity['text'] }}</strong>
-                                    <small>{{ formatDateFr(\Carbon\Carbon::parse($activity['date'])->format('Y-m-d'), true) }}</small>
-                                </div>
-                                <span class="sd-status {{ $activity['done'] ? 'is-done' : 'is-pending' }}">{{ $activity['status'] }}</span>
-                            </li>
-                        @endforeach
-                    </ul>
+                <ul class="sd-list">
+                    @foreach($recentActivities as $activity)
+                    <li class="sd-row">
+                        <span class="sd-row-icon {{ $activity['done'] ? 'is-done' : '' }}">
+                            <x-admin-icon :name="$activity['icon']" />
+                        </span>
+                        <div class="sd-row-text">
+                            <strong>{{ $activity['text'] }}</strong>
+                            <small>{{ formatDateFr(\Carbon\Carbon::parse($activity['date'])->format('Y-m-d'), true) }}</small>
+                        </div>
+                        <span class="sd-status {{ $activity['done'] ? 'is-done' : 'is-pending' }}">{{ $activity['status'] }}</span>
+                    </li>
+                    @endforeach
+                </ul>
                 @endif
             </section>
 
@@ -335,7 +339,7 @@
                     </li>
                     <li class="sd-row">
                         <span class="sd-row-icon"><x-admin-icon name="wifi" /></span>
-                        <div class="sd-row-text"><small>Wi-Fi de la résidence</small><strong>{{ $quickResidence ? ($quickResidence->wifi_gratuit ? 'Disponible' : 'Non disponible') : 'Non renseigné' }}</strong></div>
+                        <div class="sd-row-text"><small>Wi-Fi de la résidence </small><strong>{{ $quickResidence ? ($quickResidence->wifi_gratuit ? 'Disponible' : 'Non disponible') : 'Non renseigné' }}</strong></div>
                     </li>
                 </ul>
             </section>
@@ -374,31 +378,31 @@
                     </span>
                     <x-admin-icon name="chevron-right" class="sd-action-chevron" />
                 </a>
-                <button type="button" class="sd-action" onclick="openProfileModal()">
+                <a href="{{ route('etudiants.profile') }}" class="sd-action">
                     <span class="sd-row-icon"><x-admin-icon name="user-round" /></span>
                     <span class="sd-row-text">
                         <strong>Mon profil</strong>
                         <small>Coordonnées et mot de passe</small>
                     </span>
                     <x-admin-icon name="chevron-right" class="sd-action-chevron" />
-                </button>
+                </a>
             </div>
         </section>
-@else
+        @else
         {{-- Demande d'hébergement en cours (ou pas encore de demande) --}}
         @php
-            $demande = $data['derniere_demande'];
-            $documents = collect($demande['documents'] ?? []);
-            $totalDocs = $documents->count();
-            $validDocs = $documents->where('statut', 'valide')->count();
-            $progressPercent = $totalDocs > 0 ? round(($validDocs / $totalDocs) * 100) : 0;
-            $etapes = [
-                ['label' => 'Soumission', 'seuil' => 0],
-                ['label' => 'Vérification', 'seuil' => 25],
-                ['label' => 'Étude du dossier', 'seuil' => 50],
-                ['label' => 'Attribution', 'seuil' => 75],
-                ['label' => 'Validation', 'seuil' => 100],
-            ];
+        $demande = $data['derniere_demande'];
+        $documents = collect($demande['documents'] ?? []);
+        $totalDocs = $documents->count();
+        $validDocs = $documents->where('statut', 'valide')->count();
+        $progressPercent = $totalDocs > 0 ? round(($validDocs / $totalDocs) * 100) : 0;
+        $etapes = [
+        ['label' => 'Soumission', 'seuil' => 0],
+        ['label' => 'Vérification', 'seuil' => 25],
+        ['label' => 'Étude du dossier', 'seuil' => 50],
+        ['label' => 'Attribution', 'seuil' => 75],
+        ['label' => 'Validation', 'seuil' => 100],
+        ];
         @endphp
 
         <div class="sd-head">
@@ -406,11 +410,11 @@
                 <h1 class="page-title sd-h1">Ma demande d’hébergement</h1>
                 <p class="sd-lead">
                     @if($data['statut_demande'] === 'Acceptée')
-                        Votre demande est acceptée : l’attribution de votre chambre est en cours.
+                    Votre demande est acceptée : l’attribution de votre chambre est en cours.
                     @elseif($demande)
-                        Votre demande est en cours de traitement par le CROU.
+                    Votre demande est en cours de traitement par le CROU.
                     @else
-                        Vous n’avez pas encore de demande d’hébergement pour cette année.
+                    Vous n’avez pas encore de demande d’hébergement pour cette année.
                     @endif
                 </p>
             </div>
@@ -441,7 +445,7 @@
                 <div class="sd-kpi-row">
                     <strong>{{ $dateEcheanceDemandeIso ? formatDateFr($dateEcheanceDemandeIso, true) : '—' }}</strong>
                     @if($dateEcheanceDemandeIso)
-                        <span class="sd-kpi-badge" id="countdown">Calcul…</span>
+                    <span class="sd-kpi-badge" id="countdown">Calcul…</span>
                     @endif
                 </div>
             </article>
@@ -473,10 +477,10 @@
                         <div class="sd-row-text"><small>Type de demande</small><strong>Première demande</strong></div>
                     </li>
                     @if(isset($demande['moyenne']))
-                        <li class="sd-row">
-                            <span class="sd-row-icon"><x-admin-icon name="chart-column" /></span>
-                            <div class="sd-row-text"><small>Moyenne</small><strong>{{ $demande['moyenne'] }}/20</strong></div>
-                        </li>
+                    <li class="sd-row">
+                        <span class="sd-row-icon"><x-admin-icon name="chart-column" /></span>
+                        <div class="sd-row-text"><small>Moyenne</small><strong>{{ $demande['moyenne'] }}/20</strong></div>
+                    </li>
                     @endif
                     <li class="sd-row">
                         <span class="sd-row-icon"><x-admin-icon name="building-2" /></span>
@@ -492,25 +496,25 @@
                     <div class="sd-bar"><span style="width: {{ $progressPercent }}%"></span></div>
                     <ol class="sd-steps">
                         @foreach($etapes as $i => $etape)
-                            <li class="{{ $progressPercent >= $etape['seuil'] ? 'is-done' : '' }}">
-                                <span>{{ $i + 1 }}</span>
-                                {{ $etape['label'] }}
-                            </li>
+                        <li class="{{ $progressPercent >= $etape['seuil'] ? 'is-done' : '' }}">
+                            <span>{{ $i + 1 }}</span>
+                            {{ $etape['label'] }}
+                        </li>
                         @endforeach
                     </ol>
                 </div>
 
                 @if($data['statut_demande'] === 'En_attente' && $demande)
-                    <div class="sd-decision">
-                        <button type="button" class="sd-btn sd-btn-primary" onclick="showAcceptModal('{{ $demande['id_etudiant'] ?? '' }}')">
-                            <x-admin-icon name="circle-check" size="16" />
-                            Accepter l’offre
-                        </button>
-                        <button type="button" class="sd-btn sd-btn-danger" onclick="showRejectModal('{{ $demande['id_etudiant'] ?? '' }}')">
-                            <x-admin-icon name="circle-x" size="16" />
-                            Refuser
-                        </button>
-                    </div>
+                <div class="sd-decision">
+                    <button type="button" class="sd-btn sd-btn-primary" onclick="showAcceptModal('{{ $demande['id_etudiant'] ?? '' }}')">
+                        <x-admin-icon name="circle-check" size="16" />
+                        Accepter l’offre
+                    </button>
+                    <button type="button" class="sd-btn sd-btn-danger" onclick="showRejectModal('{{ $demande['id_etudiant'] ?? '' }}')">
+                        <x-admin-icon name="circle-x" size="16" />
+                        Refuser
+                    </button>
+                </div>
                 @endif
 
                 <div class="sd-notice">
@@ -533,104 +537,31 @@
                     <span class="sd-count">{{ $validDocs }}/{{ $totalDocs }} validés</span>
                 </div>
                 @if($totalDocs === 0)
-                    <p class="sd-empty">Aucun document fourni pour le moment.</p>
+                <p class="sd-empty">Aucun document fourni pour le moment.</p>
                 @else
-                    <ul class="sd-list">
-                        @foreach($documents as $doc)
-                            @php
-                                $statutDoc = $doc['statut'] ?? '';
-                                [$libelleDoc, $classeDoc] = match ($statutDoc) {
-                                    'valide' => ['Validé', 'is-done'],
-                                    'rejete' => ['Rejeté', 'is-rejected'],
-                                    default => ['En attente', 'is-pending'],
-                                };
-                            @endphp
-                            <li class="sd-row">
-                                <span class="sd-row-icon {{ $statutDoc === 'valide' ? 'is-done' : '' }}"><x-admin-icon name="file-text" /></span>
-                                <div class="sd-row-text"><strong>{{ $doc['nom'] ?? 'Document' }}</strong></div>
-                                <span class="sd-status {{ $classeDoc }}">{{ $libelleDoc }}</span>
-                            </li>
-                        @endforeach
-                    </ul>
+                <ul class="sd-list">
+                    @foreach($documents as $doc)
+                    @php
+                    $statutDoc = $doc['statut'] ?? '';
+                    [$libelleDoc, $classeDoc] = match ($statutDoc) {
+                    'valide' => ['Validé', 'is-done'],
+                    'rejete' => ['Rejeté', 'is-rejected'],
+                    default => ['En attente', 'is-pending'],
+                    };
+                    @endphp
+                    <li class="sd-row">
+                        <span class="sd-row-icon {{ $statutDoc === 'valide' ? 'is-done' : '' }}"><x-admin-icon name="file-text" /></span>
+                        <div class="sd-row-text"><strong>{{ $doc['nom'] ?? 'Document' }}</strong></div>
+                        <span class="sd-status {{ $classeDoc }}">{{ $libelleDoc }}</span>
+                    </li>
+                    @endforeach
+                </ul>
                 @endif
             </section>
         </div>
-@endif
+        @endif
     </div>
 </div>
-
-{{-- Modal « Mon profil » : disponible quel que soit l’état du dossier (menu de l’avatar). --}}
-    <div id="studentProfileModal" class="profile-modal" hidden>
-        <div class="profile-modal-overlay" onclick="closeProfileModal()"></div>
-        <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="studentProfileTitle">
-            <button type="button" class="profile-modal-close" onclick="closeProfileModal()" aria-label="Fermer">×</button>
-            <div class="profile-modal-heading">
-                <div class="profile-modal-avatar">{{ getInitials($data['etudiant']->name ?? 'Étudiant') }}</div>
-                <div>
-                    <span>Compte étudiant</span>
-                    <h2 id="studentProfileTitle">Mon profil</h2>
-                    <p>Consultez votre identité et actualisez vos coordonnées.</p>
-                </div>
-            </div>
-
-            <form method="POST" action="{{ route('etudiants.profile.update') }}">
-                @csrf
-                @method('PATCH')
-                <div class="profile-form-grid">
-                    <label>
-                        <span>Nom complet</span>
-                        <input value="{{ $data['etudiant']->name ?? '' }}" disabled>
-                    </label>
-                    <label>
-                        <span>Matricule</span>
-                        <input value="{{ $data['etudiant']->matricule ?? '' }}" disabled>
-                    </label>
-                    <label>
-                        <span>E-mail principal</span>
-                        <input value="{{ $data['etudiant']->email1 ?? '' }}" disabled>
-                    </label>
-                    <label>
-                        <span>E-mail secondaire</span>
-                        <input type="email" name="email2" value="{{ old('email2', $data['etudiant']->email2) }}" placeholder="exemple@email.com">
-                        @error('email2')<small>{{ $message }}</small>@enderror
-                    </label>
-                    <label>
-                        <span>Téléphone principal *</span>
-                        <input name="telephone1" value="{{ old('telephone1', $data['etudiant']->telephone1) }}" required>
-                        @error('telephone1')<small>{{ $message }}</small>@enderror
-                    </label>
-                    <label>
-                        <span>Téléphone secondaire</span>
-                        <input name="telephone2" value="{{ old('telephone2', $data['etudiant']->telephone2) }}">
-                        @error('telephone2')<small>{{ $message }}</small>@enderror
-                    </label>
-                </div>
-                <div class="profile-modal-actions">
-                    <button type="button" class="profile-cancel" onclick="closeProfileModal()">Annuler</button>
-                    <button type="submit" class="profile-save">Enregistrer les modifications</button>
-                </div>
-                        </form>
-            <form method="POST" action="{{ route('etudiants.profile.password') }}" style="margin-top:24px">
-                @csrf
-                @method('PUT')
-                <h3 style="font-size:18px;margin-bottom:16px">Modifier mon mot de passe</h3>
-                <div class="profile-form-grid">
-                    <label>
-                        <span>Nouveau mot de passe</span>
-                        <input type="password" name="password" autocomplete="new-password" required>
-                        @error('password', 'passwordChange')<small>{{ $message }}</small>@enderror
-                    </label>
-                    <label>
-                        <span>Confirmer le nouveau mot de passe</span>
-                        <input type="password" name="password_confirmation" autocomplete="new-password" required>
-                    </label>
-                </div>
-                <div class="profile-modal-actions">
-                    <button type="submit" class="profile-save">Modifier mon mot de passe</button>
-                </div>
-            </form>
-        </div>
-    </div>
 
 {{-- ============================================
     STYLES
@@ -694,13 +625,25 @@
     }
 
     @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
     }
 
     @keyframes slideUp {
-        from { transform: translateY(30px); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
+        from {
+            transform: translateY(30px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
     }
 
     .modal-header {
@@ -922,7 +865,9 @@
     }
 
     @keyframes spin {
-        to { transform: rotate(360deg); }
+        to {
+            transform: rotate(360deg);
+        }
     }
 
     .btn-accept {
@@ -1122,12 +1067,29 @@
         color: var(--muted);
     }
 
-    .stat-card.teal { border-left-color: #1e7aa8; }
-    .stat-card.amber { border-left-color: var(--warning); }
-    .stat-card.green { border-left-color: var(--success); }
-    .stat-card.red { border-left-color: var(--danger); }
-    .stat-card.purple { border-left-color: #7a5d9e; }
-    .stat-card.blue { border-left-color: #1565c0; }
+    .stat-card.teal {
+        border-left-color: #1e7aa8;
+    }
+
+    .stat-card.amber {
+        border-left-color: var(--warning);
+    }
+
+    .stat-card.green {
+        border-left-color: var(--success);
+    }
+
+    .stat-card.red {
+        border-left-color: var(--danger);
+    }
+
+    .stat-card.purple {
+        border-left-color: #7a5d9e;
+    }
+
+    .stat-card.blue {
+        border-left-color: #1565c0;
+    }
 
     .stat-trend {
         font-size: var(--app-font-min, 15px);
@@ -1354,36 +1316,27 @@
         margin-top: 2px;
     }
 
-    .quick-action-card.payment:hover { border-color: var(--success); }
-    .quick-action-card.maintenance:hover { border-color: var(--warning); }
-    .quick-action-card.contract:hover { border-color: var(--primary); }
-    .quick-action-card.profile:hover { border-color: #7a5d9e; }
-    button.quick-action-card { width: 100%; text-align: left; font-family: inherit; cursor: pointer; }
+    .quick-action-card.payment:hover {
+        border-color: var(--success);
+    }
 
-    .profile-modal[hidden] { display: none; }
-    .profile-modal { position: fixed; inset: 0; z-index: 1500; display: grid; place-items: center; padding: 20px; }
-    .profile-modal-overlay { position: absolute; inset: 0; background: rgba(15, 23, 42, .58); backdrop-filter: blur(2px); }
-    .profile-modal-card { position: relative; width: min(720px, 100%); max-height: 90vh; overflow-y: auto; padding: 28px; border-radius: 20px; background: #fff; box-shadow: 0 28px 80px rgba(15, 23, 42, .28); }
-    .profile-modal-close { position: absolute; top: 16px; right: 18px; width: 36px; height: 36px; border: 0; border-radius: 10px; background: var(--gray-100); color: var(--gray-700); font-size: 24px; cursor: pointer; }
-    .profile-modal-heading { display: flex; gap: 15px; align-items: center; padding-right: 40px; margin-bottom: 24px; }
-    .profile-modal-avatar { width: 54px; height: 54px; flex: 0 0 54px; display: grid; place-items: center; border-radius: 15px; background: var(--teal-50); color: var(--teal-600); font-size: 18px; font-weight: 750; }
-    .profile-modal-heading span { color: var(--teal-600); font-size: var(--app-font-min, 15px); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    .profile-modal-heading h2 { margin: 2px 0; font-size: 22px; }
-    .profile-modal-heading p { margin: 0; color: var(--muted); font-size: var(--app-font-min, 15px); }
-    .profile-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .profile-form-grid label > span { display: block; margin-bottom: 7px; color: var(--gray-700); font-size: var(--app-font-min, 15px); font-weight: 650; }
-    .profile-form-grid input { width: 100%; min-height: 44px; padding: 10px 13px; border: 1px solid var(--border); border-radius: 10px; font: inherit; font-size: var(--app-font-min, 15px); }
-    .profile-form-grid input:focus { outline: 0; border-color: var(--teal-400); box-shadow: 0 0 0 3px rgba(42, 141, 108, .12); }
-    .profile-form-grid input:disabled { background: var(--gray-50); color: var(--muted); }
-    .profile-form-grid small { display: block; margin-top: 5px; color: var(--danger); }
-    .profile-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
-    .profile-modal-actions button { min-height: 42px; padding: 10px 17px; border-radius: 9px; font-weight: 650; cursor: pointer; }
-    .profile-cancel { border: 1px solid var(--border); background: #fff; color: var(--gray-700); }
-    .profile-save { border: 1px solid var(--teal-600); background: var(--teal-600); color: #fff; }
-    @media (max-width: 650px) {
-        .profile-modal-card { padding: 22px 16px; }
-        .profile-form-grid { grid-template-columns: 1fr; }
-        .profile-modal-actions { flex-direction: column-reverse; }
+    .quick-action-card.maintenance:hover {
+        border-color: var(--warning);
+    }
+
+    .quick-action-card.contract:hover {
+        border-color: var(--primary);
+    }
+
+    .quick-action-card.profile:hover {
+        border-color: #7a5d9e;
+    }
+
+    button.quick-action-card {
+        width: 100%;
+        text-align: left;
+        font-family: inherit;
+        cursor: pointer;
     }
 
     /* ============================================
@@ -1507,9 +1460,17 @@
         font-size: var(--app-font-min, 15px);
     }
 
-    .document-item.valide { border-left: 3px solid var(--success); }
-    .document-item.rejete { border-left: 3px solid var(--danger); }
-    .document-item.pending { border-left: 3px solid var(--warning); }
+    .document-item.valide {
+        border-left: 3px solid var(--success);
+    }
+
+    .document-item.rejete {
+        border-left: 3px solid var(--danger);
+    }
+
+    .document-item.pending {
+        border-left: 3px solid var(--warning);
+    }
 
     /* ============================================
        DEMANDE PROGRESS
@@ -1702,6 +1663,7 @@
             transform: translateX(100%);
             opacity: 0;
         }
+
         to {
             transform: translateX(0);
             opacity: 1;
@@ -1889,7 +1851,9 @@
             if (!navLink) return;
             event.preventDefault();
             navLink.click();
-            window.scrollTo({ top: 0 });
+            window.scrollTo({
+                top: 0
+            });
         });
     });
 
@@ -1930,35 +1894,12 @@
     // ============================================
     // FERMER MODALES AVEC ÉCHAP
     // ============================================
-    function openProfileModal() {
-        const modal = document.getElementById('studentProfileModal');
-        if (!modal) return;
-        modal.hidden = false;
-        document.body.style.overflow = 'hidden';
-    }
-
-    function closeProfileModal() {
-        const modal = document.getElementById('studentProfileModal');
-        if (!modal) return;
-        modal.hidden = true;
-        document.body.style.overflow = '';
-    }
-
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
             closeConfirmModal();
             closeRejectModal();
-            closeProfileModal();
         }
     });
-
-    @if($errors->hasAny(['email2', 'telephone1', 'telephone2']) || $errors->getBag('passwordChange')->any())
-        document.addEventListener('DOMContentLoaded', openProfileModal);
-    @endif
-
-    @if(session('profile_success'))
-        document.addEventListener('DOMContentLoaded', () => showToast(@json(session('profile_success'))));
-    @endif
 
     // ============================================
     // FERMER MODALES EN CLIQUANT SUR L'OVERLAY

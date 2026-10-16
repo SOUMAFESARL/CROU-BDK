@@ -302,7 +302,9 @@
     color: var(--shell-muted);
 }
 
-.admin-shell .as-sidebar .as-sub-button {
+/* :hover inclus : sinon `.as-sidebar a:hover` (14px, plus spécifique) agrandit le texte au survol. */
+.admin-shell .as-sidebar .as-sub-button,
+.admin-shell .as-sidebar .as-sub-button:hover {
     font-size: 13.5px;
 }
 

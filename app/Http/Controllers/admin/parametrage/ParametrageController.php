@@ -8,8 +8,11 @@ use Illuminate\Http\Request;
 
 class ParametrageController extends  Controller
 {
-    public function index()
+    /** Accueil du paramétrage : modules du sous-menu « Paramètres » (config/admin_menu.php), filtrés par droits. */
+    public function index(Request $request)
     {
-        return view('admin.parametrage.index');
+        return \Inertia\Inertia::render('Admin/Parametrage/Index', [
+            'modules' => app(\App\Services\AdminMenu::class)->childrenOf($request->user('admin'), 'admin.parametrage.index', $request),
+        ]);
     }
 }

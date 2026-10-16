@@ -2,6 +2,13 @@
 
 namespace App\Http\Controllers\admin\immobilier\vie_residentielle;
 
+use Inertia\Inertia;
+use Illuminate\Support\Str;
+use App\Services\AdminAccess;
+use App\Models\Etudiant;
+use App\Models\Chambre;
+use App\Models\Batiment;
+use App\Models\Annonce;
 use App\Http\Controllers\Controller;
 use App\Repositories\Interfaces\AnnonceRepositoryInterface;
 use Illuminate\Http\Request;
@@ -31,27 +38,86 @@ class AnnonceController extends Controller
         $this->etidantService = $etidantService;
     }
 
+    private const STATUTS = ['publie' => 'Publiée', 'brouillon' => 'Brouillon', 'planifie' => 'Planifiée', 'annule' => 'Annulée'];
+
+    private const AUDIENCES = [
+        'all' => 'Tous les étudiants', 'cite' => 'Par cité', 'batiment' => 'Par bâtiment',
+        'chambre' => 'Par chambre', 'specific' => 'Sélection d’étudiants',
+    ];
+
     /**
-     * Liste des annonces
+     * Liste des annonces (page Inertia ; création, modification et publication dans la même page).
      */
     public function index(Request $request)
     {
-        $filters = $request->only(['statut', 'canal', 'search', 'date_debut', 'date_fin', 'audience', 'priorite']);
-       $cites = $this->citeService->getCites();
-        $batiments = $this->batimentService->getAll();
-        $annonces = $this->annonceRepository->paginateWithFilters($filters, 15);
-        $chambres = $this->chambreService->getAll();
-        $etudiants= $this->etidantService->getListeEtudiants('residents')['data'];
+        $filters = [
+            'statut' => array_key_exists((string) $request->query('statut'), self::STATUTS) ? $request->query('statut') : '',
+            'canal' => in_array($request->query('canal'), Annonce::CANAUX, true) ? $request->query('canal') : '',
+            'search' => trim((string) $request->query('search', '')),
+            'date_debut' => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $request->query('date_debut')) ? $request->query('date_debut') : '',
+            'date_fin' => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $request->query('date_fin')) ? $request->query('date_fin') : '',
+        ];
 
-        $stats = $this->annonceRepository->countByStatut();
+        $access = app(AdminAccess::class);
+        $admin = $request->user('admin');
+        $url = fn (string $route, array|string $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
 
+        $annonces = $this->annonceRepository->paginateWithFilters(array_filter($filters), 10)
+            ->through(fn (Annonce $annonce) => [
+                'id' => $annonce->id_annonce,
+                'titre' => $annonce->titre,
+                'contenu' => (string) $annonce->contenu,
+                'extrait' => Str::limit(trim(html_entity_decode(strip_tags((string) $annonce->contenu))), 220),
+                'statut' => $annonce->statut,
+                'statut_label' => self::STATUTS[$annonce->statut] ?? $annonce->statut,
+                'priorite' => $annonce->priorite,
+                'canaux' => array_values(array_intersect($annonce->canaux ?? [], Annonce::CANAUX)),
+                'audience' => $annonce->audience,
+                'audience_label' => self::AUDIENCES[$annonce->audience] ?? $annonce->audience,
+                'cibles' => $annonce->audience_cible ?: (object) [],
+                'date_creation' => $annonce->created_at?->format('Y-m-d H:i'),
+                'date_publication' => $annonce->date_publication?->format('Y-m-d H:i'),
+                'date_planification' => $annonce->date_planification?->format('Y-m-d\TH:i'),
+                'createur' => $annonce->createur?->name,
+                'envois' => [
+                    'acceptes' => (int) $annonce->deliveries_sent_count,
+                    'en_attente' => (int) $annonce->deliveries_pending_count,
+                    'echecs' => (int) $annonce->deliveries_failed_count,
+                ],
+                'vues' => (int) $annonce->vues,
+                'reactions' => (int) $annonce->reactions,
+                'pieces_jointes' => array_values(array_filter((array) $annonce->pieces_jointes, 'is_string')),
+                'urls' => [
+                    'update' => $annonce->statut !== 'annule' ? $url('admin.hebergement.annonce.update', $annonce->id_annonce) : null,
+                    'publish' => !in_array($annonce->statut, ['publie', 'annule'], true) ? $url('admin.hebergement.annonce.publish', $annonce->id_annonce) : null,
+                    'destroy' => $url('admin.hebergement.annonce.destroy', $annonce->id_annonce),
+                ],
+            ]);
 
-        return view('admin.hebergement.vie_residentielle.annonce', compact('annonces', 'stats', 'filters','cites','batiments','chambres','etudiants'));
+        return Inertia::render('Admin/Hebergement/Annonces/Index', [
+            'annonces' => $annonces,
+            'stats' => $this->annonceRepository->countByStatut(),
+            'filters' => $filters,
+            'audiences' => collect(self::AUDIENCES)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values(),
+            'cibles' => [
+                'cites' => $this->citeService->getCites()->map(fn ($cite) => ['id' => $cite->id_cite, 'name' => $cite->name])->values(),
+                'batiments' => Batiment::query()->orderBy('name')->get(['id_batiment', 'cite_id', 'name'])
+                    ->map(fn ($batiment) => ['id' => $batiment->id_batiment, 'cite_id' => $batiment->cite_id, 'name' => $batiment->name])->values(),
+                'chambres' => Chambre::query()->whereNotNull('numero_chambre')->orderBy('numero_chambre')->get(['id_chambre', 'batiment_id', 'numero_chambre'])
+                    ->map(fn ($chambre) => ['id' => $chambre->id_chambre, 'batiment_id' => $chambre->batiment_id, 'numero' => $chambre->numero_chambre])->values(),
+                'etudiants' => Etudiant::query()->where('statut_inscription', 'residents')->orderBy('name')->get(['id_etudiant', 'name', 'matricule'])
+                    ->map(fn ($etudiant) => ['id' => $etudiant->id_etudiant, 'name' => $etudiant->name, 'matricule' => $etudiant->matricule])->values(),
+            ],
+            'urls' => [
+                'index' => route('admin.hebergement.annonce.index'),
+                'store' => $url('admin.hebergement.annonce.store'),
+            ],
+        ]);
     }
 
     public function show($id)
     {
-        $annonce = $this->annonceRepository->find($id); // adapte à ton repository/modèle
+        $annonce = $this->annonceRepository->find($id);
 
         if (!$annonce) {
             return response()->json(['message' => 'Annonce introuvable'], 404);
@@ -79,11 +145,15 @@ class AnnonceController extends Controller
             'statut'          => 'required|in:brouillon,publie,planifie',
             'priorite'        => 'required|in:normale,haute,urgente',
             'date_planifiee'  => 'nullable|required_if:statut,planifie|date|after:now',
-        ]);
+        ], self::MESSAGES);
 
         $data = $this->normalizeAudience($data);
         $annonce = $this->annonceRepository->update($id, $data);
         abort_unless($annonce, 404);
+
+        if (!$request->expectsJson()) {
+            return back()->with('success', 'Annonce mise à jour avec succès.');
+        }
 
         return response()->json([
             'success' => true,
@@ -91,6 +161,20 @@ class AnnonceController extends Controller
             'data'    => $annonce,
         ]);
     }
+
+    /** Messages des règles communes à la création et à la modification. */
+    private const MESSAGES = [
+        'titre.required' => 'Le titre est obligatoire.',
+        'contenu.required' => 'Le contenu est obligatoire.',
+        'canaux.required' => 'Choisissez au moins un canal de diffusion.',
+        'cites.required_if' => 'Choisissez au moins une cité.',
+        'batiments.required_if' => 'Choisissez au moins un bâtiment.',
+        'chambres.required_if' => 'Choisissez au moins une chambre.',
+        'etudiants.required_if' => 'Choisissez au moins un étudiant.',
+        'date_planifiee.required_if' => 'Indiquez la date de publication.',
+        'date_planifiee.after' => 'La date de publication doit être dans le futur.',
+    ];
+
     /**
      * Créer une annonce
      */
@@ -115,15 +199,15 @@ class AnnonceController extends Controller
             'date_planifiee' => 'nullable|required_if:statut,planifie|date|after:now',
             'fichiers'              => 'nullable|array',
             'fichiers.*'            => 'file|mimes:pdf,doc,docx,jpg,jpeg,png|max:5120',
-        ]);
-        $image =[];
-        if($request->hasFile('fichiers')){
+        ], self::MESSAGES);
+        $image = [];
+        if ($request->hasFile('fichiers')) {
             foreach ($request->fichiers as $fichier) {
-              $image[]=  doc_upload('annonce',  'png', $fichier);
+                $image[] = doc_upload('annonce', 'png', $fichier);
             }
         }
-       $data['pieces_jointes'] = $image;
-       $data = $this->normalizeAudience($data);
+        $data['pieces_jointes'] = $image;
+        $data = $this->normalizeAudience($data);
 
         $annonce = $this->annonceRepository->create($data);
 
@@ -131,13 +215,17 @@ class AnnonceController extends Controller
             $this->annonceRepository->schedule($annonce->id_annonce, $data['date_planifiee']);
         }
 
-        return response()->json(['success' => true, 'message' => 'Annonce enregistrée. Les envois seront traités à la publication.', 'data' => $annonce], 201);
+        $message = match ($data['statut']) {
+            'publie' => 'Annonce publiée. Les envois sont en cours.',
+            'planifie' => 'Annonce planifiée. Elle sera diffusée à la date prévue.',
+            default => 'Brouillon enregistré.',
+        };
 
-//        return response()->json([
-//            'success' => true,
-//            'message' => 'Annonce créée avec succès',
-//            'data'    => $annonce,
-//        ], 201);
+        if (!$request->expectsJson()) {
+            return back()->with('success', $message);
+        }
+
+        return response()->json(['success' => true, 'message' => 'Annonce enregistrée. Les envois seront traités à la publication.', 'data' => $annonce], 201);
     }
 
     /**
@@ -154,13 +242,16 @@ class AnnonceController extends Controller
         ]);
     }
 
-
     /**
      * Supprimer une annonce
      */
-    public function destroy(string $id)
+    public function destroy(Request $request, string $id)
     {
         $this->annonceRepository->delete($id);
+
+        if (!$request->expectsJson()) {
+            return back()->with('success', 'Annonce supprimée.');
+        }
 
         return response()->json([
             'success' => true,

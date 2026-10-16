@@ -87,7 +87,7 @@ class SimplifiedUsersTest extends TestCase
         $response = $controller->updatePassword($request);
         $this->assertTrue(Hash::check('UpdatedPass123!', $student->password));
         $this->assertNotEmpty($student->remember_token);
-        $this->assertStringContainsString('/dashboard', $response->getTargetUrl());
+        $this->assertStringContainsString('/profil', $response->getTargetUrl());
         $request->merge(['password_confirmation'=>'Different123!']);
         try {
             $controller->updatePassword($request);

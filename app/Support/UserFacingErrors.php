@@ -77,6 +77,10 @@ final class UserFacingErrors
         $message = self::message($error);
         $headers = $error instanceof HttpExceptionInterface ? $error->getHeaders() : [];
         $headers['Cache-Control'] = 'private, no-store';
+        // Action envoyée par une page React (Inertia) : retour à la page avec le message en toast (flash `error`).
+        if (!$json && $request->header('X-Inertia') && !$request->isMethod('GET')) {
+            return back(303)->with('error', $message);
+        }
         if ($json) {
             $payload = ['success'=>false, 'message'=>$message];
             if ($error instanceof ValidationException) $payload['errors'] = $error->errors();

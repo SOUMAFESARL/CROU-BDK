@@ -62,6 +62,28 @@ class ParcImmobilierFormTest extends TestCase
             $t->timestamps(); $t->softDeletes();
         });
 
+        Schema::create('aile_batiment', function (Blueprint $t) {
+            $t->increments('id_aile_batiment'); $t->string('code_aile'); $t->string('batiment_id'); $t->integer('numero')->default(1);
+            $t->string('name')->nullable(); $t->integer('nombre_niveaux')->default(0); $t->integer('total_chambres')->default(0);
+            $t->integer('ordre_display')->default(1); $t->string('created_by')->nullable(); $t->timestamps();
+        });
+        Schema::create('niveau_aile_batiment', function (Blueprint $t) {
+            $t->increments('id_niveau_aile'); $t->string('code_aile'); $t->string('niveau_aile_code'); $t->integer('niveau_numero')->default(0);
+            $t->string('type_occupation')->nullable(); $t->integer('total_chambres')->default(0); $t->string('created_by')->nullable(); $t->timestamps();
+        });
+        Schema::create('chambre', function (Blueprint $t) {
+            $t->string('id_chambre')->primary();
+            foreach (['numero_chambre', 'niveau_aile_code', 'code_aile', 'batiment_id', 'cite_id', 'campus_id', 'type_occupation_id', 'type_chambre_id', 'created_by'] as $column) {
+                $t->string($column)->nullable();
+            }
+            $t->string('etat')->default('disponible'); $t->integer('capacite_max')->default(1); $t->integer('occupants_actuels')->default(0);
+            $t->timestamps(); $t->softDeletes();
+        });
+
+        Schema::create('assignation_chambres', function (Blueprint $t) {
+            $t->string('id_assignation')->primary(); $t->string('chambre_id'); $t->string('statut'); $t->dateTime('date_fin')->nullable(); $t->timestamps();
+        });
+
         DB::table('users')->insert(['id_user' => 'resp', 'name' => 'Kouassi Responsable', 'telephone_principal' => '0700000000', 'email' => 'resp@crou.ci']);
         DB::table('type_cite')->insert([
             ['id_type_cite' => 'tm', 'name' => 'Mixte'],
@@ -200,6 +222,121 @@ class ParcImmobilierFormTest extends TestCase
         $this->assertSame(422, $reponse->getStatusCode());
         $this->assertArrayHasKey('name', $reponse->getData(true)['errors']);
         $this->assertSame('BAT C', DB::table('batiment')->where('id_batiment', 'b2')->value('name'));
+    }
+
+    public function test_modification_batiment_affiche_les_niveaux_existants(): void
+    {
+        $this->structureB1();
+
+        $structure = $this->formPage(['type' => 'batiment', 'edit' => 1, 'id' => 'b1'])['props']['item']['structure'];
+
+        $this->assertCount(1, $structure);
+        $this->assertSame('A1', $structure[0]['code']);
+        $this->assertSame([0, 1], array_column($structure[0]['niveaux'], 'numero'));
+        $this->assertSame([2, 1], array_column($structure[0]['niveaux'], 'chambres'));
+        $this->assertSame([0, 1], array_column($structure[0]['niveaux'], 'occupees'));
+        $this->assertSame('hommes', $structure[0]['niveaux'][0]['type_occupation']);
+    }
+
+    public function test_modification_batiment_ajoute_chambres_et_etage(): void
+    {
+        $this->structureB1();
+
+        $reponse = $this->updateB1([
+            ['code' => 'A1', 'nom' => 'Aile Principale', 'niveaux' => [
+                ['code' => 'N0', 'numero' => 0, 'chambres' => 3, 'type_occupation' => 'uniquement homme'],
+                ['code' => 'N1', 'numero' => 1, 'chambres' => 1, 'type_occupation' => 'uniquement homme'],
+                ['code' => null, 'numero' => 2, 'chambres' => 2, 'type_occupation' => 'uniquement homme'],
+            ]],
+        ]);
+
+        $this->assertSame(200, $reponse->getStatusCode(), json_encode($reponse->getData(true)));
+        $this->assertSame(3, DB::table('chambre')->where('niveau_aile_code', 'N0')->count());
+        $nouveau = DB::table('niveau_aile_batiment')->where('code_aile', 'A1')->where('niveau_numero', 2)->first();
+        $this->assertNotNull($nouveau);
+        $this->assertSame(2, DB::table('chambre')->where('niveau_aile_code', $nouveau->niveau_aile_code)->count());
+        $batiment = DB::table('batiment')->where('id_batiment', 'b1')->first();
+        $this->assertEquals(6, $batiment->total_chambres);
+        $this->assertEquals(3, $batiment->total_etages);
+    }
+
+    public function test_modification_batiment_refuse_moins_de_chambres_ou_niveau_occupe_change(): void
+    {
+        $this->structureB1();
+
+        $diminution = $this->updateB1([['code' => 'A1', 'nom' => 'Aile Principale', 'niveaux' => [
+            ['code' => 'N0', 'numero' => 0, 'chambres' => 1, 'type_occupation' => 'uniquement homme'],
+        ]]]);
+        $this->assertSame(422, $diminution->getStatusCode());
+        $this->assertArrayHasKey('structure_data', $diminution->getData(true)['errors']);
+
+        // Le premier étage a une chambre occupée : son occupation ne change pas.
+        $occupe = $this->updateB1([['code' => 'A1', 'nom' => 'Aile Principale', 'niveaux' => [
+            ['code' => 'N1', 'numero' => 1, 'chambres' => 1, 'type_occupation' => 'mixte'],
+        ]]]);
+        $this->assertSame(422, $occupe->getStatusCode());
+        $this->assertSame(3, DB::table('chambre')->count());
+        $this->assertSame('hommes', DB::table('niveau_aile_batiment')->where('niveau_aile_code', 'N1')->value('type_occupation'));
+    }
+
+    public function test_modification_batiment_retire_les_niveaux_superieurs_libres(): void
+    {
+        $this->structureB1();
+        DB::table('niveau_aile_batiment')->insert(['code_aile' => 'A1', 'niveau_aile_code' => 'N2', 'niveau_numero' => 2, 'type_occupation' => 'hommes', 'total_chambres' => 2]);
+        DB::table('chambre')->insert([
+            ['id_chambre' => 'c4', 'niveau_aile_code' => 'N2', 'code_aile' => 'A1', 'batiment_id' => 'b1', 'cite_id' => 'cH', 'occupants_actuels' => 0, 'etat' => 'disponible'],
+            ['id_chambre' => 'c5', 'niveau_aile_code' => 'N2', 'code_aile' => 'A1', 'batiment_id' => 'b1', 'cite_id' => 'cH', 'occupants_actuels' => 0, 'etat' => 'disponible'],
+        ]);
+        $garder = fn (array $codes) => array_map(fn ($code) => ['code' => $code, 'numero' => (int) substr($code, 1), 'chambres' => $code === 'N0' ? 2 : 1, 'type_occupation' => 'uniquement homme'], $codes);
+
+        // Pas de retrait « par le milieu » : l'étage 1 est sous l'étage 2 gardé.
+        $milieu = $this->updateB1([['code' => 'A1', 'nom' => 'Aile Principale', 'niveaux' => $garder(['N0', 'N2']), 'niveaux_retires' => ['N1']]]);
+        $this->assertSame(422, $milieu->getStatusCode());
+        $this->assertStringContainsString('plus haut', $milieu->getData(true)['message']);
+
+        // Étage 1 occupé : on ne peut retirer que l'étage 2.
+        $occupe = $this->updateB1([['code' => 'A1', 'nom' => 'Aile Principale', 'niveaux' => $garder(['N0']), 'niveaux_retires' => ['N2', 'N1']]]);
+        $this->assertSame(422, $occupe->getStatusCode());
+        $this->assertSame(5, DB::table('chambre')->whereNull('deleted_at')->count());
+
+        // Une proposition en cours sur une chambre bloque aussi le retrait.
+        DB::table('assignation_chambres')->insert(['id_assignation' => 'as1', 'chambre_id' => 'c4', 'statut' => 'en_attente']);
+        $attribue = $this->updateB1([['code' => 'A1', 'nom' => 'Aile Principale', 'niveaux' => $garder(['N0', 'N1']), 'niveaux_retires' => ['N2']]]);
+        $this->assertSame(422, $attribue->getStatusCode());
+        DB::table('assignation_chambres')->delete();
+
+        $ok = $this->updateB1([['code' => 'A1', 'nom' => 'Aile Principale', 'niveaux' => $garder(['N0', 'N1']), 'niveaux_retires' => ['N2']]]);
+        $this->assertSame(200, $ok->getStatusCode(), json_encode($ok->getData(true)));
+        $this->assertFalse(DB::table('niveau_aile_batiment')->where('niveau_aile_code', 'N2')->exists());
+        $this->assertSame(2, DB::table('chambre')->where('niveau_aile_code', 'N2')->whereNotNull('deleted_at')->count());
+        $batiment = DB::table('batiment')->where('id_batiment', 'b1')->first();
+        $this->assertEquals(3, $batiment->total_chambres);
+        $this->assertEquals(2, $batiment->total_etages);
+    }
+
+    /** b1 : une aile, RDC (2 chambres libres) et étage 1 (1 chambre occupée). */
+    private function structureB1(): void
+    {
+        DB::table('aile_batiment')->insert(['code_aile' => 'A1', 'batiment_id' => 'b1', 'numero' => 1, 'name' => 'Aile Principale', 'nombre_niveaux' => 2, 'total_chambres' => 3]);
+        DB::table('niveau_aile_batiment')->insert([
+            ['code_aile' => 'A1', 'niveau_aile_code' => 'N0', 'niveau_numero' => 0, 'type_occupation' => 'hommes', 'total_chambres' => 2],
+            ['code_aile' => 'A1', 'niveau_aile_code' => 'N1', 'niveau_numero' => 1, 'type_occupation' => 'hommes', 'total_chambres' => 1],
+        ]);
+        DB::table('chambre')->insert([
+            ['id_chambre' => 'c1', 'niveau_aile_code' => 'N0', 'code_aile' => 'A1', 'batiment_id' => 'b1', 'cite_id' => 'cH', 'occupants_actuels' => 0, 'etat' => 'disponible'],
+            ['id_chambre' => 'c2', 'niveau_aile_code' => 'N0', 'code_aile' => 'A1', 'batiment_id' => 'b1', 'cite_id' => 'cH', 'occupants_actuels' => 0, 'etat' => 'disponible'],
+            ['id_chambre' => 'c3', 'niveau_aile_code' => 'N1', 'code_aile' => 'A1', 'batiment_id' => 'b1', 'cite_id' => 'cH', 'occupants_actuels' => 1, 'etat' => 'occupee'],
+        ]);
+    }
+
+    private function updateB1(array $ailes)
+    {
+        $request = $this->requete('PUT', [
+            'code' => 'b1',
+            'batiment_data' => json_encode(['code_cite' => 'cH', 'name' => 'BAT A', 'type_occupation' => 'th', 'structure_data' => ['ailes' => $ailes]]),
+        ]);
+
+        return app(ParcImmobilierController::class)->updateBatiment($request);
     }
 
     private function storeBatiment(array $donnees, int $chambres = 4)

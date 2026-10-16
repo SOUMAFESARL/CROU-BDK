@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers\admin\immobilier\vie_residentielle;
 
+use Inertia\Inertia;
+use App\Services\AdminAccess;
+use App\Http\Services\DisciplinaryImpactService;
 use App\Http\Controllers\Controller;
 use App\Models\AssignationChambre;
 use App\Models\Batiment;
@@ -15,20 +18,102 @@ use Illuminate\Validation\ValidationException;
 
 class DisciplinaryReportController extends Controller
 {
+    /** Actions du workflow proposées selon l'état du rapport (mêmes transitions que `transition()`). */
+    private const ACTIONS = [
+        'brouillon' => ['transmettre'],
+        'retourne' => ['transmettre'],
+        'transmis' => ['prendre_en_charge', 'retourner'],
+        'en_cours' => ['decider', 'retourner'],
+        'decision_prise' => ['cloturer'],
+    ];
+
+    private const STATUTS = [
+        'brouillon' => 'Brouillon', 'transmis' => 'Transmis', 'en_cours' => 'En cours', 'retourne' => 'Retourné',
+        'decision_prise' => 'Décision prise', 'cloture' => 'Clôturé',
+    ];
+
     public function index(Request $request)
     {
+        $filtres = [
+            'statut' => array_key_exists((string) $request->query('statut'), self::STATUTS) ? $request->query('statut') : '',
+            'gravite' => in_array($request->query('gravite'), ['faible', 'moyenne', 'grave', 'critique'], true) ? $request->query('gravite') : '',
+            'source' => in_array($request->query('source'), ['etudiant', 'administration'], true) ? $request->query('source') : '',
+        ];
         $reports = DisciplinaryReport::with(['etudiant:id_etudiant,name,matricule', 'cite:id_cite,name', 'batiment:id_batiment,name', 'chambre:id_chambre,numero_chambre', 'historique', 'sanction.etudiant'])
-            ->when($request->filled('statut'), fn ($q) => $q->where('statut', $request->string('statut')))
-            ->when($request->filled('gravite'), fn ($q) => $q->where('gravite', $request->string('gravite')))
-            ->when($request->filled('source'), fn ($q) => $q->where('source', $request->string('source')))
-            ->latest('date_incident')->paginate(15)->withQueryString();
+            ->when($filtres['statut'], fn ($q, $statut) => $q->where('statut', $statut))
+            ->when($filtres['gravite'], fn ($q, $gravite) => $q->where('gravite', $gravite))
+            ->when($filtres['source'], fn ($q, $source) => $q->where('source', $source))
+            ->latest('date_incident')->paginate(10)->withQueryString();
+
+        $access = app(AdminAccess::class);
+        $admin = $request->user('admin');
+        $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+        $peutTraiter = $access->allows($admin, 'admin.hebergement.vie_residentielle.incidents.transition');
+
+        $reports->through(fn (DisciplinaryReport $report) => [
+            'id' => $report->id_rapport,
+            'numero' => $report->numero_rapport,
+            'date_incident' => $report->date_incident?->format('Y-m-d H:i'),
+            'source' => $report->source === 'etudiant' ? 'Espace étudiant' : 'Administration',
+            'confidentiel' => (bool) $report->confidentiel,
+            'resident' => $report->etudiant?->name,
+            'matricule' => $report->etudiant?->matricule,
+            'localisation' => collect([$report->cite?->name, $report->batiment?->name, $report->chambre ? 'Ch. '.$report->chambre->numero_chambre : null])->filter()->implode(' · '),
+            'nature' => $report->nature,
+            'description' => $report->description,
+            'lieu' => $report->lieu,
+            'temoins' => $report->temoins,
+            'gravite' => $report->gravite,
+            'statut' => $report->statut,
+            'statut_label' => self::STATUTS[$report->statut] ?? str((string) $report->statut)->replace('_', ' ')->title()->toString(),
+            'attente' => $report->statut === 'transmis' && $report->transmis_at?->lt(now()->subDay()) ? $report->transmis_at->diffForHumans(null, true) : null,
+            'transmis_at' => $report->transmis_at?->format('Y-m-d H:i'),
+            'pris_en_charge_at' => $report->pris_en_charge_at?->format('Y-m-d H:i'),
+            'decision' => $report->decision,
+            'sanction' => $report->sanction ? [
+                'type' => DisciplinaryImpactService::LABELS[$report->sanction->type] ?? $report->sanction->type,
+                'etudiant' => $report->sanction->etudiant?->name,
+                'statut' => $report->sanction->statut,
+                'date_fin' => $report->sanction->date_fin?->toDateString(),
+            ] : null,
+            'historique' => $report->historique->sortBy('created_at')->map(fn ($item) => [
+                'id' => $item->getKey(),
+                'statut' => self::STATUTS[$item->nouveau_statut] ?? str((string) $item->nouveau_statut)->replace('_', ' ')->title()->toString(),
+                'date' => $item->created_at?->format('Y-m-d H:i'),
+                'commentaire' => $item->commentaire,
+            ])->values(),
+            'actions' => $peutTraiter ? (self::ACTIONS[$report->statut] ?? []) : [],
+            'url_transition' => $peutTraiter ? route('admin.hebergement.vie_residentielle.incidents.transition', $report) : null,
+        ]);
+
         $assignments = AssignationChambre::actives()->with(['etudiant:id_etudiant,name,matricule', 'chambre:id_chambre,numero_chambre,batiment_id,cite_id'])->get();
-        $residents = $assignments->filter(fn ($a) => $a->etudiant && $a->chambre)->map(fn ($a) => ['id'=>$a->etudiant_id,'name'=>$a->etudiant->name,'matricule'=>$a->etudiant->matricule,'chambre_id'=>$a->chambre_id])->values();
+        $residents = $assignments->filter(fn ($a) => $a->etudiant && $a->chambre)->map(fn ($a) => ['id' => $a->etudiant_id, 'name' => $a->etudiant->name, 'matricule' => $a->etudiant->matricule, 'chambre_id' => $a->chambre_id])->values();
         $rooms = $assignments->pluck('chambre')->filter()->unique('id_chambre')->values();
-        $buildings = Batiment::whereIn('id_batiment', $rooms->pluck('batiment_id'))->get(['id_batiment','cite_id','name']);
-        $cites = Cite::whereIn('id_cite', $rooms->pluck('cite_id'))->get(['id_cite','name']);
-        $stats = ['brouillons'=>DisciplinaryReport::whereIn('statut',['brouillon','retourne'])->count(),'transmis'=>DisciplinaryReport::where('statut','transmis')->count(),'en_cours'=>DisciplinaryReport::where('statut','en_cours')->count(),'decides'=>DisciplinaryReport::whereIn('statut',['decision_prise','cloture'])->count()];
-        return view('admin.hebergement.vie_residentielle.incidents.index', compact('reports','residents','rooms','buildings','cites','stats'));
+        $buildings = Batiment::whereIn('id_batiment', $rooms->pluck('batiment_id'))->orderBy('name')->get(['id_batiment', 'cite_id', 'name']);
+        $cites = Cite::whereIn('id_cite', $rooms->pluck('cite_id'))->orderBy('name')->get(['id_cite', 'name']);
+
+        return Inertia::render('Admin/Hebergement/Discipline/Incidents', [
+            'rapports' => $reports,
+            'stats' => [
+                'brouillons' => DisciplinaryReport::whereIn('statut', ['brouillon', 'retourne'])->count(),
+                'transmis' => DisciplinaryReport::where('statut', 'transmis')->count(),
+                'en_cours' => DisciplinaryReport::where('statut', 'en_cours')->count(),
+                'decides' => DisciplinaryReport::whereIn('statut', ['decision_prise', 'cloture'])->count(),
+            ],
+            'filters' => $filtres,
+            'structure' => [
+                'cites' => $cites->map(fn ($cite) => ['id' => $cite->id_cite, 'name' => $cite->name])->values(),
+                'batiments' => $buildings->map(fn ($batiment) => ['id' => $batiment->id_batiment, 'cite_id' => $batiment->cite_id, 'name' => $batiment->name])->values(),
+                'chambres' => $rooms->sortBy('numero_chambre')->map(fn ($chambre) => ['id' => $chambre->id_chambre, 'batiment_id' => $chambre->batiment_id, 'numero' => $chambre->numero_chambre])->values(),
+                'residents' => $residents,
+            ],
+            'sanctions' => collect(DisciplinaryImpactService::LABELS)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values(),
+            'urls' => [
+                'index' => route('admin.hebergement.vie_residentielle.incidents.index'),
+                'store' => $url('admin.hebergement.vie_residentielle.incidents.store'),
+                'sanctions' => $url('admin.hebergement.vie_residentielle.sanctions.index'),
+            ],
+        ]);
     }
 
     public function store(Request $request)

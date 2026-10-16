@@ -15,6 +15,8 @@ use App\Models\AssignationChambre;
 use App\Http\Services\EtudiantService;
 use App\Http\Services\LoyerService;
 use App\Http\Services\CiteService;
+use App\Services\AdminAccess;
+use Inertia\Inertia;
 
 class PaiementController extends Controller
 {
@@ -72,26 +74,66 @@ class PaiementController extends Controller
     $retardPage = $paiementsPage->where('statut_paiement', '!=', 'valide')
         ->where('date_echeance', '<', now())
         ->count();
-    // dd($paiements);
-    return view('admin.hebergement.vie_residentielle.paiement.index', compact(
-        'paiements',
-        'kpis',
-        'statsParResidence',
-        'residences',
-        'residents',
-        'totalDu',
-        'totalEncaisse',
-        'impayes',
-        'tauxRecouvrement',
-        'nombreRetard',
-        'totalPenalites',
-        'totalEncaissePage',
-        'totalDuPage',
-        'impayesPage',
-        'tauxPage',
-        'retardPage'
-    ));
+    $url = $this->urlSiAutorise($request);
+    $nombrePaiements = collect($kpis)->firstWhere('label', 'Nombre de paiements')['value'] ?? 0;
+
+    return Inertia::render('Admin/Hebergement/Paiements/Index', [
+        'paiements' => $paiements->appends($request->query())->through(fn (Paiement $paiement) => [
+            'id' => (string) $paiement->id_paiement,
+            'numero' => $paiement->numero_paiement,
+            'resident' => $paiement->resident?->name,
+            'telephone' => $paiement->resident?->telephone1 ?? $paiement->resident?->telephone2,
+            'residence' => $paiement->cite?->name,
+            'chambre' => $paiement->chambre?->numero_chambre,
+            'mois' => $paiement->mois ? formatPaiementMois($paiement->mois, 0) : null,
+            'montant' => (float) $paiement->montant,
+            'methode' => $paiement->methode_label,
+            'type' => $paiement->type_label,
+            'statut' => $paiement->statut_paiement,
+            'statut_label' => $paiement->statut_label,
+            'date_paiement' => $paiement->date_paiement?->format('Y-m-d H:i'),
+            'urls' => [
+                'show' => $url('admin.hebergement.paiements.show', ['id' => $paiement->id_paiement]),
+                'valider' => $paiement->statut_paiement === 'en_attente' ? $url('admin.hebergement.paiements.valider', ['id' => $paiement->id_paiement]) : null,
+                'annuler' => $paiement->statut_paiement === 'en_attente' ? $url('admin.hebergement.paiements.annuler', ['id' => $paiement->id_paiement]) : null,
+            ],
+        ]),
+        'kpis' => [
+            'total_encaisse' => (float) $totalEncaisse,
+            'taux_recouvrement' => (float) $tauxRecouvrement,
+            'impayes' => (float) $impayes,
+            'penalites' => (float) $totalPenalites,
+            'nombre_paiements' => (int) $nombrePaiements,
+            'nombre_retard' => (int) $nombreRetard,
+        ],
+        'statsParResidence' => collect($statsParResidence)->values(),
+        'residences' => $residences->map(fn (Cite $cite) => ['id' => (string) $cite->id_cite, 'name' => $cite->name])->values(),
+        'filters' => [
+            'residence' => (string) ($filters['residence'] ?? ''),
+            'statut' => (string) ($filters['statut'] ?? ''),
+            'mois' => (string) ($filters['mois'] ?? ''),
+        ],
+        'urls' => [
+            'index' => route('admin.hebergement.paiements.index'),
+            'export' => $url('admin.hebergement.paiements.export', $request->query()),
+            'store' => $url('admin.hebergement.paiements.store'),
+            'recherche' => $url('admin.hebergement.paiements.recherche'),
+            'relances' => $url('admin.hebergement.paiements.relances.envoyer'),
+            'rapport' => $url('admin.hebergement.paiements.rapport_financier'),
+        ],
+    ]);
 }
+
+    /**
+     * URL d'une route admin, ou null si l'administrateur connecté n'y a pas accès (remplace `@adminroute`).
+     */
+    private function urlSiAutorise(Request $request): \Closure
+    {
+        $access = app(AdminAccess::class);
+        $admin = $request->user('admin');
+
+        return fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+    }
 
    
 
@@ -578,7 +620,7 @@ class PaiementController extends Controller
     /**
  * Affiche le détail d'un paiement
  */
-public function show(string $id)
+public function show(Request $request, string $id)
 {
     $paiement = Paiement::with([
         'resident',
@@ -587,8 +629,52 @@ public function show(string $id)
         'repartitions',
         'createdBy'
     ])->findOrFail($id);
-    
-    return view('admin.hebergement.vie_residentielle.paiement.show', compact('paiement'));
+
+    $url = $this->urlSiAutorise($request);
+    $moisListe = $paiement->mois;
+    if (is_string($moisListe)) {
+        $moisListe = json_decode($moisListe, true) ?? [$moisListe];
+    }
+    $totalReparti = (float) $paiement->repartitions->sum('montant');
+
+    return Inertia::render('Admin/Hebergement/Paiements/Show', [
+        'paiement' => [
+            'id' => (string) $paiement->id_paiement,
+            'numero' => $paiement->numero_paiement,
+            'montant' => formatSystemAmount($paiement->montant),
+            'methode' => $paiement->methode_label,
+            'type' => ucfirst((string) $paiement->type_paiement),
+            'statut' => $paiement->statut_paiement,
+            'statut_label' => $paiement->statut_label,
+            'date_paiement' => $paiement->date_paiement?->format('Y-m-d H:i'),
+            'date_echeance' => $paiement->date_echeance?->toDateString(),
+            'reference' => $paiement->reference_transaction,
+            'cree_par' => $paiement->createdBy?->name,
+            'notes' => $paiement->notes,
+            'mois' => $paiement->mois ? array_values(array_map('strval', (array) $moisListe)) : [],
+            'resident' => [
+                'name' => $paiement->resident?->name,
+                'matricule' => $paiement->resident?->matricule,
+                'telephone' => $paiement->resident?->telephone1,
+                'email' => $paiement->resident?->email1,
+                'residence' => $paiement->cite?->name,
+                'chambre' => $paiement->chambre?->numero_chambre,
+            ],
+            'repartitions' => $paiement->repartitions->map(fn ($rep) => [
+                'id' => (string) $rep->getKey(),
+                'type' => $rep->type,
+                'periode' => $rep->mois && $rep->annee ? $rep->mois.'/'.$rep->annee : null,
+                'montant' => formatSystemAmount($rep->montant),
+                'description' => $rep->description,
+            ])->values(),
+            'total_reparti' => formatSystemAmount($totalReparti),
+            'ecart' => $totalReparti != $paiement->montant ? formatSystemAmount($paiement->montant - $totalReparti) : null,
+        ],
+        'urls' => [
+            'index' => $url('admin.hebergement.paiements.index'),
+            'valider' => $paiement->statut_paiement === 'en_attente' ? $url('admin.hebergement.paiements.valider', ['id' => $paiement->id_paiement]) : null,
+        ],
+    ]);
 }
 
 /**
@@ -659,31 +745,73 @@ public function rapportFinancier(Request $request)
     }
 
 
-    return view('admin.hebergement.vie_residentielle.paiement.rapport-financier', compact(
-        'totalAttendu',
-        'totalEncaisse',
-        'totalImpayes',
-        'totalPenalites',
-        'totalRetard',
-        'nbRetard',
-        'nbImpayes',
-        'nbLoyers',
-        'nbPaiements',
-        'tauxRecouvrement',
-        'statsParResidence',
-        'evolutionData',
-        'evolutionLabels',
-        'evolutionAttendus',
-        'repartitionData',
-        'derniersPaiements',
-        'residences',
-        'annee',
-        'mois',
-         'statsParMode',
-        'modeLabels',
-        'modeData',
-        'modeColors'
-    ));
+    $url = $this->urlSiAutorise($request);
+
+    return Inertia::render('Admin/Hebergement/Paiements/RapportFinancier', [
+        'stats' => [
+            'total_attendu' => (float) $totalAttendu,
+            'total_encaisse' => (float) $totalEncaisse,
+            'total_impayes' => (float) $totalImpayes,
+            'total_penalites' => (float) $totalPenalites,
+            'total_retard' => (float) $totalRetard,
+            'nb_retard' => (int) $nbRetard,
+            'nb_impayes' => (int) $nbImpayes,
+            'nb_loyers' => (int) $nbLoyers,
+            'nb_paiements' => (int) $nbPaiements,
+            'taux_recouvrement' => (float) $tauxRecouvrement,
+        ],
+        'evolution' => collect($evolutionLabels)->map(fn ($label, $index) => [
+            'label' => $label,
+            'encaisse' => (float) ($evolutionData[$index] ?? 0),
+            'attendu' => (float) ($evolutionAttendus[$index] ?? 0),
+        ])->values(),
+        'repartition' => [
+            'paye' => (float) $repartitionData[0],
+            'impaye' => (float) $repartitionData[1],
+            'retard' => (float) $repartitionData[2],
+        ],
+        'statsParMode' => collect($statsParMode)->map(fn ($mode) => [
+            'methode' => (string) $mode['methode'],
+            'libelle' => $mode['libelle'],
+            'couleur' => $mode['couleur'],
+            'nombre' => (int) $mode['nombre'],
+            'total' => (float) $mode['total'],
+            'moyenne' => (float) $mode['moyenne'],
+            'pourcentage' => (float) $mode['pourcentage'],
+        ])->values(),
+        'statsParResidence' => collect($statsParResidence)->map(fn ($stat) => [
+            'residence' => $stat['residence'] ?? null,
+            'total_attendu' => (float) ($stat['total_attendu'] ?? 0),
+            'total_encaisse' => (float) ($stat['total_encaisse'] ?? 0),
+            'total_impayes' => (float) ($stat['total_impayes'] ?? 0),
+            'taux_recouvrement' => (float) ($stat['taux_recouvrement'] ?? 0),
+            'nb_residents' => (int) ($stat['nb_residents'] ?? 0),
+            'loyer_moyen' => (float) ($stat['loyer_moyen'] ?? 0),
+            'nb_en_retard' => (int) ($stat['nb_en_retard'] ?? 0),
+            'alerte' => (bool) ($stat['alerte'] ?? false),
+        ])->values(),
+        'derniersPaiements' => collect($derniersPaiements)->map(fn ($paiement) => [
+            'id' => (string) $paiement['id'],
+            'numero' => $paiement['numero'],
+            'resident' => $paiement['resident'],
+            'montant' => (float) $paiement['montant'],
+            'methode' => $paiement['methode'],
+            'statut_label' => $paiement['statut'],
+            'statut_badge' => $paiement['statut_badge'],
+            'date' => $paiement['date'],
+            'url' => $url('admin.hebergement.paiements.show', ['id' => $paiement['id']]),
+        ])->values(),
+        'residences' => $residences->map(fn (Cite $cite) => ['id' => (string) $cite->id_cite, 'name' => $cite->name])->values(),
+        'filters' => [
+            'annee' => (string) $annee,
+            'mois' => (string) ($mois ?? ''),
+            'residence' => (string) ($residence ?? ''),
+        ],
+        'urls' => [
+            'rapport' => route('admin.hebergement.paiements.rapport_financier'),
+            'index' => $url('admin.hebergement.paiements.index'),
+        ],
+    ]);
 }
 
 

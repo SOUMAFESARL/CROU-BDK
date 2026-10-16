@@ -33,7 +33,7 @@ class MaintenancierRequest extends FormRequest
                 Rule::unique('maintenanciers', 'email')->ignore($id, 'id_maintenancier')
             ],
             'specialite' => ['required', 'string', Rule::in(Maintenancier::SPECIALITE)],
-            'cite_id' => ['nullable', 'exists:cites,id_cite'],
+            'cite_id' => ['nullable', 'exists:cite,id_cite'],
             'notes' => ['nullable', 'string'],
             'adresse' => ['nullable', 'string', 'max:255'],
             'statut' => ['boolean'],

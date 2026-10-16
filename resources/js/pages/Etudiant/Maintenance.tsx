@@ -1,0 +1,347 @@
+import {
+    CalendarCheck,
+    CalendarClock,
+    ChevronRight,
+    CircleCheck,
+    Hash,
+    HardHat,
+    Info,
+    Layers,
+    MapPin,
+    Plus,
+    Siren,
+    Star,
+    Wrench,
+    type LucideIcon,
+} from "lucide-react";
+import { useState } from "react";
+import {
+    Filtres,
+    Ligne,
+    Notice,
+    PaginationSimple,
+    Panneau,
+    Vide,
+    type PaginationSimpleProps,
+} from "@/components/etudiant/panneau";
+import {
+    SignalementEquipement,
+    type Categorie,
+    type EquipementChambre,
+} from "@/components/etudiant/signalement-equipement";
+import { ICON } from "@/components/layout/app-sidebar";
+import { EtudiantLayout } from "@/components/layout/etudiant-layout";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetHeader,
+    SheetTitle,
+} from "@/components/ui/sheet";
+import { StatCard } from "@/components/ui/stat-card";
+import { cn } from "@/lib/utils";
+
+type Ton = "success" | "warning" | "danger" | "info" | "neutral";
+
+type Demande = {
+    id: string;
+    numero: string | null;
+    titre: string;
+    description: string | null;
+    categorie: string | null;
+    priorite: { libelle: string; ton: Ton };
+    statut: { libelle: string; ton: Ton };
+    /** 0 déposée, 1 prise en charge, 2 terminée ; null : annulée ou reportée. */
+    etape: 0 | 1 | 2 | null;
+    creeLe: string | null;
+    disponibilite: string | null;
+    intervention: string | null;
+    resolueLe: string | null;
+    technicien: string | null;
+    solution: string | null;
+    satisfaction: number | null;
+};
+
+type Filtre = "toutes" | "en_cours" | "resolues" | "urgentes";
+
+type MaintenanceProps = {
+    compteurs: Record<Filtre, number> & { tauxResolution: number };
+    filtre: Filtre;
+    demandes: Demande[];
+    pagination: PaginationSimpleProps;
+    chambre: string | null;
+    equipements: EquipementChambre[];
+    categories: Categorie[];
+    urls: { signalement: string; page: string; chambre: string };
+};
+
+const FILTRES: { cle: Filtre; libelle: string; vide: string }[] = [
+    { cle: "toutes", libelle: "Toutes", vide: "Vous n’avez encore déposé aucune demande de maintenance." },
+    { cle: "en_cours", libelle: "En cours", vide: "Aucune demande en cours de traitement." },
+    { cle: "resolues", libelle: "Résolues", vide: "Aucune demande résolue pour le moment." },
+    { cle: "urgentes", libelle: "Urgentes", vide: "Aucune demande urgente en cours." },
+];
+
+const ETAPES = ["Déposée", "Prise en charge", "Terminée"];
+
+/** URL de la page avec un autre filtre (la pagination repart de la première page). */
+function avecFiltre(page: string, filtre: Filtre) {
+    const url = new URL(page, window.location.origin);
+    if (filtre !== "toutes") url.searchParams.set("filtre", filtre);
+    return url.pathname + url.search;
+}
+
+/** Page « Maintenance » : demandes d'intervention de l'étudiant, avec leur suivi, et dépôt d'une nouvelle demande. */
+export default function Maintenance({
+    compteurs,
+    filtre,
+    demandes,
+    pagination,
+    chambre,
+    equipements,
+    categories,
+    urls,
+}: MaintenanceProps) {
+    const [nouvelle, setNouvelle] = useState(false);
+    const [detail, setDetail] = useState<Demande | null>(null);
+
+    return (
+        <EtudiantLayout title="Maintenance">
+            <div className="flex flex-col gap-5">
+                <header className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <h1 className="page-title text-xl font-medium text-gray-900">
+                            Maintenance
+                        </h1>
+                        <p className="mt-2 text-sm text-muted">
+                            {chambre
+                                ? `Signalez un problème dans votre logement (${chambre}) et suivez l’intervention.`
+                                : "Signalez un problème et suivez l’intervention du service technique."}
+                        </p>
+                    </div>
+                    <Button onClick={() => setNouvelle(true)} className="font-medium">
+                        <Plus {...ICON} />
+                        Nouvelle demande
+                    </Button>
+                </header>
+
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <StatCard label="Mes demandes" value={compteurs.toutes} tone="blue" />
+                    <StatCard label="En cours" value={compteurs.en_cours} tone="amber" />
+                    <StatCard
+                        label="Résolues"
+                        value={compteurs.resolues}
+                        tone="green"
+                        extra={compteurs.toutes > 0 ? `${compteurs.tauxResolution} %` : undefined}
+                    />
+                    <StatCard
+                        label="Urgentes en cours"
+                        value={compteurs.urgentes}
+                        tone={compteurs.urgentes > 0 ? "red" : "neutral"}
+                        highlight={compteurs.urgentes > 0}
+                        extra={compteurs.urgentes > 0 ? "À suivre" : undefined}
+                    />
+                </div>
+
+                {!chambre && (
+                    <Notice icone={Info} className="bg-amber-50 text-amber-800">
+                        Aucune chambre confirmée n’est associée à votre dossier : précisez le lieu
+                        exact du problème dans la description de votre demande.
+                    </Notice>
+                )}
+
+                <Panneau
+                    surtitre="Suivi des interventions"
+                    titre="Mes demandes"
+                    badge={`${pagination.total} demande${pagination.total > 1 ? "s" : ""}`}
+                >
+                    <Filtres
+                        libelle="Filtrer les demandes"
+                        actif={filtre}
+                        filtres={FILTRES.map((f) => ({
+                            cle: f.cle,
+                            libelle: f.libelle,
+                            compte: compteurs[f.cle],
+                            href: avecFiltre(urls.page, f.cle),
+                        }))}
+                    />
+                    {demandes.length === 0 ? (
+                        <div className="flex flex-col gap-3">
+                            <Vide icone={Wrench}>
+                                {FILTRES.find((f) => f.cle === filtre)?.vide}
+                            </Vide>
+                            {filtre === "toutes" && (
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setNouvelle(true)}
+                                    className="w-fit"
+                                >
+                                    <Plus {...ICON} />
+                                    Déposer ma première demande
+                                </Button>
+                            )}
+                        </div>
+                    ) : (
+                        <ul className="flex flex-col gap-3">
+                            {demandes.map((demande) => (
+                                <CarteDemande
+                                    key={demande.id}
+                                    demande={demande}
+                                    ouvrir={() => setDetail(demande)}
+                                />
+                            ))}
+                        </ul>
+                    )}
+                    <PaginationSimple {...pagination} />
+                </Panneau>
+
+                {chambre && (
+                    <a
+                        href={urls.chambre}
+                        className="inline-flex w-fit items-center gap-1 text-sm font-medium text-primary hover:underline"
+                    >
+                        Voir les équipements de ma chambre
+                        <ChevronRight {...ICON} size={16} />
+                    </a>
+                )}
+            </div>
+
+            <DetailDemande demande={detail} fermer={() => setDetail(null)} />
+
+            <SignalementEquipement
+                ouverte={nouvelle}
+                fermer={() => setNouvelle(false)}
+                url={urls.signalement}
+                equipements={equipements}
+                categories={categories}
+                titre="Nouvelle demande de maintenance"
+            />
+        </EtudiantLayout>
+    );
+}
+
+function CarteDemande({ demande, ouvrir }: { demande: Demande; ouvrir: () => void }) {
+    return (
+        <li className="rounded-brand border p-3 md:p-4">
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <h3 className="truncate text-sm font-medium text-gray-900">{demande.titre}</h3>
+                    <p className="mt-0.5 truncate text-xs text-muted">
+                        {[demande.numero, demande.categorie, demande.creeLe && `Déposée le ${demande.creeLe}`]
+                            .filter(Boolean)
+                            .join(" · ")}
+                    </p>
+                </div>
+                <Badge variant={demande.statut.ton}>{demande.statut.libelle}</Badge>
+            </div>
+            {demande.description && (
+                <p className="mt-2 line-clamp-2 text-sm text-muted">{demande.description}</p>
+            )}
+            {demande.etape !== null && <Avancement etape={demande.etape} />}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <span className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                    <Badge variant={demande.priorite.ton}>{demande.priorite.libelle}</Badge>
+                    <span className="inline-flex items-center gap-1">
+                        <HardHat {...ICON} size={14} />
+                        {demande.technicien ?? "En attente d’affectation"}
+                    </span>
+                </span>
+                <Button variant="ghost" size="sm" onClick={ouvrir} className="text-primary">
+                    Détails
+                    <ChevronRight {...ICON} size={16} />
+                </Button>
+            </div>
+        </li>
+    );
+}
+
+/** Trois étapes : déposée, prise en charge, terminée. */
+function Avancement({ etape }: { etape: 0 | 1 | 2 }) {
+    return (
+        <ol className="mt-3 grid grid-cols-3 gap-1.5" aria-label={`Avancement : ${ETAPES[etape]}`}>
+            {ETAPES.map((libelle, index) => (
+                <li key={libelle} className="min-w-0">
+                    <span
+                        aria-hidden
+                        className={cn(
+                            "block h-1.5 rounded-full",
+                            index <= etape ? (etape === 2 ? "bg-primary" : "bg-accent") : "bg-gray-200",
+                        )}
+                    />
+                    <span
+                        className={cn(
+                            "mt-1 block truncate text-xs",
+                            index === etape ? "font-medium text-gray-900" : "text-muted",
+                        )}
+                    >
+                        {libelle}
+                    </span>
+                </li>
+            ))}
+        </ol>
+    );
+}
+
+function DetailDemande({ demande, fermer }: { demande: Demande | null; fermer: () => void }) {
+    const lignes: { icone: LucideIcon; libelle: string; valeur: string | null }[] = demande
+        ? [
+              { icone: Hash, libelle: "Numéro de suivi", valeur: demande.numero },
+              { icone: Layers, libelle: "Catégorie", valeur: demande.categorie },
+              { icone: Siren, libelle: "Urgence", valeur: demande.priorite.libelle },
+              { icone: CalendarClock, libelle: "Déposée le", valeur: demande.creeLe },
+              { icone: MapPin, libelle: "Ma disponibilité", valeur: demande.disponibilite },
+              { icone: HardHat, libelle: "Technicien", valeur: demande.technicien ?? "En attente d’affectation" },
+              { icone: Wrench, libelle: "Intervention", valeur: demande.intervention },
+              { icone: CalendarCheck, libelle: "Résolue le", valeur: demande.resolueLe },
+              {
+                  icone: Star,
+                  libelle: "Satisfaction",
+                  valeur: demande.satisfaction ? `${demande.satisfaction} / 5` : null,
+              },
+          ].filter((l) => l.valeur)
+        : [];
+
+    return (
+        <Sheet open={demande !== null} onOpenChange={(ouvert) => !ouvert && fermer()}>
+            <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+                {demande && (
+                    <>
+                        <SheetHeader>
+                            <SheetTitle className="pr-6">{demande.titre}</SheetTitle>
+                            <SheetDescription asChild>
+                                <div className="flex flex-wrap gap-2">
+                                    <Badge variant={demande.statut.ton}>{demande.statut.libelle}</Badge>
+                                    <Badge variant={demande.priorite.ton}>{demande.priorite.libelle}</Badge>
+                                </div>
+                            </SheetDescription>
+                        </SheetHeader>
+                        <div className="flex flex-col gap-4 px-4 pb-6">
+                            {demande.etape !== null && <Avancement etape={demande.etape} />}
+                            {demande.description && (
+                                <section>
+                                    <h3 className="mb-1 text-xs text-muted">Description</h3>
+                                    <p className="rounded-brand bg-surface p-3 text-sm whitespace-pre-line text-gray-900">
+                                        {demande.description}
+                                    </p>
+                                </section>
+                            )}
+                            {demande.solution && (
+                                <Notice icone={CircleCheck}>
+                                    <strong className="block font-medium">Solution apportée</strong>
+                                    {demande.solution}
+                                </Notice>
+                            )}
+                            <ul className="-mx-2 grid">
+                                {lignes.map((l) => (
+                                    <Ligne key={l.libelle} icone={l.icone} libelle={l.libelle} titre={l.valeur} />
+                                ))}
+                            </ul>
+                        </div>
+                    </>
+                )}
+            </SheetContent>
+        </Sheet>
+    );
+}

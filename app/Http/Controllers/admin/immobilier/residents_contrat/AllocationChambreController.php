@@ -12,6 +12,11 @@ use App\Models\AssignationChambre;
 use App\Http\Services\AllocationChambreService;
 use App\Repositories\Interfaces\ChambreRepositoryInterface;
 use App\Repositories\Interfaces\AssignationChambreRepositoryInterface;
+use App\Http\Services\AttributionRules;
+use App\Http\Services\DossierWorkflow;
+use App\Http\Services\LitService;
+use App\Services\AdminAccess;
+use Inertia\Inertia;
 
 use Exception;
 
@@ -32,47 +37,121 @@ class AllocationChambreController extends Controller
     }
 
     /**
-     * Afficher la liste des campagnes
+     * Liste des campagnes d'attribution (page React `Admin/Hebergement/Allocations/Index`).
      */
-    public function index()
+    public function index(Request $request, AdminAccess $access)
     {
-
         $campagnes = Campagne::where('statut', '!=', 'annulee')
+            ->withCount([
+                // Dossiers éligibles qui attendent une proposition de chambre.
+                'demandes as dossiers_eligibles_count' => fn ($q) => $q->where('etat_dossier', 'eligible'),
+                'assignations as propositions_count' => fn ($q) => $q->where('statut', 'en_attente'),
+                'assignations as confirmees_count' => fn ($q) => $q->where('statut', 'confirmee'),
+            ])
             ->orderByDesc('periode_debut')
             ->paginate(10);
 
-        return view('admin.hebergement.resident_contrat.allocation_index', [
-            'campagnes' => $campagnes
+        $parStatut = Campagne::where('statut', '!=', 'annulee')
+            ->selectRaw('statut, count(*) as total')->groupBy('statut')->pluck('total', 'statut');
+        $url = $this->urlAutorisee($request, $access);
+
+        return Inertia::render('Admin/Hebergement/Allocations/Index', [
+            'campagnes' => $campagnes->through(fn (Campagne $campagne) => [
+                ...$this->campagneProps($campagne),
+                'a_loger' => (int) $campagne->dossiers_eligibles_count,
+                'propositions' => (int) $campagne->propositions_count,
+                'confirmees' => (int) $campagne->confirmees_count,
+                'taux' => max(0, min(100, (float) $campagne->getTauxAllocation())),
+                'urls' => [
+                    'show' => $url('admin.allocation.show', ['campagneId' => $campagne->id_campagne]),
+                    'allocate' => $url('admin.allocation.allocate-form', ['campagneId' => $campagne->id_campagne]),
+                ],
+            ]),
+            'stats' => [
+                'total' => (int) $parStatut->sum(),
+                'active' => (int) ($parStatut['active'] ?? 0),
+                'planifiee' => (int) ($parStatut['planifiee'] ?? 0),
+                'terminee' => (int) ($parStatut['terminee'] ?? 0),
+            ],
+            'classement' => $this->classement($request),
         ]);
     }
 
     /**
-     * Afficher les détails d'une campagne
+     * Suivi d'une campagne : attributions, éligibles sans chambre et chambres disponibles (page React).
      */
-    public function show($campagneId)
+    public function show(Request $request, AdminAccess $access, $campagneId)
     {
-
         $campagne = Campagne::findOrFail($campagneId);
 
         try {
             $stats = $this->service->getStatistiques($campagneId);
-           // dd($stats);
         } catch (Exception $e) {
             $stats = [];
         }
 
-     //  dd($campagne);
-      //  dd($campagne,$stats);
         $assignations = $this->assignationRepository->getByCampagne($campagneId);
         $etudiants = $this->assignationRepository->getStudentsSansChambres($campagneId);
         $chambres = $this->chambreRepository->getDisponibles($campagneId);
-//dd($assignations);
-        return view('admin.hebergement.resident_contrat.allocation_show', [
-            'campagne' => $campagne,
-            'stats' => $stats,
-            'assignations' => $assignations,
-            'etudiants_sans_chambre' => $etudiants,
-            'chambres_disponibles' => $chambres,
+        $url = $this->urlAutorisee($request, $access);
+        $parametres = ['campagneId' => $campagne->id_campagne];
+
+        return Inertia::render('Admin/Hebergement/Allocations/Show', [
+            'campagne' => $this->campagneProps($campagne),
+            'stats' => $this->statsProps($stats),
+            'assignations' => $assignations->map(function (AssignationChambre $assignation) {
+                $etudiant = $assignation->etudiant;
+                $chambre = $assignation->chambre;
+                $etat = $assignation->dossier?->etat_dossier;
+
+                return [
+                    'id' => (string) $assignation->id_assignation,
+                    'statut' => $assignation->statut,
+                    'etat_dossier' => $etat,
+                    'etat_label' => DossierWorkflow::LABELS[$etat] ?? ucfirst(str_replace('_', ' ', (string) $assignation->statut)),
+                    'etudiant' => $etudiant?->name,
+                    'matricule' => $etudiant?->matricule,
+                    'niveau' => $this->niveau($etudiant),
+                    'chambre' => $chambre?->numero_chambre,
+                    'lit' => $assignation->lit?->numero,
+                    'batiment' => $chambre?->batiment?->name,
+                    'type' => ucfirst($chambre?->typeChambre?->name ?? 'Non défini'),
+                    'echeance' => $assignation->statut === 'en_attente' && $assignation->date_fin
+                        ? \Illuminate\Support\Carbon::parse($assignation->date_fin)->format('Y-m-d H:i') : null,
+                    // Validation définitive : seulement après l'accord de l'étudiant (dossier « accepté »).
+                    'confirmable' => $assignation->statut === 'en_attente' && $etat === 'accepte',
+                    'annulable' => $assignation->statut === 'en_attente',
+                ];
+            })->values(),
+            'etudiants' => $etudiants->map(fn (Etudiant $etudiant) => [
+                'id' => (string) $etudiant->id_etudiant,
+                'name' => $etudiant->name,
+                'matricule' => $etudiant->matricule,
+                'email' => $etudiant->email1,
+                'niveau' => $this->niveau($etudiant),
+                'pmr' => (bool) $etudiant->pmr_confirme,
+            ])->values(),
+            'chambres' => $chambres->map(fn (Chambre $chambre) => [
+                'id' => (string) $chambre->id_chambre,
+                'numero' => $chambre->numero_chambre,
+                'type' => ucfirst($chambre->typeChambre?->name ?? 'Non défini'),
+                'lieu' => collect([$chambre->batiment?->name, $chambre->cite?->name])->filter()->implode(' · '),
+                'capacite' => (int) $chambre->capacite_max,
+                'libres' => (int) $chambre->getNombrePlacesDisponibles(),
+                'occupation' => max(0, min(100, (float) $chambre->getPourcentageOccupation())),
+                'prix' => (float) $chambre->prix,
+                'pmr' => (bool) $chambre->pmr,
+            ])->values(),
+            'classement' => $this->classement($request),
+            'urls' => [
+                'index' => $url('admin.allocation.index'),
+                'statistics' => $url('admin.allocation.statistics', $parametres),
+                'export' => $url('admin.allocation.export-csv', $parametres),
+                'allocateAll' => $url('admin.allocation.allocate-all', $parametres),
+                'allocateForm' => $url('admin.allocation.allocate-form', $parametres),
+                'confirm' => $url('admin.allocation.confirm', $parametres),
+                'cancel' => $url('admin.allocation.cancel', $parametres),
+            ],
         ]);
     }
 
@@ -98,19 +177,54 @@ class AllocationChambreController extends Controller
         return back()->with('success', 'Confirmation PMR enregistree.');
     }
 
-    public function allocateForm($campagneId)
+    /**
+     * Formulaire d'attribution d'une chambre (page React) avec le pré-contrôle PMR / sexe / places.
+     */
+    public function allocateForm(Request $request, AdminAccess $access, $campagneId)
     {
-
         $campagne = Campagne::findOrFail($campagneId);
-
         $etudiants = $this->assignationRepository->getStudentsSansChambres($campagneId);
-
         $chambres = $this->chambreRepository->getDisponibles($campagneId);
-    //  dd($chambres[0],$campagneId);
-        return view('admin.hebergement.resident_contrat.allocation_form', [
-            'campagne' => $campagne,
-            'etudiants' => $etudiants,
-            'chambres' => $chambres,
+        // Pré-contrôle affiché à l'écran ; AttributionRules::erreurs() refait la vérification complète.
+        $regles = app(AttributionRules::class);
+        $lits = app(LitService::class);
+        // Types visés par l'attribution automatique (Etudiant::getPrioriteChambres()).
+        $libellesTypes = ['individuelle' => 'individuelle', 'double' => 'double', 'triple' => 'triple ou plus'];
+        $url = $this->urlAutorisee($request, $access);
+        $parametres = ['campagneId' => $campagne->id_campagne];
+
+        return Inertia::render('Admin/Hebergement/Allocations/Allocate', [
+            'campagne' => $this->campagneProps($campagne),
+            'etudiants' => $etudiants->map(fn (Etudiant $etudiant) => [
+                'id' => (string) $etudiant->id_etudiant,
+                'name' => $etudiant->name,
+                'matricule' => $etudiant->matricule,
+                'email' => $etudiant->email1,
+                'niveau' => $this->niveau($etudiant),
+                'pmr' => (bool) $etudiant->pmr_confirme,
+                'sexe' => $regles->sexeEtudiant($etudiant),
+                'priorites' => collect($etudiant->getPrioriteChambres())->map(fn ($type) => $libellesTypes[$type] ?? $type)->implode(', '),
+            ])->values(),
+            'chambres' => $chambres->map(fn (Chambre $chambre) => [
+                'id' => (string) $chambre->id_chambre,
+                'numero' => $chambre->numero_chambre,
+                'type' => ucfirst($chambre->typeChambre?->name ?? 'Non défini'),
+                'batiment' => $chambre->batiment?->name,
+                'lieu' => collect([$chambre->batiment?->name, $chambre->cite?->name])->filter()->implode(' · '),
+                'capacite' => (int) $chambre->capacite_max,
+                'occupes' => (int) $chambre->getNombrePlacesOccupees(),
+                'libres' => (int) $chambre->getNombrePlacesDisponibles(),
+                'prix' => (float) $chambre->prix,
+                'pmr' => (bool) $chambre->pmr,
+                'sexe' => $regles->sexeRequis($chambre),
+                'lits' => array_values(array_map('intval', (array) $lits->disponibles($chambre))),
+            ])->values(),
+            'etudiantInitial' => (string) $request->query('etudiant_id', ''),
+            'urls' => [
+                'show' => $url('admin.allocation.show', $parametres),
+                'allocate' => $url('admin.allocation.allocate', $parametres),
+                'pmr' => $url('admin.allocation.pmr', $parametres),
+            ],
         ]);
     }
 
@@ -142,9 +256,9 @@ class AllocationChambreController extends Controller
                     "Chambre {$assignation->chambre->numero_chambre} assignée avec succès à {$etudiant->name}");
             }
 
-            return back()->with('error', 'Impossible d\'assigner une chambre. Vérifiez les critères.');
+            return back()->withInput()->with('error', 'Impossible d\'assigner une chambre. Vérifiez les critères.');
         } catch (Exception $e) {
-            return back()->with('error', 'Erreur: ' . \App\Support\UserFacingErrors::caught($e));
+            return back()->withInput()->with('error', 'Erreur: ' . \App\Support\UserFacingErrors::caught($e));
         }
     }
 
@@ -344,7 +458,7 @@ class AllocationChambreController extends Controller
                 $a->etudiant->name,
                 $a->etudiant->getAnneeEtude(),
                 $a->chambre->numero_chambre,
-                $a->chambre->type_chambre_code,
+                $a->chambre->typeChambre?->name,
                 $a->chambre->batiment?->name,
                 $a->statut,
                 $a->date_assignation?->format('d/m/Y H:i'),
@@ -361,20 +475,105 @@ class AllocationChambreController extends Controller
     }
 
     /**
-     * Afficher les statistiques détaillées
+     * Statistiques d'attribution d'une campagne (page React).
      */
-    public function statistics($campagneId)
+    public function statistics(Request $request, AdminAccess $access, $campagneId)
     {
         try {
             $campagne = Campagne::findOrFail($campagneId);
             $stats = $this->service->getStatistiques($campagneId);
+            $url = $this->urlAutorisee($request, $access);
+            $parametres = ['campagneId' => $campagne->id_campagne];
 
-            return view('allocation.statistics', [
-                'campagne' => $campagne,
-                'stats' => $stats,
+            return Inertia::render('Admin/Hebergement/Allocations/Statistics', [
+                'campagne' => $this->campagneProps($campagne),
+                'stats' => $this->statsProps($stats),
+                'urls' => [
+                    'show' => $url('admin.allocation.show', $parametres),
+                    'export' => $url('admin.allocation.export-csv', $parametres),
+                ],
             ]);
         } catch (Exception $e) {
             return back()->with('error', \App\Support\UserFacingErrors::caught($e));
         }
     }
+
+    /** URL d'une route si l'admin connecté y a accès (remplace `@adminroute`), sinon null. */
+    private function urlAutorisee(Request $request, AdminAccess $access): \Closure
+    {
+        $admin = $request->user('admin');
+
+        return fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+    }
+
+    private function campagneProps(Campagne $campagne): array
+    {
+        return [
+            'id' => (string) $campagne->id_campagne,
+            'annee' => $campagne->annee_campagne,
+            'description' => $campagne->description,
+            'statut' => $campagne->statut,
+            'statut_label' => $campagne->getLabelStatut(),
+            'periode_debut' => $campagne->periode_debut?->toDateString(),
+            'periode_fin' => $campagne->periode_fin?->toDateString(),
+        ];
+    }
+
+    /** Statistiques de `getStatistiques()` ; `null` si elles n'ont pas pu être calculées. */
+    private function statsProps(array $stats): ?array
+    {
+        if ($stats === []) {
+            return null;
+        }
+
+        return [
+            'demandes_acceptees' => (int) ($stats['demandes_acceptees'] ?? 0),
+            'assignations_confirmees' => (int) ($stats['assignations_confirmees'] ?? 0),
+            'assignations_en_attente' => (int) ($stats['assignations_en_attente'] ?? 0),
+            'total_assignations' => (int) ($stats['total_assignations'] ?? 0),
+            'sans_chambre' => (int) ($stats['sans_chambre'] ?? 0),
+            'taux_allocation' => max(0, min(100, (float) ($stats['taux_allocation'] ?? 0))),
+            'par_type' => array_values(array_map(fn ($type) => [
+                'nom' => $type['nom'],
+                'total' => (int) $type['total'],
+                'occupees' => (int) $type['occupees'],
+                'disponibles' => (int) $type['disponibles'],
+            ], $stats['par_type'] ?? [])),
+        ];
+    }
+
+    /** Classement utilisé par la dernière « Attribution automatique » (flash `allocation_result`), trié par rang. */
+    private function classement(Request $request): ?array
+    {
+        $resultat = $request->session()->get('allocation_result');
+        if (!$resultat) {
+            return null;
+        }
+
+        return [
+            'reservations' => count($resultat['allocated'] ?? []),
+            'lignes' => collect($resultat['allocated'] ?? [])->merge($resultat['not_allocated'] ?? [])->sortBy('rang')
+                ->map(fn ($entree) => [
+                    'rang' => $entree['rang'] ?? null,
+                    'name' => $entree['name'] ?? null,
+                    'score' => isset($entree['score']) ? (float) $entree['score'] : null,
+                    'chambre' => $entree['chambre'] ?? null,
+                    'raison' => $entree['reason'] ?? null,
+                    'bareme' => $entree['scoring_version'] ?? null,
+                    'priorite' => $entree['priority'] ?? null,
+                ])->values()->all(),
+        ];
+    }
+
+    /** Libellé du niveau : le code stocké sur la demande est souvent l'identifiant du niveau. */
+    private function niveau(?Etudiant $etudiant): ?string
+    {
+        if (!$etudiant) {
+            return null;
+        }
+        $demande = $etudiant->demandeActuelle();
+
+        return $demande?->niveauEtudiantActuel?->name ?? $demande?->niveau_etude_actuel_code;
+    }
+
 }

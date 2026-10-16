@@ -9,7 +9,9 @@ export const buttonVariants = cva(
             variant: {
                 primary: 'bg-primary text-white hover:bg-primary-hover',
                 accent: 'bg-accent text-gray-900 shadow-md shadow-accent/40 hover:bg-accent-hover hover:shadow-lg hover:shadow-accent/50 focus-visible:ring-accent',
-                secondary: 'border border-primary bg-white text-primary hover:bg-soft hover:text-primary-hover focus-visible:bg-soft focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-soft',
+                // Orange de la charte en version atténuée (fond pâle, texte ambré), sans ombre.
+                'soft-accent': 'border border-accent/40 bg-accent/15 text-amber-800 hover:bg-accent/25 focus-visible:ring-accent',
+                secondary:'border border-primary bg-white text-primary hover:bg-soft hover:text-primary-hover focus-visible:bg-soft focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-soft',
                 outline:'border border-gray-300 bg-white text-muted hover:bg-surface',
                 ghost: 'text-muted hover:bg-soft hover:text-primary',
             },
