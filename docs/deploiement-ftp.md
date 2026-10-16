@@ -1,16 +1,17 @@
 # Deploiement FTP vers LWS / cPanel
 
-Le workflow `.github/workflows/deploy.yml` deploie les push sur `dev` et `main`
-et peut etre lance manuellement depuis ces branches. GitHub Actions installe les dependances PHP
+Le workflow `.github/workflows/deploy.yml` deploie les push sur `dev` et peut etre
+lance manuellement sur cette branche. GitHub Actions installe les dependances PHP
 de production, compile le frontend puis transfere le code, `vendor` et
 `public/build`. Aucun acces SSH ni Node.js sur le serveur n'est necessaire.
 
 ## Secrets GitHub
 
 Le serveur de `dev` est distinct de celui de `main`. Dans Settings > Environments >
-development, ajouter les secrets FTP du serveur de developpement. Pour `main`,
-configurer ces memes secrets dans l'environnement `production`, avec les
-identifiants et le dossier du serveur de production :
+development, ajouter les secrets FTP du serveur de developpement.
+La branche `main` utilise le workflow SSH `.github/workflows/deploy-ssh.yml`
+avec l'environnement `production` et execute automatiquement les migrations.
+Voir [le deploiement SSH](deploiement-ssh.md).
 
 | Secret | Valeur |
 | --- | --- |
@@ -58,7 +59,7 @@ Retirer les eventuels anciens dumps SQL accessibles dans le dossier Web.
 ## Maintenance et migrations dans le terminal cPanel
 
 FTP met a jour les fichiers progressivement : ce deploiement n'est pas atomique.
-Avant de pousser sur `dev` ou `main`, ou de lancer le workflow, effectuer une sauvegarde de la
+Avant de pousser sur `dev` ou de lancer le workflow FTP, effectuer une sauvegarde de la
 base, ouvrir le terminal web cPanel et executer :
 
 ```bash
