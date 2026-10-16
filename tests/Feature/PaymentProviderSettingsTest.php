@@ -175,17 +175,16 @@ class PaymentProviderSettingsTest extends TestCase
 
     public function test_student_display_only_contains_enabled_network_names(): void
     {
-        $provider = PaymentProvider::first();
+        // Page React « Mes paiements » : seuls les réseaux utilisables sont envoyés, avec leur code et leur nom.
+        $provider = PaymentProvider::where('code', 'cinetpay')->firstOrFail();
         $provider->update($this->data());
-        $html = view('etudiant.partials.payment_providers', ['paymentProviders' => PaymentProvider::visibleToStudents()])->render();
-        $this->assertStringContainsString('Moov', $html);
-        foreach (['Orange', 'MTN', 'Wave', 'CinetPay', 'TrésorPay', 'api-secret', 'merchant-secret', 'example.test'] as $hidden) {
-            $this->assertStringNotContainsString($hidden, $html);
+        $json = json_encode(app(\App\Services\EtudiantPaiements::class)->reseaux(), JSON_UNESCAPED_UNICODE);
+        $this->assertSame('[{"code":"cinetpay","nom":"CinetPay"}]', $json);
+        foreach (['api-secret', 'merchant-secret', 'example.test'] as $hidden) {
+            $this->assertStringNotContainsString($hidden, $json);
         }
         $provider->update(['is_active' => false]);
-        $html = view('etudiant.partials.payment_providers', ['paymentProviders' => PaymentProvider::visibleToStudents()])->render();
-        $this->assertStringContainsString('Aucun réseau', $html);
-        $this->assertStringNotContainsString('Moov', $html);
+        $this->assertSame([], app(\App\Services\EtudiantPaiements::class)->reseaux());
     }
 
     public function test_page_shows_networks_without_ever_sending_secrets(): void

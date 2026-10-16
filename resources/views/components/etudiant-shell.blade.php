@@ -10,6 +10,8 @@
      * Les entrées `page` correspondent aux sections du tableau de bord
      * (etudiant/index.blade.php) : sur cette page, le script local bascule la
      * section sans recharger ; ailleurs, le lien ouvre ?section=...
+     * Les sections migrées en React (EtudiantMenu::SECTIONS_REACT) n'ont pas de
+     * `data-page` : lien classique vers la page Inertia.
      */
     $student = $student ?? auth('etudiant')->user();
     $collapsed = request()->cookie('sidebar_state') === 'false';
@@ -49,7 +51,7 @@
                                class="as-menu-button"
                                data-active="{{ $item['active'] ? 'true' : 'false' }}"
                                data-tooltip="{{ $item['label'] }}"
-                               @if ($item['page']) data-page="{{ $item['page'] }}" @endif
+                               @if ($item['page'] && ! $item['react']) data-page="{{ $item['page'] }}" @endif
                                @if ($item['active']) aria-current="page" @endif>
                                 <x-admin-icon :name="$item['icon']" />
                                 <span>{{ $item['label'] }}</span>

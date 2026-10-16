@@ -10,11 +10,16 @@ use Illuminate\Http\Request;
  *
  * Les entrées `page` correspondent aux sections du tableau de bord
  * (etudiant/index.blade.php) : elles sont actives selon `?section=`.
+ * Les sections migrées en React (SECTIONS_REACT) s'ouvrent par un lien classique,
+ * sans bascule locale dans la page Blade.
  */
 class EtudiantMenu
 {
+    /** Sections `?section=` servies par une page Inertia (dashboardController::index). */
+    public const SECTIONS_REACT = ['dashboard', 'chambre', 'paiements', 'maintenance'];
+
     /**
-     * @return list<array{label: string, items: list<array{label: string, icon: string, href: string, active: bool, page: ?string}>}>
+     * @return list<array{label: string, items: list<array{label: string, icon: string, href: string, active: bool, page: ?string, react: bool}>}>
      */
     public function groupes(Request $request): array
     {
@@ -51,6 +56,7 @@ class EtudiantMenu
                     'icon' => $item['icon'],
                     'href' => $item['href'],
                     'page' => $item['page'] ?? null,
+                    'react' => in_array($item['page'] ?? null, self::SECTIONS_REACT, true),
                     'active' => isset($item['page'])
                         ? $section === $item['page']
                         : $request->routeIs(...$item['routes']),

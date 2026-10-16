@@ -31,6 +31,8 @@ export interface UserMenuLink {
 export interface EtudiantMenuItem extends MenuLink {
     /** Section du tableau de bord (`?section=`), null pour une page à part. */
     page: string | null;
+    /** Section servie par une page Inertia (EtudiantMenu::SECTIONS_REACT). */
+    react: boolean;
 }
 
 export interface EtudiantMenuGroup {

@@ -64,8 +64,8 @@ class dashboardController extends Controller
      */
 
 
-    /** Sections encore servies par la page Blade etudiant/index (`?section=`) ; sans section : tableau de bord React. */
-    private const SECTIONS_BLADE = ['chambre', 'demandes', 'etat-lieux', 'paiements', 'annonce', 'maintenance', 'incidents', 'carte-interactive'];
+    /** Sections encore servies par la page Blade etudiant/index (`?section=`) ; les autres sont des pages React (EtudiantMenu::SECTIONS_REACT). */
+    private const SECTIONS_BLADE = ['demandes', 'etat-lieux', 'annonce', 'incidents', 'carte-interactive'];
 
     public function index()
     {
@@ -120,6 +120,17 @@ class dashboardController extends Controller
                 ? collect([$campagneTableauDeBord])
                 : collect();
 
+            $pageReact = match (request('section')) {
+                'chambre' => ['Etudiant/MaChambre', fn () => app(\App\Services\EtudiantChambre::class)->props($etudiant)],
+                'paiements' => ['Etudiant/MesPaiements', fn () => app(\App\Services\EtudiantPaiements::class)->props($etudiant, request())],
+                'maintenance' => ['Etudiant/Maintenance', fn () => app(\App\Services\EtudiantMaintenance::class)->props($etudiant, request())],
+                default => null,
+            };
+            if ($pageReact) {
+                return \Inertia\Inertia::render($pageReact[0], $pageReact[1]())
+                    ->toResponse(request())->header('Cache-Control', 'private, no-store');
+            }
+
             // Tableau de bord migré en React ; les autres sections restent sur la page Blade etudiant/index.
             if (! in_array(request('section'), self::SECTIONS_BLADE, true)) {
                 return \Inertia\Inertia::render('Etudiant/TableauDeBord', app(\App\Services\EtudiantDashboard::class)->props(
@@ -129,19 +140,9 @@ class dashboardController extends Controller
                     $this->serviceOrdreTravail->getPaginated(['etudiant_id' => $idEtudiant], 10),
                 ))->toResponse(request())->header('Cache-Control', 'private, no-store');
             }
-//dd($result['etudiant']);
-            // Récupérer les statistiques des ordres de travail
-            $result['statOT'] = $this->serviceOrdreTravail->getStats();
-
-            // Récupérer les ordres de travail de l'étudiant avec pagination
-            $filters = request()->only(['search', 'statut', 'categorie']);
-            $filters['etudiant_id'] = $idEtudiant;
-            $result['ordres'] = $this->serviceOrdreTravail->getPaginated($filters, 10);
 
             // Récupérer les données pour la carte
             $result['carte'] = $this->carte();
-          $result['paiementData'] = $this->getPaiementData($idEtudiant);
-            $result['paymentProviders'] = \App\Models\PaymentProvider::payableToStudents();
             $result['disciplinaryReports'] = DisciplinaryReport::query()
                 ->where('declarant_id', $idEtudiant)
                 ->latest('date_incident')
@@ -155,23 +156,6 @@ class dashboardController extends Controller
                 ->where('etudiant_id', $idEtudiant)
                 ->latest('date_demande')
                 ->get();
-
-            $activeAssignment = AssignationChambre::actives()
-                ->where('etudiant_id', $idEtudiant)
-                ->latest('date_assignation')
-                ->first();
-
-            $result['roommates'] = $activeAssignment
-                ? AssignationChambre::with('etudiant')
-                    ->actives()
-                    ->where('chambre_id', $activeAssignment->chambre_id)
-                    ->where('etudiant_id', '!=', $idEtudiant)
-                    ->get()
-                    ->pluck('etudiant')
-                    ->filter()
-                    ->values()
-                : collect();
-
 
 //dd($result);
             // Retourner la vue avec les données
@@ -340,43 +324,6 @@ class dashboardController extends Controller
             'success' => true,
             'data'    => $annonces,
         ]);
-    }
-
-    /**
-     * Afficher la page de maintenance avec les ordres de travail
-     */
-    public function maintenance()
-    {
-        // Vérifier si l'étudiant est authentifié
-        if (!Auth::guard('etudiant')->check()) {
-            return redirect()->route('login')->withErrors([
-                'email' => 'Veuillez vous connecter pour accéder à cette page.'
-            ]);
-        }
-
-        $idEtudiant = Auth::guard('etudiant')->user()->id_etudiant;
-
-        try {
-            // Récupérer les statistiques des ordres de travail
-            $stats = $this->serviceOrdreTravail->getStats(['etudiant_id' => $idEtudiant]);
-
-            // Récupérer les ordres de travail de l'étudiant avec pagination et filtres
-            $filters = request()->only(['search', 'statut', 'categorie']);
-            $filters['etudiant_id'] = $idEtudiant;
-            $ordres = $this->serviceOrdreTravail->getPaginated($filters, 10);
-
-            // Récupérer les détails de l'étudiant
-            $etudiant = $this->etudiantService->getEtudiantDetails($idEtudiant);
-
-            // Récupérer les cités pour les filtres
-            $cites = Cite::where('statut', 'ouvert')->get();
-
-            return view('etudiant.maintenance', compact('stats', 'ordres', 'etudiant', 'cites'));
-
-        } catch (\Exception $e) {
-            Log::error('Erreur page maintenance: ' . $e->getMessage());
-            return back()->withErrors(['error' => 'Une erreur est survenue : ' . \App\Support\UserFacingErrors::caught($e)]);
-        }
     }
 
     public function carte()
@@ -805,31 +752,46 @@ class dashboardController extends Controller
                 return redirect()->route('login')->withErrors(['error' => 'Veuillez vous connecter']);
             }
 
-            // Récupérer les données du formulaire
-            $data = $request->all();
+            // Seuls les champs qu'un étudiant peut renseigner sont repris (pas de statut, d'affectation ni de coût).
+            $data = $request->validate([
+                'titre' => ['nullable', 'string', 'max:255'],
+                'description' => ['required', 'string', 'max:3000'],
+                'categorie' => ['required', 'in:'.implode(',', \App\Models\OrdreTravail::CATEGORIES)],
+                'priorite' => ['required', 'in:'.implode(',', \App\Models\OrdreTravail::PRIORITES)],
+                'type_intervention' => ['nullable', 'in:corrective,preventive,urgente'],
+                'equipement_id' => ['nullable', 'string', 'max:150'],
+                'date_disponibilite' => ['nullable', 'date', 'after_or_equal:today'],
+                'periode_disponibilite' => ['nullable', 'string', 'max:50'],
+            ], [
+                'description.required' => 'Décrivez le problème rencontré.',
+                'categorie.required' => 'Choisissez la catégorie du problème.',
+                'categorie.in' => 'La catégorie sélectionnée est invalide.',
+                'priorite.required' => 'Indiquez le niveau d’urgence.',
+                'priorite.in' => 'Le niveau d’urgence sélectionné est invalide.',
+                'date_disponibilite.after_or_equal' => 'La date de disponibilité ne peut pas être passée.',
+            ]);
+            $data['type_intervention'] = $data['type_intervention'] ?? 'corrective';
             $idEtudiant = Auth::guard('etudiant')->user()->id_etudiant;
+            $data['etudiant_id'] = $idEtudiant;
 
-            // Récupérer les détails de l'étudiant
-            $result = $this->etudiantService->getEtudiantDetails($idEtudiant);
-
-            if (!$result['success']) {
-                throw new \Exception('Impossible de récupérer les informations de l\'étudiant');
-            }
-
-            $etudiant = $result['data'];
-
-            // Récupérer l'assignation de chambre actuelle
-            $assignation = $etudiant->assignationsChambre->first(); // Prendre la première assignation
-
-            // Ajouter les informations de localisation
+            // Chambre confirmée de l'étudiant (en cours ou à venir) : localisation de l'intervention.
+            $assignation = app(\App\Services\EtudiantChambre::class)->assignation($idEtudiant);
             if ($assignation && $assignation->chambre) {
-                $data['etudiant_id'] = $etudiant->id_etudiant;
                 $data['batiment_id'] = $assignation->chambre->batiment_id ?? null;
                 $data['chambre_id'] = $assignation->chambre->id_chambre ?? null;
                 $data['cite_id'] = $assignation->chambre->cite_id ?? null;
-            } else {
-                // Si l'étudiant n'a pas de chambre assignée, utiliser les données du formulaire
-                $data['etudiant_id'] = $etudiant->id_etudiant;
+            }
+
+            // L'équipement signalé doit être affecté à cette chambre.
+            if (! empty($data['equipement_id'])) {
+                $affecte = ! empty($data['chambre_id']) && \App\Models\EquipementAffectation::query()
+                    ->where('chambre_id', $data['chambre_id'])
+                    ->where('equipement_id', $data['equipement_id'])
+                    ->whereNull('returned_at')
+                    ->exists();
+                if (! $affecte) {
+                    throw ValidationException::withMessages(['equipement_id' => 'Cet équipement n’est pas affecté à votre chambre.']);
+                }
             }
 
             // Définir le statut par défaut
@@ -848,7 +810,7 @@ class dashboardController extends Controller
 
             return redirect()
                 ->back()
-                ->with('success', '✅ Votre demande de maintenance a été soumise avec succès ! Le numéro de suivi est : ' . $ordre->numero_ot);
+                ->with('success', 'Votre demande de maintenance a été soumise avec succès ! Le numéro de suivi est : ' . $ordre->numero_ot);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return redirect()
@@ -1012,60 +974,5 @@ private function getMoisLibelle($mois): string
     ];
     return $moisListe[(int) $mois] ?? $mois;
 }
-
-/**
- * Récupère les données de paiement avec pagination AJAX
- */
-public function getPaiementsAjax(Request $request)
-{
-    if (!Auth::guard('etudiant')->check()) {
-        return response()->json(['error' => 'Non authentifié'], 401);
-    }
-
-    $idEtudiant = Auth::guard('etudiant')->user()->id_etudiant;
-    $page = $request->get('page', 1);
-    $perPage = $request->get('per_page', 10);
-
-    try {
-        // Récupérer les paiements paginés
-        $paiements = \App\Models\Paiement::where('resident_id', $idEtudiant)
-            ->where('statut_paiement', '!=', 'annule')
-            ->orderBy('created_at', 'desc')
-            ->paginate($perPage, ['*'], 'page', $page);
-
-        // Récupérer les statistiques
-        $loyers = \App\Models\Loyer::where('etudiant_id', $idEtudiant)
-            ->where('statut', '!=', 'annule')
-            ->get();
-
-        $totalPaye = $loyers->sum('total_paye');
-        $totalImpayes = $loyers->sum('solde_restant');
-
-        return response()->json([
-            'success' => true,
-            'data' => $paiements->items(),
-            'pagination' => [
-                'current_page' => $paiements->currentPage(),
-                'last_page' => $paiements->lastPage(),
-                'per_page' => $paiements->perPage(),
-                'total' => $paiements->total(),
-                'from' => $paiements->firstItem(),
-                'to' => $paiements->lastItem(),
-            ],
-            'stats' => [
-                'total_paye' => $totalPaye,
-                'total_impayes' => $totalImpayes,
-                'nb_paiements' => $paiements->total(),
-            ]
-        ]);
-
-    } catch (\Exception $e) {
-        return response()->json([
-            'success' => false,
-            'error' => \App\Support\UserFacingErrors::caught($e)
-        ], 500);
-    }
-}
-
 
 }

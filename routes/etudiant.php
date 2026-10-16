@@ -54,7 +54,6 @@ Route::middleware(['etudiants'])->group(function () {
         Route::post('/demande/ot',  'storeOrdreTravail')->name('store_ot');
         Route::get('/contrat/{id?}',  'pdfContrat')->name('pdfContrat');
         Route::get('/annonce',  'annonces')->name('annonces');
-        Route::get('/paiements/ajax', 'getPaiementsAjax')->name('paiements.ajax');
     });
 
 

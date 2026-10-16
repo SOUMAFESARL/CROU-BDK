@@ -1,6 +1,8 @@
+import { Link } from '@inertiajs/react';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ICON } from '@/components/layout/app-sidebar';
+import { PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
 import { cn } from '@/lib/utils';
 
 /** Briques de mise en page des pages React de l'espace étudiant (cartes « surtitre + titre », lignes, états vides). */
@@ -28,7 +30,7 @@ export function Panneau({ surtitre, titre, badge, id, className, children }: Pan
                     </h2>
                 </div>
                 {badge !== undefined && (
-                    <span className="shrink-0 rounded-full bg-surface px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-muted tabular-nums">{badge}</span>
+                    <span className="shrink-0 rounded-brand bg-surface px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-muted tabular-nums">{badge}</span>
                 )}
             </div>
             {children}
@@ -115,6 +117,51 @@ export function Notice({ icone: Icone, children, className }: { icone: LucideIco
         <div className={cn('flex items-start gap-2.5 rounded-brand bg-soft p-3 text-sm text-primary', className)}>
             <Icone {...ICON} className="mt-0.5 shrink-0" />
             <div>{children}</div>
+        </div>
+    );
+}
+
+export type Filtre = { cle: string; libelle: string; href: string; compte?: number };
+
+/** Puces de filtre d'une liste (liens Inertia : la page garde son défilement). */
+export function Filtres({ filtres, actif, libelle }: { filtres: Filtre[]; actif: string; libelle: string }) {
+    return (
+        <nav aria-label={libelle} className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1">
+            {filtres.map((filtre) => (
+                <Link
+                    key={filtre.cle}
+                    href={filtre.href}
+                    preserveScroll
+                    preserveState
+                    aria-current={filtre.cle === actif ? 'page' : undefined}
+                    className={cn(
+                        'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-brand border px-3.5 text-sm whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-secondary focus-visible:outline-none',
+                        filtre.cle === actif ? 'border-primary bg-primary font-medium text-white' : 'border-gray-300 bg-white text-muted hover:bg-surface',
+                    )}
+                >
+                    {filtre.libelle}
+                    {filtre.compte !== undefined && (
+                        <span className={cn('rounded-sm px-1.5 text-xs tabular-nums', filtre.cle === actif ? 'bg-white/20' : 'bg-surface')}>{filtre.compte}</span>
+                    )}
+                </Link>
+            ))}
+        </nav>
+    );
+}
+
+export type PaginationSimpleProps = { page: number; pages: number; total: number; precedent: string | null; suivant: string | null };
+
+/** Pagination précédent / suivant (EtudiantMaintenance::pagination), masquée sur une seule page. */
+export function PaginationSimple({ page, pages, precedent, suivant }: PaginationSimpleProps) {
+    if (pages <= 1) return null;
+
+    return (
+        <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
+            <PaginationPrevious href={precedent} />
+            <span className="text-sm text-muted tabular-nums">
+                Page {page} sur {pages}
+            </span>
+            <PaginationNext href={suivant} />
         </div>
     );
 }
