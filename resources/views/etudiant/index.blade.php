@@ -58,7 +58,6 @@
     <!-- ── Demandes ── -->
     @include('etudiant.demandes',$data)
 
-    @include('etudiant.etat-lieux',$data)
     @include('etudiant.incidents', ['reports' => $result['disciplinaryReports'] ?? collect(), 'assignment' => $data['derniereAssignation']])
 
     @include('etudiant.carte', $data)

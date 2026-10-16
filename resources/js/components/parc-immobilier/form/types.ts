@@ -66,7 +66,14 @@ export type BatimentItem = {
     total_etages: number;
     total_ailes: number;
     plan: string | null;
+    /** Ailes et niveaux existants (`Batiment::structureExistante`). */
+    structure: AileExistante[];
 };
+
+/** Niveau existant : `type_occupation` est la valeur stockée ('hommes', 'femmes', 'mixte'). */
+export type NiveauExistant = { code: string; numero: number; type_occupation: string | null; chambres: number; occupees: number };
+
+export type AileExistante = { code: string; nom: string; niveaux: NiveauExistant[] };
 
 export type FormUrls = {
     hebergement: string;

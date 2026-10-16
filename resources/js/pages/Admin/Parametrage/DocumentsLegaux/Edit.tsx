@@ -118,7 +118,7 @@ export default function DocumentsLegauxEdit(props: Props) {
 
 function Editeur({ document, versions, urls }: Props) {
     const { errors: serverErrors } = usePage<SharedProps>().props;
-    const wizard = useWizard(STEPS.length);
+    const wizard = useWizard(STEPS.length, { toutesAccessibles: !!document.id });
     const [fichier, setFichier] = useState<File | null>(null);
     const [erreurFichier, setErreurFichier] = useState<string | null>(null);
     const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);

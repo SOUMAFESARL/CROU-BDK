@@ -78,7 +78,7 @@ const CHAMPS_ETAPES: (keyof Valeurs)[][] = [
 
 /** Modifier un ordre de travail (remplace `vie_residentielle/maintenance/edit.blade.php` ; action `update` inchangée). */
 export default function MaintenanceEdit({ ordre, categories, structure, equipements, urls }: Props) {
-    const wizard = useWizard(ETAPES.length);
+    const wizard = useWizard(ETAPES.length, { toutesAccessibles: true });
     const [erreurServeur, setErreurServeur] = useState<string | null>(null);
     const schema = useMemo(() => construireSchema(ordre.date_echeance), [ordre.date_echeance]);
     const {

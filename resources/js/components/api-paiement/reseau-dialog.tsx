@@ -108,7 +108,8 @@ export function ReseauDialog({ reseau, onClose }: Props) {
 
 function Formulaire({ reseau, onClose }: { reseau: Reseau; onClose: () => void }) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
+    // Réseau existant à modifier : toutes les étapes sont accessibles (les étapes intermédiaires restent validées avant d’avancer).
+    const [atteinte, setAtteinte] = useState(ETAPES.length - 1);
     const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
     const schema = useMemo(() => schemaPour(reseau), [reseau]);
     const {

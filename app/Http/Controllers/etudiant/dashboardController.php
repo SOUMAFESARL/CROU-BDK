@@ -65,7 +65,7 @@ class dashboardController extends Controller
 
 
     /** Sections encore servies par la page Blade etudiant/index (`?section=`) ; les autres sont des pages React (EtudiantMenu::SECTIONS_REACT). */
-    private const SECTIONS_BLADE = ['demandes', 'etat-lieux', 'annonce', 'incidents', 'carte-interactive'];
+    private const SECTIONS_BLADE = ['demandes', 'annonce', 'incidents', 'carte-interactive'];
 
     public function index()
     {
@@ -124,6 +124,7 @@ class dashboardController extends Controller
                 'chambre' => ['Etudiant/MaChambre', fn () => app(\App\Services\EtudiantChambre::class)->props($etudiant)],
                 'paiements' => ['Etudiant/MesPaiements', fn () => app(\App\Services\EtudiantPaiements::class)->props($etudiant, request())],
                 'maintenance' => ['Etudiant/Maintenance', fn () => app(\App\Services\EtudiantMaintenance::class)->props($etudiant, request())],
+                'etat-lieux' => ['Etudiant/EtatDesLieux', fn () => app(\App\Services\EtudiantEtatDesLieux::class)->props($etudiant)],
                 default => null,
             };
             if ($pageReact) {

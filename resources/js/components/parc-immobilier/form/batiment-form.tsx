@@ -14,8 +14,10 @@ import {
     Map as MapIcon,
     MapPin,
     Network,
+    Plus,
+    RotateCcw,
     ShieldCheck,
-    Wrench,
+    Trash2,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Controller, useForm, type FieldPath } from 'react-hook-form';
@@ -36,6 +38,7 @@ import {
     estMixte,
     normaliser,
     texte,
+    type AileExistante,
     type BatimentItem,
     type CiteOption,
     type Option,
@@ -59,6 +62,21 @@ const niveauSchema = z.object({
     type: z.string().min(1, "Choisissez le type d'occupation."),
 });
 
+/** Niveau en modification : on ne descend jamais sous le nombre de chambres déjà créées. */
+const niveauExistantSchema = z
+    .object({
+        code: z.string().nullable(),
+        numero: z.number(),
+        existantes: z.number(),
+        occupees: z.number(),
+        chambres: entierObligatoire('Le nombre de chambres', 0, 500),
+        type: z.string().min(1, "Choisissez le type d'occupation."),
+    })
+    .refine((niveau) => Number(niveau.chambres) >= niveau.existantes, {
+        path: ['chambres'],
+        message: 'Impossible de descendre sous le nombre de chambres déjà créées.',
+    });
+
 const schema = z.object({
     code_cite: z.string().min(1, 'Choisissez la cité de rattachement.'),
     name: z.string().trim().min(1, 'Le nom du bâtiment est obligatoire.').max(100, '100 caractères au maximum.'),
@@ -81,6 +99,16 @@ const schema = z.object({
             etages: z.array(niveauSchema),
         }),
     ),
+    /** Structure existante (modification uniquement). */
+    existant: z.array(
+        z.object({
+            code: z.string().nullable(),
+            nom: z.string().trim().min(1, "Le nom de l'aile est obligatoire.").max(100, '100 caractères au maximum.'),
+            niveaux: z.array(niveauExistantSchema),
+            /** Niveaux existants retirés (du plus haut au plus bas), supprimés à l'enregistrement ; gardés pour pouvoir les rétablir. */
+            retires: z.array(niveauExistantSchema),
+        }),
+    ),
     acces_handicape: z.boolean(),
     ascenseur: z.boolean(),
     gardiennage: z.boolean(),
@@ -91,6 +119,8 @@ type FormInput = z.input<typeof schema>;
 type FormOutput = z.output<typeof schema>;
 type Champ = FieldPath<FormInput>;
 type Niveau = FormInput['etages'][number];
+type AileEdition = FormInput['existant'][number];
+type NiveauEdition = AileEdition['niveaux'][number];
 type EtapeId = 'identite' | 'localisation' | 'structure' | 'services' | 'verification';
 
 const ETAPES: Record<EtapeId, WizardStep> = {
@@ -132,6 +162,44 @@ function redimensionner<T>(liste: T[], taille: number, creer: (index: number) =>
 
 const totalNiveaux = (niveaux: Niveau[]) => niveaux.reduce((somme, niveau) => somme + (Number.parseInt(niveau.chambres, 10) || 0), 0);
 
+/** Chambres à ajouter à la structure existante (différence avec les chambres déjà créées). */
+const chambresAjoutees = (ailes: AileEdition[]) =>
+    ailes.reduce((s, aile) => s + aile.niveaux.reduce((t, n) => t + Math.max(0, (Number.parseInt(n.chambres, 10) || 0) - n.existantes), 0), 0);
+
+const chambresExistantes = (ailes: AileEdition[]) => ailes.reduce((s, aile) => s + aile.niveaux.reduce((t, n) => t + n.existantes, 0), 0);
+
+/** Valeur stockée d'un niveau ('hommes', 'femmes', 'mixte') → valeur du formulaire (nom normalisé du type de cité). */
+function typeDepuisStockage(valeur: string | null, types: Option[], defaut: string): string {
+    const v = normaliser(valeur);
+    const correspond = (nom: string) => {
+        const n = normaliser(nom);
+        if (v.includes('mixte')) return n.includes('mixte');
+        if (v.includes('femme') || v.includes('fille')) return n.includes('femme') || n.includes('fille');
+        if (v.includes('homme') || v.includes('garcon')) return n.includes('homme') || n.includes('garcon');
+        return false;
+    };
+    const type = types.find((t) => correspond(t.name));
+    return type ? normaliser(type.name) : defaut;
+}
+
+/** Structure existante → valeurs du formulaire ; un bâtiment sans aile reçoit une aile vide (créée seulement si des niveaux y sont ajoutés). */
+function structureEdition(structure: AileExistante[], types: Option[], defaut: string): AileEdition[] {
+    if (!structure.length) return [{ code: null, nom: 'Aile Principale', niveaux: [], retires: [] }];
+    return structure.map((aile) => ({
+        code: aile.code,
+        nom: aile.nom || 'Aile Principale',
+        niveaux: aile.niveaux.map((niveau) => ({
+            code: niveau.code,
+            numero: niveau.numero,
+            existantes: niveau.chambres,
+            occupees: niveau.occupees,
+            chambres: String(niveau.chambres),
+            type: typeDepuisStockage(niveau.type_occupation, types, defaut),
+        })),
+        retires: [],
+    }));
+}
+
 type BatimentFormProps = {
     item: BatimentItem | null;
     campusId: string;
@@ -145,12 +213,10 @@ type BatimentFormProps = {
 
 export function BatimentForm({ item, campusId, cites, typesCite, users, preselectionCite, submitUrl, cancelUrl }: BatimentFormProps) {
     const isEdit = item !== null;
-    // En modification, la structure (niveaux et chambres déjà créés) ne change pas : l'étape est retirée.
-    const etapes: EtapeId[] = isEdit
-        ? ['identite', 'localisation', 'services', 'verification']
-        : ['identite', 'localisation', 'structure', 'services', 'verification'];
+    // En modification, l'étape Structure permet d'ajouter niveaux et chambres (jamais d'en retirer) et toutes les étapes sont accessibles.
+    const etapes: EtapeId[] = ['identite', 'localisation', 'structure', 'services', 'verification'];
     const steps = etapes.map((id) => ETAPES[id]);
-    const wizard = useWizard(steps.length);
+    const wizard = useWizard(steps.length, { toutesAccessibles: isEdit });
     const etapeCourante = etapes[wizard.current];
     const [submitting, setSubmitting] = useState(false);
     const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
@@ -183,6 +249,7 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
             config_niveaux: 'meme-hauteur',
             nombre_niveaux_global: '1',
             ailes: redimensionner([], 2, (index) => ({ nom: `Aile ${index + 1}`, niveaux: '1', etages: redimensionner([], 2, () => ({ chambres: '0', type: typeNiveau })) })),
+            existant: item ? structureEdition(item.structure ?? [], typesCite, typeNiveau) : [],
             acces_handicape: item?.acces_handicape ?? false,
             ascenseur: item?.ascenseur ?? false,
             gardiennage: item?.gardiennage ?? false,
@@ -231,6 +298,14 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
         setValue(
             'ailes',
             getValues('ailes').map((aile) => ({ ...aile, etages: corriger(aile.etages) })),
+        );
+        // Un niveau occupé garde son occupation (le serveur refuse de la changer).
+        setValue(
+            'existant',
+            getValues('existant').map((aile) => ({
+                ...aile,
+                niveaux: aile.niveaux.map((n) => (n.occupees > 0 || permis.includes(n.type) ? n : { ...n, type: defaut })),
+            })),
         );
     };
 
@@ -293,10 +368,67 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
         if (config === 'meme-hauteur') changerNiveauxAile('tous', getValues('nombre_niveaux_global'));
     };
 
-    const total = values.type_architecture === 'simple' ? totalNiveaux(values.etages) : values.ailes.reduce((s, a) => s + totalNiveaux(a.etages), 0);
+    /* Structure en modification : ajout d'étages / d'ailes et de chambres. */
+    const nouveauNiveau = (numero: number): NiveauEdition => ({ code: null, numero, existantes: 0, occupees: 0, chambres: '0', type: defautNiveau().type });
+
+    const modifierExistant = (ailes: AileEdition[]) => {
+        setValue('existant', ailes, { shouldValidate: true });
+        setErreurStructure(null);
+    };
+
+    const ajouterEtage = (indexAile: number) => {
+        const ailes = getValues('existant');
+        const niveaux = ailes[indexAile].niveaux;
+        const numero = niveaux.length ? Math.max(...niveaux.map((n) => n.numero)) + 1 : 0;
+        if (numero > MAX_NIVEAUX) return;
+        modifierExistant(ailes.map((a, i) => (i === indexAile ? { ...a, niveaux: [...a.niveaux, nouveauNiveau(numero)] } : a)));
+    };
+
+    /** Retire le niveau le plus haut de l'aile : un niveau nouveau disparaît, un niveau existant (libre) passe dans « retirés ». */
+    const retirerNiveauSuperieur = (indexAile: number) =>
+        modifierExistant(
+            getValues('existant').map((a, i) => {
+                const dernier = a.niveaux[a.niveaux.length - 1];
+                if (i !== indexAile || !dernier || dernier.occupees > 0) return a;
+                return {
+                    ...a,
+                    niveaux: a.niveaux.slice(0, -1),
+                    retires: dernier.code ? [...a.retires, { ...dernier, chambres: String(dernier.existantes) }] : a.retires,
+                };
+            }),
+        );
+
+    /** Rétablit le dernier niveau retiré, s'il redevient le niveau le plus haut de l'aile. */
+    const retablirNiveau = (indexAile: number) =>
+        modifierExistant(
+            getValues('existant').map((a, i) => {
+                const niveau = a.retires[a.retires.length - 1];
+                if (i !== indexAile || !niveau) return a;
+                return { ...a, niveaux: [...a.niveaux, niveau], retires: a.retires.slice(0, -1) };
+            }),
+        );
+
+    const ajouterAile = () => {
+        const ailes = getValues('existant');
+        if (ailes.length < MAX_AILES) modifierExistant([...ailes, { code: null, nom: `Aile ${ailes.length + 1}`, niveaux: [nouveauNiveau(0)], retires: [] }]);
+    };
+
+    const retirerAile = (indexAile: number) => modifierExistant(getValues('existant').filter((_, i) => i !== indexAile));
+
+    const total = isEdit
+        ? chambresExistantes(values.existant) + chambresAjoutees(values.existant)
+        : values.type_architecture === 'simple'
+          ? totalNiveaux(values.etages)
+          : values.ailes.reduce((s, a) => s + totalNiveaux(a.etages), 0);
+    const ajoutees = chambresAjoutees(values.existant);
+    const nouveauxNiveaux = values.existant.reduce((s, aile) => s + aile.niveaux.filter((n) => !n.code).length, 0);
+    const nombreNiveaux = values.existant.reduce((s, aile) => s + aile.niveaux.length, 0);
+    const niveauxRetires = values.existant.reduce((s, aile) => s + aile.retires.length, 0);
+    const chambresSupprimees = values.existant.reduce((s, aile) => s + aile.retires.reduce((t, n) => t + n.existantes, 0), 0);
 
     const champsEtape = (id: EtapeId): Champ[] => {
         if (id !== 'structure') return CHAMPS_FIXES[id];
+        if (isEdit) return ['existant'];
         return values.type_architecture === 'simple'
             ? ['type_architecture', 'nombre_etages', 'etages']
             : ['type_architecture', 'nombre_ailes', 'config_niveaux', 'nombre_niveaux_global', 'ailes'];
@@ -305,7 +437,7 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
     const validerEtape = async (index: number) => {
         const id = etapes[index];
         let ok = await trigger(champsEtape(id), { shouldFocus: true });
-        if (id === 'structure') {
+        if (id === 'structure' && !isEdit) {
             const erreur = total < 1 ? 'Indiquez au moins une chambre dans la structure du bâtiment.' : null;
             setErreurStructure(erreur);
             ok = ok && !erreur;
@@ -343,7 +475,19 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
             services: { acces_handicape: v.acces_handicape ? 1 : 0, ascenseur: v.ascenseur ? 1 : 0, gardiennage: v.gardiennage ? 1 : 0 },
             description: v.description,
         };
-        if (!isEdit) {
+        if (isEdit) {
+            // Seules les ailes existantes ou dotées de niveaux sont envoyées (une aile vide ne crée rien).
+            donnees.structure_data = {
+                ailes: v.existant
+                    .filter((aile) => aile.code || aile.niveaux.length)
+                    .map((aile) => ({
+                        code: aile.code,
+                        nom: aile.nom,
+                        niveaux_retires: aile.retires.map((n) => n.code),
+                        niveaux: aile.niveaux.map((n) => ({ code: n.code, numero: n.numero, chambres: Number(n.chambres), type_occupation: n.type })),
+                    })),
+            };
+        } else {
             donnees.type_architecture = v.type_architecture;
             if (v.type_architecture === 'simple') {
                 const etages = v.etages.map((niveau, index) => ({
@@ -494,6 +638,79 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
             </Field>
         </div>
     );
+
+    /** Ligne d'un niveau en modification : chambres (jamais sous l'existant) + occupation (figée si le niveau est occupé). */
+    const ligneNiveauExistant = (
+        indexAile: number,
+        index: number,
+        niveau: NiveauEdition,
+        erreur?: { chambres?: { message?: string }; type?: { message?: string } },
+    ) => {
+        const prefixe = `existant.${indexAile}.niveaux.${index}` as const;
+        const libelle = libelleNiveau(niveau.numero);
+        return (
+            <div
+                key={niveau.code ?? `${prefixe}-nouveau`}
+                className="grid grid-cols-1 items-start gap-3 rounded-brand border border-gray-200 bg-surface/50 p-3 sm:grid-cols-[130px_minmax(0,1fr)_minmax(0,1fr)]"
+            >
+                <span className="flex flex-wrap items-center gap-2 pt-2">
+                    <span className={cn('text-sm font-medium', niveau.numero === 0 ? 'text-primary' : 'text-gray-700')}>{libelle}</span>
+                    {!niveau.code && <span className="rounded-sm bg-soft px-1.5 py-0.5 text-xs text-primary">Nouveau</span>}
+                </span>
+                <Field
+                    id={`${prefixe}.chambres`}
+                    label="Chambres"
+                    error={erreur?.chambres?.message}
+                    hint={niveau.existantes ? `${nombre.format(niveau.existantes)} déjà créée(s) : on peut seulement en ajouter.` : undefined}
+                >
+                    <Controller
+                        control={control}
+                        name={`${prefixe}.chambres`}
+                        render={({ field }) => (
+                            <Counter
+                                id={`${prefixe}.chambres`}
+                                label={`chambres, ${libelle}`}
+                                value={field.value}
+                                onChange={(valeur) => {
+                                    field.onChange(valeur);
+                                    setErreurStructure(null);
+                                }}
+                                onBlur={field.onBlur}
+                                min={niveau.existantes}
+                                max={500}
+                                invalid={!!erreur?.chambres}
+                            />
+                        )}
+                    />
+                </Field>
+                <Field
+                    id={`${prefixe}.type`}
+                    label="Occupation"
+                    error={erreur?.type?.message}
+                    hint={niveau.occupees ? 'Niveau occupé : occupation non modifiable.' : undefined}
+                >
+                    <Controller
+                        control={control}
+                        name={`${prefixe}.type`}
+                        render={({ field }) => (
+                            <Select value={field.value} onValueChange={field.onChange} disabled={niveau.occupees > 0}>
+                                <SelectTrigger id={`${prefixe}.type`} ref={field.ref} invalid={!!erreur?.type}>
+                                    <SelectValue placeholder="Type" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {typesNiveau.map((type) => (
+                                        <SelectItem key={type.value} value={type.value}>
+                                            {type.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        )}
+                    />
+                </Field>
+            </div>
+        );
+    };
 
     return (
         <form
@@ -653,7 +870,131 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
                     </>
                 )}
 
-                {etapeCourante === 'structure' && (
+                {etapeCourante === 'structure' && isEdit && (
+                    <>
+                        <div className="flex items-start gap-3 rounded-brand border bg-surface/60 px-4 py-3 text-sm text-muted">
+                            <Layers className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+                            <span>
+                                {values.type_architecture === 'complexe' ? 'Structure à ailes' : 'Structure simple'} : vous pouvez ajouter des étages
+                                {values.type_architecture === 'complexe' ? ', des ailes' : ''} et des chambres, changer l’occupation d’un niveau ou retirer des
+                                niveaux en commençant par le plus haut (s’ils n’ont aucune chambre occupée). Le nombre de chambres d’un niveau gardé ne peut pas
+                                diminuer.
+                            </span>
+                        </div>
+
+                        {values.existant.map((aile, indexAile) => {
+                            const erreurAile = errors.existant?.[indexAile];
+                            const dernier = aile.niveaux[aile.niveaux.length - 1];
+                            const retire = aile.retires[aile.retires.length - 1];
+                            const nommable = values.type_architecture === 'complexe' || values.existant.length > 1;
+                            return (
+                                <section key={aile.code ?? `aile-nouvelle-${indexAile}`} className="space-y-3 rounded-brand border p-4">
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                                        <div className="flex-1">
+                                            {nommable ? (
+                                                <Field id={`existant.${indexAile}.nom`} label={`Aile ${indexAile + 1}`} required error={erreurAile?.nom?.message}>
+                                                    <Input
+                                                        id={`existant.${indexAile}.nom`}
+                                                        placeholder="Nom de l'aile"
+                                                        invalid={!!erreurAile?.nom}
+                                                        {...register(`existant.${indexAile}.nom`)}
+                                                    />
+                                                </Field>
+                                            ) : (
+                                                <SectionTitle hint={`${nombre.format(aile.niveaux.length)} niveau(x)`}>Niveaux du bâtiment</SectionTitle>
+                                            )}
+                                        </div>
+                                        <p className="flex h-11 items-center gap-1.5 text-sm text-muted sm:justify-end">
+                                            <BedDouble className="size-4 text-primary" aria-hidden />
+                                            {nombre.format(totalNiveaux(aile.niveaux))} chambre(s)
+                                        </p>
+                                        {!aile.code && (
+                                            <Button variant="ghost" className="h-11 text-red-700 hover:bg-red-50" onClick={() => retirerAile(indexAile)}>
+                                                <Trash2 className="size-4" aria-hidden />
+                                                Retirer l’aile
+                                            </Button>
+                                        )}
+                                    </div>
+                                    {aile.niveaux.length === 0 && <p className="text-sm text-muted">Aucun niveau enregistré pour l’instant.</p>}
+                                    <div className="space-y-2">
+                                        {aile.niveaux.map((niveau, index) => ligneNiveauExistant(indexAile, index, niveau, erreurAile?.niveaux?.[index]))}
+                                    </div>
+                                    <div className="flex flex-col gap-2 sm:flex-row">
+                                        <Button variant="outline" className="h-10" onClick={() => ajouterEtage(indexAile)} disabled={(dernier?.numero ?? -1) >= MAX_NIVEAUX}>
+                                            <Plus className="size-4" aria-hidden />
+                                            {dernier ? 'Ajouter un étage' : 'Ajouter le rez-de-chaussée'}
+                                        </Button>
+                                        {dernier && (
+                                            <Button
+                                                variant="ghost"
+                                                className="h-10 text-red-700 hover:bg-red-50"
+                                                onClick={() => retirerNiveauSuperieur(indexAile)}
+                                                disabled={dernier.occupees > 0}
+                                            >
+                                                <Trash2 className="size-4" aria-hidden />
+                                                Retirer « {libelleNiveau(dernier.numero)} »
+                                            </Button>
+                                        )}
+                                    </div>
+                                    {dernier && dernier.occupees > 0 && (
+                                        <p className="text-xs text-muted">
+                                            « {libelleNiveau(dernier.numero)} » a des chambres occupées : libérez-les avant de retirer ce niveau.
+                                        </p>
+                                    )}
+                                    {retire && (
+                                        <div className="flex flex-col gap-2 rounded-brand border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700 sm:flex-row sm:items-center sm:justify-between">
+                                            <span>
+                                                Niveau(x) retiré(s) : {aile.retires.map((n) => libelleNiveau(n.numero)).join(', ')}
+                                                {aile.retires.some((n) => n.existantes > 0) &&
+                                                    ` — ${nombre.format(aile.retires.reduce((t, n) => t + n.existantes, 0))} chambre(s) seront supprimées à l’enregistrement`}
+                                                .
+                                            </span>
+                                            <Button
+                                                variant="outline"
+                                                className="h-9 shrink-0 bg-white"
+                                                onClick={() => retablirNiveau(indexAile)}
+                                                disabled={(dernier?.numero ?? -1) >= retire.numero}
+                                            >
+                                                <RotateCcw className="size-4" aria-hidden />
+                                                Rétablir « {libelleNiveau(retire.numero)} »
+                                            </Button>
+                                        </div>
+                                    )}
+                                </section>
+                            );
+                        })}
+
+                        {values.type_architecture === 'complexe' && (
+                            <Button variant="outline" className="h-11 w-full" onClick={ajouterAile} disabled={values.existant.length >= MAX_AILES}>
+                                <Plus className="size-4" aria-hidden />
+                                Ajouter une aile
+                            </Button>
+                        )}
+
+                        <div
+                            className={cn(
+                                'flex items-center justify-between gap-3 rounded-brand border px-4 py-3',
+                                erreurStructure ? 'border-red-200 bg-red-50' : 'border-secondary/40 bg-soft/60',
+                            )}
+                        >
+                            <span className="flex items-center gap-2 text-sm text-gray-900">
+                                <BedDouble className="size-4 text-primary" aria-hidden />
+                                Total du bâtiment
+                            </span>
+                            <span className="text-right">
+                                <span className="block text-base font-medium text-primary tabular-nums">{nombre.format(total)} chambre(s)</span>
+                                {ajoutees > 0 && <span className="block text-xs text-muted">dont {nombre.format(ajoutees)} à créer</span>}
+                                {chambresSupprimees > 0 && <span className="block text-xs text-red-700">{nombre.format(chambresSupprimees)} à supprimer</span>}
+                            </span>
+                        </div>
+                        {erreurStructure && <FormAlert>{erreurStructure}</FormAlert>}
+                        <p className="text-xs text-muted">
+                            Les chambres ajoutées sont créées vides : leur numéro, leur type et leurs lits se configurent ensuite dans « Nouvelle chambre ».
+                        </p>
+                    </>
+                )}
+
+                {etapeCourante === 'structure' && !isEdit && (
                     <>
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                             <ChoiceCard
@@ -844,14 +1185,27 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
                             rows={[['Coordonnées GPS', values.latitude && values.longitude ? `${values.latitude}, ${values.longitude}` : 'Non renseignées']]}
                         />
                         {isEdit ? (
-                            <div className="flex items-start gap-3 rounded-brand border bg-surface/60 px-4 py-3 text-sm text-muted">
-                                <Wrench className="mt-0.5 size-4 shrink-0" aria-hidden />
-                                <span>
-                                    Structure existante conservée : {nombre.format(item.total_chambres)} chambre(s)
-                                    {item.total_ailes > 1 ? `, ${item.total_ailes} ailes` : ''}
-                                    {item.total_etages ? `, ${item.total_etages} niveau(x)` : ''}.
-                                </span>
-                            </div>
+                            <RecapSection
+                                title="Structure"
+                                onEdit={() => goToEtape('structure')}
+                                rows={[
+                                    ['Architecture', values.type_architecture === 'complexe' ? `${values.existant.length} aile(s)` : 'Structure simple'],
+                                    [
+                                        'Niveaux',
+                                        `${nombre.format(nombreNiveaux)} niveau(x)${nouveauxNiveaux ? `, dont ${nombre.format(nouveauxNiveaux)} nouveau(x)` : ''}${
+                                            niveauxRetires ? ` ; ${nombre.format(niveauxRetires)} retiré(s)` : ''
+                                        }`,
+                                    ],
+                                    [
+                                        'Chambres',
+                                        <span key="total">
+                                            {nombre.format(total)}
+                                            {ajoutees > 0 && <strong className="font-medium text-primary"> (dont {nombre.format(ajoutees)} à créer)</strong>}
+                                            {chambresSupprimees > 0 && <strong className="font-medium text-red-700"> — {nombre.format(chambresSupprimees)} à supprimer</strong>}
+                                        </span>,
+                                    ],
+                                ]}
+                            />
                         ) : (
                             <RecapSection
                                 title="Structure"

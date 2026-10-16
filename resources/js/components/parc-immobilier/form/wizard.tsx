@@ -6,10 +6,14 @@ import { cn } from '@/lib/utils';
 
 export type WizardStep = { label: string; description: string; icon: LucideIcon };
 
-/** Étape courante + plus haute étape atteinte (on ne saute jamais une étape non validée). */
-export function useWizard(count: number) {
+/**
+ * Étape courante + plus haute étape atteinte (on ne saute jamais une étape non validée).
+ * `toutesAccessibles` (modification d'un élément existant) : toutes les étapes sont cliquables d'emblée ;
+ * le formulaire valide quand même les étapes intermédiaires avant d'avancer (`allerA`).
+ */
+export function useWizard(count: number, { toutesAccessibles = false }: { toutesAccessibles?: boolean } = {}) {
     const [current, setCurrent] = useState(0);
-    const [reached, setReached] = useState(0);
+    const [reached, setReached] = useState(toutesAccessibles ? count - 1 : 0);
 
     const goTo = useCallback(
         (index: number) => {
@@ -122,9 +126,31 @@ export function Wizard({
                         </span>
                         <span>{progression} %</span>
                     </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100" aria-hidden>
-                        <div className="h-full rounded-full bg-secondary transition-all" style={{ width: `${progression}%` }} />
-                    </div>
+                    {/* Segments cliquables : on passe directement à une étape déjà atteinte. */}
+                    <ol aria-label="Étapes du formulaire" className="mt-2 flex gap-1">
+                        {steps.map((item, index) => {
+                            const accessible = index <= reached && !submitting;
+                            return (
+                                <li key={item.label} className="flex-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => accessible && onStepClick(index)}
+                                        disabled={!accessible}
+                                        aria-label={`Étape ${index + 1} : ${item.label}`}
+                                        aria-current={index === current ? 'step' : undefined}
+                                        className="flex h-5 w-full items-center disabled:cursor-not-allowed"
+                                    >
+                                        <span
+                                            className={cn(
+                                                'h-1.5 w-full rounded-full transition-colors',
+                                                index === current ? 'bg-primary' : index <= reached ? 'bg-secondary' : 'bg-gray-100',
+                                            )}
+                                        />
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </ol>
                 </div>
 
                 <div className="flex items-start gap-3 border-b px-4 py-4 md:px-6">

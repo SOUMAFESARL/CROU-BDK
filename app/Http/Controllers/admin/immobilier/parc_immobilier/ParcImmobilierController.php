@@ -16,6 +16,7 @@ use App\Models\Region;
 use App\Models\TypeCite;
 use App\Models\TypeChambre;
 use App\Models\Niveau_Aile_Batiment;
+use App\Models\Aile_Batiment;
 use App\Http\Services\CampusService;
 use App\Http\Services\CiteService;
 use App\Http\Services\BatimentService;
@@ -526,6 +527,7 @@ class ParcImmobilierController extends Controller
             'total_etages' => (int) $batiment->total_etages,
             'total_ailes' => (int) $batiment->total_ailes,
             'plan' => $batiment->plan_file ? asset($batiment->plan_file) : null,
+            'structure' => Batiment::structureExistante($batiment),
         ];
     }
 
@@ -755,6 +757,7 @@ class ParcImmobilierController extends Controller
             $longitude = isset($batimentData['longitude']) ? (float)$batimentData['longitude'] : null;
 
             DB::beginTransaction();
+            $batiment = null;
 
             try {
                 // Créer le bâtiment
@@ -812,16 +815,24 @@ class ParcImmobilierController extends Controller
                     'message'       => 'Bâtiment enregistré avec succès!',
                     'batiment_id'   => $batiment->id_batiment,
                     'code_batiment' => $batiment->code_batiment,
-                    'redirect'      => route('admin.hebergement.parc-immobilier.create', ['type' => 'batiment'])
+                    'redirect'      => route('admin.hebergement.parc-immobilier.index')
                 ], 201);
 
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 DB::rollBack();
-                session()->flash('error', 'Erreur lors de la création: ' . \App\Support\UserFacingErrors::caught($e));
+                // Tables MyISAM : le rollback n'annule rien, on retire à la main le bâtiment créé et sa structure.
+                if ($batiment?->wasRecentlyCreated) {
+                    $ailes = Aile_Batiment::where('batiment_id', $batiment->id_batiment)->pluck('code_aile');
+                    Chambre::where('batiment_id', $batiment->id_batiment)->forceDelete();
+                    Niveau_Aile_Batiment::whereIn('code_aile', $ailes)->delete();
+                    Aile_Batiment::where('batiment_id', $batiment->id_batiment)->delete();
+                    $batiment->forceDelete();
+                }
 
+                // Le formulaire affiche le message ; pas de flash qui réapparaîtrait sur la page suivante.
                 return response()->json([
                     'success' => false,
-                    'message' => 'Erreur lors de la création: ' . \App\Support\UserFacingErrors::caught($e)
+                    'message' => 'Erreur lors de la création : ' . \App\Support\UserFacingErrors::caught($e)
                 ], 500);
             }
 
@@ -886,6 +897,11 @@ class ParcImmobilierController extends Controller
                 'updated_by' => getInfoAdmin()->users->id_user ?? null,
             ]);
 
+            // Structure : nouveaux niveaux / ailes et chambres ajoutées (les totaux sont recalculés depuis la base).
+            if (is_array($data['structure_data']['ailes'] ?? null)) {
+                DB::transaction(fn () => Batiment::appliquerStructureModifiee($batiment->refresh(), $data['structure_data']['ailes']));
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Bâtiment modifié avec succès.',
@@ -899,6 +915,108 @@ class ParcImmobilierController extends Controller
         }
     }
 
+
+    /**
+     * Retrait de niveaux d'une aile : uniquement les plus hauts (on retire toujours en commençant par le niveau supérieur),
+     * et seulement si aucune de leurs chambres n'est occupée, réservée ou attribuée (proposition ou affectation en cours).
+     * Renvoie le message de refus, ou null si le retrait est permis.
+     */
+    private function refusRetraitNiveaux(\Illuminate\Support\Collection $niveauxAile, array $retires, array $niveauxEnvoyes): ?string
+    {
+        $envoyes = collect($niveauxEnvoyes)->pluck('code')->filter()->all();
+        $aRetirer = $niveauxAile->whereIn('niveau_aile_code', $retires);
+        if ($aRetirer->count() !== count($retires) || array_intersect($retires, $envoyes)) {
+            return "Un niveau à retirer n'appartient pas à ce bâtiment. Rechargez la page.";
+        }
+
+        $plusHautGarde = $niveauxAile->whereNotIn('niveau_aile_code', $retires)->max(fn ($n) => (int) $n->niveau_numero);
+        if ($plusHautGarde !== null && $plusHautGarde > $aRetirer->min(fn ($n) => (int) $n->niveau_numero)) {
+            return 'Retirez les niveaux en commençant par le niveau le plus haut.';
+        }
+
+        $chambres = Chambre::whereIn('niveau_aile_code', $retires);
+        $occupee = (clone $chambres)->where(fn ($q) => $q->where('occupants_actuels', '>', 0)->orWhereIn('etat', ['occupee', 'reservee']))->exists()
+            || AssignationChambre::mobilisantPlace()->whereIn('chambre_id', (clone $chambres)->pluck('id_chambre'))->exists();
+        if ($occupee) {
+            $niveau = $aRetirer->sortBy('niveau_numero')->first();
+            $libelle = (int) $niveau->niveau_numero === 0 ? 'Le rez-de-chaussée' : "L'étage {$niveau->niveau_numero}";
+
+            return "{$libelle} (ou un niveau au-dessus) a des chambres occupées ou attribuées : libérez-les avant de retirer le niveau.";
+        }
+
+        return null;
+    }
+
+    /**
+     * Structure modifiée d'un bâtiment existant : on peut ajouter des niveaux, des ailes et des chambres, renommer une aile,
+     * changer l'occupation d'un niveau ou retirer les niveaux supérieurs libres ; jamais diminuer les chambres d'un niveau gardé
+     * ni changer l'occupation d'un niveau occupé.
+     */
+    private function validerStructureModifiee($validator, array $ailes, ?Batiment $batiment): void
+    {
+        if (!$batiment) {
+            return;
+        }
+        $ailesExistantes = Aile_Batiment::where('batiment_id', $batiment->id_batiment)->get()->keyBy('code_aile');
+        $niveauxExistants = Niveau_Aile_Batiment::whereIn('code_aile', $ailesExistantes->keys())->get()->keyBy('niveau_aile_code');
+        $chambres = Batiment::chambresParNiveau($batiment);
+        $erreur = fn (string $message) => $validator->errors()->add('structure_data', $message);
+
+        foreach (array_values($ailes) as $aileData) {
+            $codeAile = $aileData['code'] ?? null;
+            if ($codeAile && !$ailesExistantes->has($codeAile)) {
+                $erreur("Une aile envoyée n'appartient pas à ce bâtiment. Rechargez la page.");
+                return;
+            }
+            if (mb_strlen(trim((string) ($aileData['nom'] ?? ''))) > 100) {
+                $erreur("Le nom d'une aile ne doit pas dépasser 100 caractères.");
+                return;
+            }
+
+            $niveauxAile = $codeAile ? $niveauxExistants->where('code_aile', $codeAile) : collect();
+            $retires = array_values(array_unique(array_filter((array) ($aileData['niveaux_retires'] ?? []), 'is_string')));
+            if ($retires && ($message = $this->refusRetraitNiveaux($niveauxAile, $retires, $aileData['niveaux'] ?? []))) {
+                $erreur($message);
+                return;
+            }
+
+            // Numéros encore utilisés dans l'aile : un nouveau niveau peut reprendre le numéro d'un niveau retiré.
+            $numeros = $niveauxAile->whereNotIn('niveau_aile_code', $retires)->pluck('niveau_numero')->map(fn ($n) => (int) $n)->all();
+            foreach ($aileData['niveaux'] ?? [] as $niveauData) {
+                $voulues = $niveauData['chambres'] ?? null;
+                if (!is_numeric($voulues) || (int) $voulues < 0 || (int) $voulues > 500) {
+                    $erreur('Le nombre de chambres d’un niveau doit être compris entre 0 et 500.');
+                    return;
+                }
+                $codeNiveau = $niveauData['code'] ?? null;
+                if ($codeNiveau) {
+                    $niveau = $niveauxExistants->get($codeNiveau);
+                    if (!$niveau || $niveau->code_aile !== $codeAile) {
+                        $erreur("Un niveau envoyé n'appartient pas à ce bâtiment. Rechargez la page.");
+                        return;
+                    }
+                    $libelle = (int) $niveau->niveau_numero === 0 ? 'Le rez-de-chaussée' : "L'étage {$niveau->niveau_numero}";
+                    $existantes = $chambres[$codeNiveau]['total'] ?? 0;
+                    if ((int) $voulues < $existantes) {
+                        $erreur("{$libelle} compte déjà {$existantes} chambre(s) : ce nombre ne peut pas être diminué ici.");
+                        return;
+                    }
+                    $type = Batiment::typeOccupationNiveau($niveauData['type_occupation'] ?? null, $batiment);
+                    if ($type !== $niveau->type_occupation && ($chambres[$codeNiveau]['occupees'] ?? 0) > 0) {
+                        $erreur("{$libelle} a des chambres occupées : son type d'occupation ne peut pas être modifié.");
+                        return;
+                    }
+                } else {
+                    $numero = $niveauData['numero'] ?? null;
+                    if (!is_numeric($numero) || (int) $numero < 0 || (int) $numero > 30 || in_array((int) $numero, $numeros, true)) {
+                        $erreur('Le numéro d’un nouveau niveau est invalide ou déjà utilisé dans son aile.');
+                        return;
+                    }
+                    $numeros[] = (int) $numero;
+                }
+            }
+        }
+    }
 
     /**
      * Contrôles serveur du bâtiment (le formulaire les applique déjà étape par étape) :
@@ -941,6 +1059,9 @@ class ParcImmobilierController extends Controller
                 ->when($batimentId, fn ($q) => $q->where('id_batiment', '!=', $batimentId))->exists();
             if ($doublon) {
                 $validator->errors()->add('name', 'Un bâtiment porte déjà ce nom dans cette cité.');
+            }
+            if (!$creation && is_array($data['structure_data']['ailes'] ?? null)) {
+                $this->validerStructureModifiee($validator, $data['structure_data']['ailes'], Batiment::find($batimentId));
             }
             if ($creation) {
                 $structure = $data['structure_data'] ?? [];
