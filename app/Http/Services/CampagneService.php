@@ -11,6 +11,9 @@ use Illuminate\Support\Facades\Log;
 use Exception;
 use App\Models\Campagne;
 use App\Models\DemandeEtudiant;
+use App\Models\DocumentCampagne;
+use App\Models\ResidenceCampagne;
+use Illuminate\Validation\ValidationException;
 
 class CampagneService
 {
@@ -71,8 +74,8 @@ class CampagneService
         }
 
         // Vérifier la date d'échéance des contrats
-        if (isset($data['date_echeance_demande']) && isset($data['date_echance_contrat'])) {
-            if ($data['date_echance_contrat'] <= $data['date_echeance_demande']) {
+        if (isset($data['date_echeance_demande']) && isset($data['date_echeance_contrat'])) {
+            if ($data['date_echeance_contrat'] <= $data['date_echeance_demande']) {
                 throw new Exception('La date d\'échéance des contrats doit être après la date d\'échéance des demandes');
             }
         }
@@ -118,56 +121,94 @@ class CampagneService
     }
 
     /**
-     * Mettre à jour une campagne
+     * Mettre à jour une campagne, ses résidences et ses documents requis (même règles que la création).
      */
-    public function updateCampagne(string $id, array $data): bool
+    public function updateCampagne(string $id, array $data): Campagne
     {
-        try {
-            DB::beginTransaction();
+        $campagne = $this->campagneRepository->findById($id);
+        if (!$campagne) {
+            throw ValidationException::withMessages(['campagne' => 'Campagne introuvable ou déjà supprimée.']);
+        }
 
-            $campagne = $this->campagneRepository->findById($id);
-            if (!$campagne) {
-                throw new Exception('Campagne non trouvée');
+        $residences = $data['residences'] ?? null;
+        $documents = $data['documents'] ?? null;
+        unset($data['residences'], $data['documents']);
+
+        $this->validateDates($data);
+        $data = $this->prepareBooleanData($data);
+
+        DB::transaction(function () use ($campagne, $data, $residences, $documents) {
+            $this->campagneRepository->update($campagne->id_campagne, $data);
+
+            if ($residences !== null) {
+                $this->synchroniserResidences($campagne, $residences);
             }
-
-            // Validation des dates
-            $periodeDebut = $data['periode_debut'] ?? $campagne->periode_debut;
-            $periodeFin = $data['periode_fin'] ?? $campagne->periode_fin;
-            $dateEcheanceDemande = $data['date_echeance_demande'] ?? $campagne->date_echeance_demande;
-            $dateEcheanceContrat = $data['date_echance_contrat'] ?? $campagne->date_echance_contrat;
-
-            if ($periodeFin <= $periodeDebut) {
-                throw new Exception('La date de fin de campagne doit être postérieure à la date de début');
+            if ($documents !== null) {
+                $this->synchroniserDocuments($campagne, $documents);
             }
+        });
 
-            if ($dateEcheanceDemande <= $periodeFin) {
-                throw new Exception('La date d\'échéance des demandes doit être après la fin de la campagne');
-            }
+        return $campagne->fresh();
+    }
 
-            if ($dateEcheanceContrat <= $dateEcheanceDemande) {
-                throw new Exception('La date d\'échéance des contrats doit être après la date d\'échéance des demandes');
-            }
+    /**
+     * Nombre de dossiers rattachés à la campagne (demandes, attributions, dérogations).
+     * Une campagne qui en a ne peut pas être supprimée : l'historique des étudiants en dépend.
+     */
+    public function nombreDossiers(string $id): int
+    {
+        return DB::table('demande')->where('campagne_id', $id)->count()
+            + DB::table('assignation_chambres')->where('campagne_id', $id)->count()
+            + DB::table('admission_derogations')->where('campagne_id', $id)->count();
+    }
 
-            // Validation des âges
-//            $ageMin = $data['age_min'] ?? $campagne->age_min;
-//            $ageMax = $data['age_max'] ?? $campagne->age_max;
-//
-//            if ($ageMax <= $ageMin) {
-//                throw new Exception('L\'âge maximum doit être supérieur à l\'âge minimum');
-//            }
+    /**
+     * Supprimer (suppression logique) une campagne sans dossier rattaché.
+     * Les liens résidences / documents sont conservés pour permettre une restauration.
+     */
+    public function deleteCampagne(string $id): void
+    {
+        $campagne = $this->campagneRepository->findById($id);
+        if (!$campagne) {
+            throw ValidationException::withMessages(['campagne' => 'Campagne introuvable ou déjà supprimée.']);
+        }
 
-            // Préparation des données booléennes
-            $data = $this->prepareBooleanData($data);
+        if ($this->nombreDossiers($id) > 0) {
+            throw ValidationException::withMessages([
+                'campagne' => 'Cette campagne ne peut pas être supprimée : des étudiants y ont déjà déposé une demande ou reçu une attribution.',
+            ]);
+        }
 
-            $result = $this->campagneRepository->update($id, $data);
+        $this->campagneRepository->delete($id);
+    }
 
-            DB::commit();
-            return $result;
+    /** Remplace les résidences de la campagne par la sélection (ajouts et retraits uniquement). */
+    protected function synchroniserResidences(Campagne $campagne, array $citeIds): void
+    {
+        $citeIds = array_values(array_unique($citeIds));
+        $actuelles = ResidenceCampagne::where('campagne_id', $campagne->id_campagne)->pluck('cite_id')->all();
 
-        } catch (Exception $e) {
-            DB::rollBack();
-            Log::error('Erreur lors de la mise à jour de la campagne: ' . $e->getMessage());
-            throw $e;
+        ResidenceCampagne::where('campagne_id', $campagne->id_campagne)
+            ->whereIn('cite_id', array_diff($actuelles, $citeIds))
+            ->delete();
+
+        foreach (array_diff($citeIds, $actuelles) as $citeId) {
+            ResidenceCampagne::create(['campagne_id' => $campagne->id_campagne, 'cite_id' => $citeId]);
+        }
+    }
+
+    /** Remplace les documents requis de la campagne par la sélection (ajouts et retraits uniquement). */
+    protected function synchroniserDocuments(Campagne $campagne, array $documentIds): void
+    {
+        $documentIds = array_values(array_unique($documentIds));
+        $actuels = DocumentCampagne::where('id_campagne', $campagne->id_campagne)->pluck('document_id')->all();
+
+        DocumentCampagne::where('id_campagne', $campagne->id_campagne)
+            ->whereIn('document_id', array_diff($actuels, $documentIds))
+            ->delete();
+
+        foreach (array_diff($documentIds, $actuels) as $documentId) {
+            DocumentCampagne::create(['id_campagne' => $campagne->id_campagne, 'document_id' => $documentId]);
         }
     }
 

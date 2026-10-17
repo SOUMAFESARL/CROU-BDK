@@ -167,7 +167,7 @@ class Chambre extends Model
     {
         return $this->statut === 'actif'
             && $this->batiment?->statut === 'actif'
-            && $this->cite?->statut === 'actif'
+            && $this->cite?->estActive()
             && (string) $this->batiment->cite_id === (string) $this->cite_id;
     }
 
@@ -245,7 +245,7 @@ class Chambre extends Model
             ->where('etat', 'disponible')
             ->where('statut', 'actif')
             ->whereHas('batiment', fn ($q) => $q->where('statut', 'actif'))
-            ->whereHas('cite', fn ($q) => $q->where('statut', 'actif'));
+            ->whereHas('cite', fn ($q) => $q->whereIn('statut', Cite::STATUTS_ACTIFS));
     }
     public function responsable()
     {

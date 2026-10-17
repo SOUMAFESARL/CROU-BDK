@@ -6,7 +6,7 @@ Les écrans existants sont conservés. Une section repliable de confirmation PMR
 
 - Chambre, bâtiment et cité doivent être actifs et cohérents. La cité doit appartenir à la campagne.
 - Les restrictions hommes/femmes/mixte sont vérifiées aux trois niveaux à partir du référentiel et du genre de l'étudiant. Un référentiel manquant ou inconnu bloque l'attribution et doit être complété.
-- Une chambre PMR exige `pmr_confirme`. Aucune conversion du champ historique `autiste` n'est effectuée. La confirmation et son retrait enregistrent l'agent et la date.
+- Une chambre PMR exige `pmr_confirme`, sauf pour l'admission directe (régularisation d'un étudiant déjà installé dans la chambre, formulaire et import). Aucune conversion du champ historique `autiste` n'est effectuée. La confirmation et son retrait enregistrent l'agent et la date.
 - Les assignations `en_attente` et `confirmee` sans date de fin passée consomment une place, toutes campagnes confondues. Les propositions futures sont également réservées : ce lot n'introduit pas de calendrier de séjours successifs.
 - Les places occupées affichées restent les occupations confirmées en cours ; les places disponibles retranchent aussi les réservations. L'état d'une chambre partiellement occupée reste compatible avec les écrans existants.
 - La création verrouille l'étudiant puis la cité, le bâtiment et la chambre, dans une transaction. Le comptage des places utilise une lecture verrouillée pour éviter un instantané périmé sous MySQL REPEATABLE READ.

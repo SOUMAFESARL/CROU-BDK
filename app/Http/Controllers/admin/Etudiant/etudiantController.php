@@ -57,10 +57,8 @@ class etudiantController extends Controller
         $chambres = Chambre::withDefaultRelations()
             ->withCount(['assignations as places_occupees' => fn ($query) => $query->mobilisantPlace()])
             ->whereNotNull('numero_chambre')
-            ->where('etat', 'disponible')
             ->orderBy('numero_chambre')
-            ->get()
-            ->filter(fn (Chambre $chambre) => $chambre->peutAccueillir());
+            ->get();
 
         $admin = request()->user('admin');
         $access = app(\App\Services\AdminAccess::class);
@@ -88,6 +86,7 @@ class etudiantController extends Controller
                 'cite_id' => (string) $chambre->cite_id,
                 'batiment_id' => (string) $chambre->batiment_id,
                 'libres' => max(0, (int) $chambre->capacite_max - (int) $chambre->places_occupees),
+                'disponible' => $chambre->peutAccueillir(),
             ])->values(),
             'aujourdhui' => today()->toDateString(),
             'import' => $avertissement ? ['message' => \Illuminate\Support\Str::before((string) $avertissement, ' Certaines lignes'), 'lignes' => $lignesRefusees] : null,
@@ -243,7 +242,7 @@ class etudiantController extends Controller
                 'niveau_etude_precedent_code' => $data['niveau_etude_precedent_code'] ?? null,
                 'niveau_etude_actuel_code' => $data['niveau_etude_actuel_code'] ?? null,
                 'filiere_code' => $data['filiere_code'] ?? null,
-                'moyenne' => $data['moyenne'] ?? null,
+                'moyenne' => $data['moyenne'] ?? 0, // colonne demande.moyenne NOT NULL (défaut 0)
                 'credit_valider' => $data['credit_valider'] ?? null,
                 'boursier' => $data['boursier'] ?? false,
                 'periode' => $data['periode'] ?? null,
@@ -257,135 +256,172 @@ class etudiantController extends Controller
         });
 
         return redirect()
-            ->route('admin.etudiant.admission_directe')
+            ->route('admin.hebergement.campagnes_admission.admission')
             ->with('success', 'Étudiant déjà logé enregistré : dossier validé et chambre confirmée.');
+    }
+
+    /** En-têtes du modèle d'import, en français (les anciens en-têtes `name`/`telephone1` restent acceptés à l'import). */
+    private const IMPORT_HEADERS = ['nom_prenoms', 'civilite', 'matricule', 'telephone', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree', 'numero_lit'];
+
+    /** Une ligne dont le nom commence par ce préfixe est un exemple : l'import l'ignore. */
+    private const IMPORT_EXAMPLE_PREFIX = 'EXEMPLE';
+
+    /** Ligne d'exemple du modèle, construite avec des valeurs réelles pour rester cohérente avec les listes déroulantes. */
+    private function importExampleRow(): array
+    {
+        $room = null;
+        foreach (Cite::query()->where('statut', '!=', 'ferme')->orderBy('name')->get() as $cite) {
+            foreach (Batiment::query()->where('cite_id', $cite->id_cite)->where('is_valid', 1)->orderBy('name')->get() as $building) {
+                $numero = Chambre::query()->where('batiment_id', $building->id_batiment)->whereNotNull('numero_chambre')->orderBy('numero_chambre')->value('numero_chambre');
+                if ($numero !== null) {
+                    $room = [$cite->name, $building->name, $numero];
+                    break 2;
+                }
+            }
+        }
+        $campagne = Campagne::query()->where('statut', 'active')->orderByDesc('annee_campagne')->value('annee_campagne');
+
+        return [
+            'nom_prenoms' => self::IMPORT_EXAMPLE_PREFIX . ' - Kouassi Jean (ligne à remplacer)',
+            'civilite' => Genre::query()->orderBy('name')->value('name') ?? 'Masculin',
+            'matricule' => 'MAT-0001',
+            'telephone' => '0700000000',
+            'cite' => $room[0] ?? 'Nom de la cité',
+            'batiment' => $room[1] ?? 'Nom du bâtiment',
+            'campagne' => $campagne ?? getAnneeUniversitaire(),
+            'chambre' => $room[2] ?? '101',
+            'date_entree' => today()->format('d/m/Y'),
+            'numero_lit' => '1',
+        ];
     }
 
     public function downloadAdmissionImportTemplate()
     {
-        $headers = ['name', 'civilite', 'matricule', 'telephone1', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree', 'numero_lit'];
+        $headers = self::IMPORT_HEADERS;
+        $example = $this->importExampleRow();
 
         if (!class_exists(ZipArchive::class)) {
-            return response()->streamDownload(function () use ($headers) {
+            return response()->streamDownload(function () use ($headers, $example) {
                 $output = fopen('php://output', 'wb');
                 fwrite($output, "\xEF\xBB\xBF");
                 fputcsv($output, $headers, ';');
+                fputcsv($output, array_map(fn ($header) => $example[$header], $headers), ';');
                 fclose($output);
             }, 'modele_import_etudiants.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
         }
 
+        $cites = Cite::query()->where('statut', '!=', 'ferme')->orderBy('name')->get();
+        // Seules les campagnes actives permettent l'admission directe (DossierWorkflow::admissionDirecte).
+        $campagnes = Campagne::query()->where('statut', 'active')->orderByDesc('annee_campagne')->pluck('annee_campagne');
         $lists = [
-            'Genres' => Genre::query()->orderBy('name')->pluck('name')->filter()->values()->all(),
-            'Campagnes' => Campagne::query()->orderByDesc('annee_campagne')->pluck('annee_campagne')->filter()->values()->all(),
-            'Cites' => Cite::query()->where('statut', '!=', 'ferme')->orderBy('name')->pluck('name')->filter()->values()->all(),
-            'Batiments' => Batiment::query()->where('is_valid', 1)->orderBy('name')->pluck('name')->filter()->values()->all(),
-            'Chambres' => Chambre::query()->whereNotNull('numero_chambre')->orderBy('numero_chambre')->pluck('numero_chambre')->filter()->values()->all(),
+            'Genres' => Genre::query()->orderBy('name')->pluck('name')->filter()->unique()->values()->all(),
+            'Campagnes' => $campagnes->filter()->unique()->values()->all(),
+            'Cites' => $cites->pluck('name')->filter()->unique()->values()->all(),
         ];
-        $additionalLists = [];
 
+        // Listes dépendantes : cité → bâtiments (CITE_n), puis « cité|bâtiment » → chambres (BAT_n),
+        // pour que deux bâtiments homonymes de cités différentes ne mélangent pas leurs chambres.
         $dependentLists = [];
         $citeLookup = [];
         $buildingLookup = [];
-        $citeRangeNumber = 1;
-        $buildingRangeNumber = 1;
-        foreach (Cite::query()->where('statut', '!=', 'ferme')->orderBy('name')->get() as $cite) {
-            $buildingNames = Batiment::query()->where('cite_id', $cite->id_cite)->where('is_valid', 1)->orderBy('name')->pluck('name')->filter()->values()->all();
-            if ($buildingNames) {
-                $rangeName = 'CITE_' . $citeRangeNumber++;
-                $dependentLists[$rangeName] = $buildingNames;
-                $citeLookup[] = [$cite->name, $rangeName];
-            }
-        }
-        foreach (Batiment::query()->where('is_valid', 1)->orderBy('name')->get() as $building) {
-            $roomNames = Chambre::query()->where('batiment_id', $building->id_batiment)->whereNotNull('numero_chambre')->orderBy('numero_chambre')->pluck('numero_chambre')->filter()->values()->all();
-            if ($roomNames) {
-                $rangeName = 'BAT_' . $buildingRangeNumber++;
+        foreach ($cites as $cite) {
+            $buildings = Batiment::query()->where('cite_id', $cite->id_cite)->where('is_valid', 1)->orderBy('name')->get();
+            $buildingNames = $buildings->pluck('name')->filter()->unique()->values()->all();
+            if (!$buildingNames) continue;
+            $rangeName = 'CITE_' . (count($citeLookup) + 1);
+            $dependentLists[$rangeName] = $buildingNames;
+            $citeLookup[] = [$cite->name, $rangeName];
+            foreach ($buildings as $building) {
+                $roomNames = Chambre::query()->where('batiment_id', $building->id_batiment)->whereNotNull('numero_chambre')
+                    ->orderBy('numero_chambre')->pluck('numero_chambre')->filter()->unique()->values()->all();
+                if (!$roomNames) continue;
+                $rangeName = 'BAT_' . (count($buildingLookup) + 1);
                 $dependentLists[$rangeName] = $roomNames;
-                $buildingLookup[] = [$building->name, $rangeName];
+                $buildingLookup[] = [$cite->name . '|' . $building->name, $rangeName];
             }
         }
+
+        $cell = fn (string $ref, mixed $value, string $style = '') => '<c r="' . $ref . '"' . $style . ' t="inlineStr"><is><t>' . htmlspecialchars((string) $value, ENT_XML1) . '</t></is></c>';
 
         $path = tempnam(sys_get_temp_dir(), 'etudiants_template_');
         $zip = new ZipArchive();
         $zip->open($path, ZipArchive::OVERWRITE);
-        $zip->addFromString('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>');
+        $zip->addFromString('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>');
         $zip->addFromString('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
-        $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>');
+        $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+        // Styles : 0 = défaut, 1 = texte (garde le 0 initial des téléphones/matricules), 2 = date jj/mm/aaaa, 3 = en-tête en gras,
+        // 4/5/6 = ligne d'exemple en gris italique (défaut / texte / date).
+        $zip->addFromString('xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts><fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><i/><sz val="11"/><color rgb="FF6B7280"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="49" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="49" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/><xf numFmtId="164" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>');
 
         $workbook = '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Etudiants" sheetId="1" r:id="rId1"/><sheet name="Listes" sheetId="2" state="hidden" r:id="rId2"/></sheets><definedNames>';
-        foreach ($lists as $name => $values) {
-            $last = max(2, count($values) + 1);
-            $workbook .= '<definedName name="' . $name . '">Listes!$' . $this->excelColumn(array_search($name, array_keys($lists), true) + 1) . '$2:$' . $this->excelColumn(array_search($name, array_keys($lists), true) + 1) . '$' . $last . '</definedName>';
+        $listColumns = [];
+        foreach (array_keys($lists) as $index => $name) {
+            $listColumns[$name] = $this->excelColumn($index + 1);
+            $workbook .= '<definedName name="' . $name . '">Listes!$' . $listColumns[$name] . '$2:$' . $listColumns[$name] . '$' . max(2, count($lists[$name]) + 1) . '</definedName>';
         }
-        foreach ($additionalLists as $index => $values) {
-            $column = $this->excelColumn(17 + array_search($index, array_keys($additionalLists), true));
-            $workbook .= '<definedName name="' . $index . '">Listes!$' . $column . '$2:$' . $column . '$' . max(2, count($values) + 1) . '</definedName>';
-        }
+        // Feuille « Listes » : K/L = cité → plage des bâtiments, O/P = cité|bâtiment → plage des chambres, W… = plages dépendantes.
         $dependentColumn = 23;
         $dependentColumnMap = [];
         foreach ($dependentLists as $name => $values) {
             $column = $this->excelColumn($dependentColumn++);
             $dependentColumnMap[$name] = $column;
-            $last = max(2, count($values) + 1);
-            $workbook .= '<definedName name="' . $name . '">Listes!$' . $column . '$2:$' . $column . '$' . $last . '</definedName>';
+            $workbook .= '<definedName name="' . $name . '">Listes!$' . $column . '$2:$' . $column . '$' . max(2, count($values) + 1) . '</definedName>';
         }
         $workbook .= '</definedNames></workbook>';
         $zip->addFromString('xl/workbook.xml', $workbook);
 
         $sheetRows = '<row r="1">';
-        foreach ($headers as $index => $header) $sheetRows .= '<c r="' . $this->excelColumn($index + 1) . '1" t="inlineStr"><is><t>' . htmlspecialchars($header, ENT_XML1) . '</t></is></c>';
+        foreach ($headers as $index => $header) $sheetRows .= $cell($this->excelColumn($index + 1) . '1', $header, ' s="3"');
+        $sheetRows .= '</row><row r="2">';
+        foreach ($headers as $index => $header) {
+            $ref = $this->excelColumn($index + 1) . '2';
+            $sheetRows .= match ($header) {
+                // Date en numéro de série Excel pour qu'elle s'affiche au format jj/mm/aaaa.
+                'date_entree' => '<c r="' . $ref . '" s="6"><v>' . (int) today()->diffInDays(\Illuminate\Support\Carbon::create(1899, 12, 30), true) . '</v></c>',
+                'numero_lit' => '<c r="' . $ref . '" s="4"><v>' . (int) $example[$header] . '</v></c>',
+                'matricule', 'telephone' => $cell($ref, $example[$header], ' s="5"'),
+                default => $cell($ref, $example[$header], ' s="4"'),
+            };
+        }
         $sheetRows .= '</row>';
-        $validations = ['B' => '=Genres', 'E' => '=Cites', 'F' => '=INDIRECT("CITE_"&MATCH($E2,Listes!$K$2:$K$1000,0))', 'G' => '=Campagnes', 'H' => '=INDIRECT("BAT_"&MATCH($F2,Listes!$O$2:$O$1000,0))'];
-        $sheet = '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" freezePane="1"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetData>' . $sheetRows . '</sheetData><dataValidations count="' . count($validations) . '">';
-        foreach ($validations as $column => $formula) $sheet .= '<dataValidation type="list" allowBlank="1" sqref="' . $column . '2:' . $column . '1000"><formula1>' . htmlspecialchars($formula, ENT_XML1) . '</formula1></dataValidation>';
+        $cols = '<cols><col min="1" max="1" width="32" customWidth="1"/><col min="2" max="2" width="14" customWidth="1"/>'
+            . '<col min="3" max="4" width="16" style="1" customWidth="1"/><col min="5" max="8" width="20" customWidth="1"/>'
+            . '<col min="9" max="9" width="14" style="2" customWidth="1"/><col min="10" max="10" width="12" customWidth="1"/></cols>';
+        $validations = [
+            'B' => '=Genres',
+            'E' => '=Cites',
+            'F' => '=INDIRECT("CITE_"&MATCH($E2,Listes!$K$2:$K$1000,0))',
+            'G' => '=Campagnes',
+            'H' => '=INDIRECT("BAT_"&MATCH($E2&"|"&$F2,Listes!$O$2:$O$1000,0))',
+        ];
+        $sheet = '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' . $cols . '<sheetData>' . $sheetRows . '</sheetData><dataValidations count="' . (count($validations) + 1) . '">';
+        foreach ($validations as $column => $formula) {
+            $sheet .= '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="' . $column . '2:' . $column . '1000"><formula1>' . htmlspecialchars($formula, ENT_XML1) . '</formula1></dataValidation>';
+        }
+        $sheet .= '<dataValidation type="whole" operator="greaterThanOrEqual" allowBlank="1" showErrorMessage="1" error="' . htmlspecialchars('Le numéro de lit doit être un entier positif.', ENT_XML1) . '" sqref="J2:J1000"><formula1>1</formula1></dataValidation>';
         $sheet .= '</dataValidations></worksheet>';
         $zip->addFromString('xl/worksheets/sheet1.xml', $sheet);
 
         $listRows = '<row r="1">';
-        foreach (array_keys($lists) as $index => $name) {
-            $listRows .= '<c r="' . $this->excelColumn($index + 1) . '1" t="inlineStr"><is><t>' . htmlspecialchars($name, ENT_XML1) . '</t></is></c>';
-        }
-        foreach (array_keys($additionalLists) as $index => $name) {
-            $column = $this->excelColumn(17 + $index);
-            $listRows .= '<c r="' . $column . '1" t="inlineStr"><is><t>' . htmlspecialchars($name, ENT_XML1) . '</t></is></c>';
-        }
-        foreach (['K' => 'CiteLookup', 'L' => 'CiteRange', 'O' => 'BuildingLookup', 'P' => 'BuildingRange'] as $column => $name) {
-            $listRows .= '<c r="' . $column . '1" t="inlineStr"><is><t>' . $name . '</t></is></c>';
-        }
-        foreach ($dependentColumnMap as $name => $column) {
-            $listRows .= '<c r="' . $column . '1" t="inlineStr"><is><t>' . $name . '</t></is></c>';
-        }
+        foreach ($listColumns as $name => $column) $listRows .= $cell($column . '1', $name);
+        foreach (['K' => 'CiteLookup', 'L' => 'CiteRange', 'O' => 'BuildingLookup', 'P' => 'BuildingRange'] as $column => $name) $listRows .= $cell($column . '1', $name);
+        foreach ($dependentColumnMap as $name => $column) $listRows .= $cell($column . '1', $name);
         $listRows .= '</row>';
-        $maxListRows = max(array_merge(array_map('count', $lists), array_map('count', $additionalLists), [count($citeLookup), count($buildingLookup)], array_map('count', $dependentLists)));
+        $maxListRows = max(array_merge([0, count($citeLookup), count($buildingLookup)], array_map('count', $lists), array_map('count', $dependentLists)));
         for ($row = 0; $row < $maxListRows; $row++) {
             $excelRow = $row + 2;
             $listRows .= '<row r="' . $excelRow . '">';
-            foreach ($lists as $index => $values) {
-                if (!array_key_exists($row, $values)) continue;
-                $column = $this->excelColumn(array_search($index, array_keys($lists), true) + 1);
-                $listRows .= '<c r="' . $column . $excelRow . '" t="inlineStr"><is><t>' . htmlspecialchars((string) $values[$row], ENT_XML1) . '</t></is></c>';
+            foreach ($lists as $name => $values) {
+                if (array_key_exists($row, $values)) $listRows .= $cell($listColumns[$name] . $excelRow, $values[$row]);
             }
-            foreach ($additionalLists as $index => $values) {
-                if (!array_key_exists($row, $values)) continue;
-                $column = $this->excelColumn(17 + array_search($index, array_keys($additionalLists), true));
-                $listRows .= '<c r="' . $column . $excelRow . '" t="inlineStr"><is><t>' . htmlspecialchars((string) $values[$row], ENT_XML1) . '</t></is></c>';
-            }
-            if (isset($citeLookup[$row])) {
-                $listRows .= '<c r="K' . $excelRow . '" t="inlineStr"><is><t>' . htmlspecialchars((string) $citeLookup[$row][0], ENT_XML1) . '</t></is></c>';
-                $listRows .= '<c r="L' . $excelRow . '" t="inlineStr"><is><t>' . htmlspecialchars((string) $citeLookup[$row][1], ENT_XML1) . '</t></is></c>';
-            }
-            if (isset($buildingLookup[$row])) {
-                $listRows .= '<c r="O' . $excelRow . '" t="inlineStr"><is><t>' . htmlspecialchars((string) $buildingLookup[$row][0], ENT_XML1) . '</t></is></c>';
-                $listRows .= '<c r="P' . $excelRow . '" t="inlineStr"><is><t>' . htmlspecialchars((string) $buildingLookup[$row][1], ENT_XML1) . '</t></is></c>';
-            }
+            if (isset($citeLookup[$row])) $listRows .= $cell('K' . $excelRow, $citeLookup[$row][0]) . $cell('L' . $excelRow, $citeLookup[$row][1]);
+            if (isset($buildingLookup[$row])) $listRows .= $cell('O' . $excelRow, $buildingLookup[$row][0]) . $cell('P' . $excelRow, $buildingLookup[$row][1]);
             foreach ($dependentLists as $name => $values) {
-                if (isset($values[$row])) {
-                    $listRows .= '<c r="' . $dependentColumnMap[$name] . $excelRow . '" t="inlineStr"><is><t>' . htmlspecialchars((string) $values[$row], ENT_XML1) . '</t></is></c>';
-                }
+                if (isset($values[$row])) $listRows .= $cell($dependentColumnMap[$name] . $excelRow, $values[$row]);
             }
             $listRows .= '</row>';
         }
-        $zip->addFromString('xl/worksheets/sheet2.xml', '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:' . $this->excelColumn(max(10, $dependentColumn - 1)) . ($maxListRows + 1) . '"/><sheetData>' . $listRows . '</sheetData></worksheet>');
+        $zip->addFromString('xl/worksheets/sheet2.xml', '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:' . $this->excelColumn(max(16, $dependentColumn - 1)) . ($maxListRows + 1) . '"/><sheetData>' . $listRows . '</sheetData></worksheet>');
         $zip->close();
 
         return response()->download($path, 'modele_import_etudiants.xlsx', ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])->deleteFileAfterSend(true);
@@ -405,7 +441,11 @@ class etudiantController extends Controller
     public function importAdmissionDirecte(Request $request)
     {
         $request->validate([
-            'fichier' => ['required', 'file', 'mimes:csv,txt,xlsx', 'max:10240'],
+            // `extensions` contrôle le nom ; `mimes` inclut zip car un .xlsx produit hors Excel est souvent détecté comme une archive ZIP.
+            'fichier' => ['required', 'file', 'extensions:csv,txt,xlsx', 'mimes:csv,txt,xlsx,zip', 'max:10240'],
+        ], [
+            'fichier.extensions' => 'Formats acceptés : .xlsx ou .csv.',
+            'fichier.mimes' => 'Formats acceptés : .xlsx ou .csv.',
         ]);
 
         try {
@@ -418,12 +458,22 @@ class etudiantController extends Controller
             return back()->withErrors(['fichier' => 'Le fichier ne contient aucune ligne de données.']);
         }
 
+        $colonnes = array_keys($this->normalizeImportRow(array_fill_keys(array_keys($rows[0]), '')));
+        $manquantes = array_values(array_diff(['name', 'genre', 'matricule', 'telephone1', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree'], $colonnes));
+        if ($manquantes) {
+            $libelles = array_combine(['name', 'genre', 'telephone1'], ['nom_prenoms', 'civilite', 'telephone']);
+            return back()->withErrors(['fichier' => 'Colonnes manquantes : ' . implode(', ', array_map(fn ($colonne) => $libelles[$colonne] ?? $colonne, $manquantes))
+                . '. Téléchargez le modèle et conservez ses en-têtes.']);
+        }
+
         $successCount = 0;
         $errors = [];
 
         foreach ($rows as $index => $row) {
             $line = $index + 2;
             $data = $this->normalizeImportRow($row);
+            // Ligne d'exemple du modèle laissée en place : ignorée.
+            if (str_starts_with(mb_strtoupper(trim((string) ($data['name'] ?? ''))), self::IMPORT_EXAMPLE_PREFIX)) continue;
             try {
                 $data = $this->resolveImportReferences($data);
                 $existing = app(\App\Http\Services\StudentIdentityResolver::class)->existingForAdmin($data);
@@ -480,6 +530,16 @@ class etudiantController extends Controller
                 'filiere_code' => ['nullable', 'string', 'max:100'],
                 'credit_valider' => ['nullable', 'numeric'],
                 'periode' => ['nullable', 'string', 'max:100'],
+            ], [
+                'matricule.unique' => 'Un étudiant possède déjà ce matricule.',
+                'telephone1.unique' => 'Un étudiant possède déjà ce numéro de téléphone.',
+                'email1.unique' => 'Un étudiant possède déjà cette adresse e-mail.',
+                'date_entree.before_or_equal' => "La date d'entrée ne peut pas être future.",
+                'date_entree.date' => "La date d'entrée doit être au format jj/mm/aaaa.",
+            ], [
+                'name' => 'nom_prenoms', 'genre_id' => 'civilite', 'telephone1' => 'telephone',
+                'cite_id' => 'cite', 'batiment_id' => 'batiment', 'campagne_id' => 'campagne',
+                'chambre_id' => 'chambre', 'date_entree' => 'date_entree', 'numero_lit' => 'numero_lit',
             ]);
 
             if ($validator->fails()) {
@@ -488,6 +548,7 @@ class etudiantController extends Controller
             }
 
             try {
+                $data['numero_lit'] = isset($data['numero_lit']) ? (int) $data['numero_lit'] : null;
                 $this->registerImportedAdmission($data);
                 $successCount++;
             } catch (\Throwable $exception) {
@@ -509,11 +570,12 @@ class etudiantController extends Controller
             $chambre = app(AttributionRules::class)->verrouillerChambre($data['chambre_id']);
             $placesOccupees = AssignationChambre::mobilisantPlace()->where('chambre_id', $chambre->id_chambre)->count();
 
+            // ValidationException (et non RuntimeException) : le motif reste lisible dans le rapport d'import.
             if ($chambre->etat !== 'disponible' || $placesOccupees >= max(0, (int) $chambre->capacite_max)) {
-                throw new \RuntimeException("La chambre {$data['chambre_id']} n'est plus disponible.");
+                throw ValidationException::withMessages(['chambre' => "La chambre « {$chambre->numero_chambre} » n'est plus disponible (pleine ou indisponible)."]);
             }
             if ((string) $chambre->batiment_id !== (string) $data['batiment_id'] || (string) $chambre->cite_id !== (string) $data['cite_id']) {
-                throw new \RuntimeException('La chambre ne correspond pas à la cité et au bâtiment indiqués.');
+                throw ValidationException::withMessages(['chambre' => 'La chambre ne correspond pas à la cité et au bâtiment indiqués.']);
             }
 
             $campagne = Campagne::query()->findOrFail($data['campagne_id']);
@@ -577,7 +639,7 @@ class etudiantController extends Controller
                 'niveau_etude_precedent_code' => $data['niveau_etude_precedent_code'] ?? null,
                 'niveau_etude_actuel_code' => $data['niveau_etude_actuel_code'] ?? null,
                 'filiere_code' => $data['filiere_code'] ?? null,
-                'moyenne' => $data['moyenne'] ?? null,
+                'moyenne' => $data['moyenne'] ?? 0, // colonne demande.moyenne NOT NULL (défaut 0)
                 'credit_valider' => $data['credit_valider'] ?? null,
                 'boursier' => $data['boursier'] ?? false,
                 'periode' => $data['periode'] ?? null,
@@ -595,7 +657,10 @@ class etudiantController extends Controller
     {
         $aliases = [
             'nom' => 'name', 'nom et prenoms' => 'name', 'nom et prénoms' => 'name',
+            'nom_prenoms' => 'name', 'nom_prénoms' => 'name', 'nom_et_prenoms' => 'name', 'nom_et_prénoms' => 'name', 'nom prenoms' => 'name', 'nom prénoms' => 'name',
             'civilite' => 'genre', 'civilité' => 'genre', 'genre' => 'genre', 'genre_id' => 'genre', 'telephone' => 'telephone1', 'téléphone' => 'telephone1',
+            'numéro lit' => 'numero_lit', 'numero lit' => 'numero_lit', 'numéro_lit' => 'numero_lit', 'lit' => 'numero_lit',
+            'date_entrée' => 'date_entree',
             'email' => 'email1', 'e-mail' => 'email1', 'annee_academique' => 'campagne',
             'année académique' => 'campagne', 'campagne_id' => 'campagne', 'chambre' => 'chambre', 'chambre_id' => 'chambre',
             'cité' => 'cite', 'cite' => 'cite', 'cite_id' => 'cite',
@@ -612,7 +677,10 @@ class etudiantController extends Controller
         $normalized = [];
         foreach ($row as $key => $value) {
             $key = mb_strtolower(trim(preg_replace('/^\xEF\xBB\xBF/', '', (string) $key)));
-            $normalized[$aliases[$key] ?? str_replace([' ', '-'], '_', $key)] = is_string($value) ? trim($value) : $value;
+            if ($key === '') continue;
+            $value = is_string($value) ? trim($value) : $value;
+            // Cellule vide = valeur absente (pas de chaîne vide en base, ni de '' passé à un paramètre ?int).
+            $normalized[$aliases[$key] ?? str_replace([' ', '-'], '_', $key)] = $value === '' ? null : $value;
         }
         foreach (['date_entree', 'date_naissance', 'date_delivrance', 'date_expiration'] as $field) {
             $value = $normalized[$field] ?? null;
@@ -629,7 +697,9 @@ class etudiantController extends Controller
     private function resolveImportReferences(array $data): array
     {
         $data['genre_id'] = Genre::query()->whereRaw('LOWER(name) = ?', [mb_strtolower(trim((string) ($data['genre'] ?? '')) ?: '')])->value('id');
-        $data['campagne_id'] = Campagne::query()->where('annee_campagne', trim((string) ($data['campagne'] ?? '')))->value('id_campagne');
+        // Plusieurs campagnes peuvent partager une année : on retient l'active (seule acceptée pour une admission directe).
+        $data['campagne_id'] = Campagne::query()->where('annee_campagne', trim((string) ($data['campagne'] ?? '')))
+            ->orderByRaw("CASE WHEN statut = 'active' THEN 0 ELSE 1 END")->value('id_campagne');
         $data['cite_id'] = Cite::query()->whereRaw('LOWER(name) = ?', [mb_strtolower(trim((string) ($data['cite'] ?? '')) ?: '')])->value('id_cite');
         $cite = $data['cite_id'] ? Cite::query()->find($data['cite_id']) : null;
         $data['batiment_id'] = $cite
@@ -655,13 +725,16 @@ class etudiantController extends Controller
 
         $missing = [];
         foreach ([
-            'genre_id' => 'civilité', 'campagne_id' => 'campagne', 'cite_id' => 'cité',
-            'batiment_id' => 'bâtiment', 'chambre_id' => 'chambre',
-        ] as $id => $label) {
-            if (empty($data[$id])) $missing[] = $label;
+            'genre_id' => ['civilite', 'genre'], 'campagne_id' => ['campagne', 'campagne'], 'cite_id' => ['cite', 'cite'],
+            'batiment_id' => ['batiment', 'batiment'], 'chambre_id' => ['chambre', 'chambre'],
+        ] as $id => [$label, $source]) {
+            if (!empty($data[$id])) continue;
+            $value = trim((string) ($data[$source] ?? ''));
+            $missing[] = $value === '' ? $label . ' (vide)' : $label . ' « ' . $value . ' » introuvable';
         }
         if ($missing) {
-            throw new \RuntimeException('Valeur introuvable pour : ' . implode(', ', $missing) . '.');
+            // ValidationException : message conservé tel quel par UserFacingErrors::caught().
+            throw ValidationException::withMessages(['ligne' => 'Valeur à corriger : ' . implode(', ', $missing) . '.']);
         }
         return $data;
     }
@@ -685,11 +758,17 @@ class etudiantController extends Controller
     {
         $extension = strtolower($file->getClientOriginalExtension());
         if (in_array($extension, ['csv', 'txt'], true)) {
-            $handle = fopen($file->getRealPath(), 'rb');
+            $content = (string) file_get_contents($file->getRealPath());
+            // Excel (Windows FR) enregistre souvent les CSV en Windows-1252 : on convertit pour garder les accents (Cité, Bâtiment…).
+            if (!mb_check_encoding($content, 'UTF-8')) {
+                $content = mb_convert_encoding($content, 'UTF-8', 'Windows-1252');
+            }
+            $handle = fopen('php://temp', 'w+b');
+            fwrite($handle, $content);
             rewind($handle);
             $delimiter = str_contains((string) fgets($handle), ';') ? ';' : ',';
             rewind($handle);
-            $headers = fgetcsv($handle, 0, $delimiter);
+            $headers = fgetcsv($handle, 0, $delimiter) ?: [];
             $rows = [];
             while (($values = fgetcsv($handle, 0, $delimiter)) !== false) {
                 if (count(array_filter($values, fn ($value) => trim((string) $value) !== '')) === 0) continue;
@@ -700,27 +779,46 @@ class etudiantController extends Controller
         }
 
         if ($extension !== 'xlsx' || !class_exists(ZipArchive::class)) {
-            throw new \RuntimeException('Format non supporté. Utilisez un fichier .xlsx ou .csv.');
+            throw ValidationException::withMessages(['fichier' => 'Format non supporté. Utilisez un fichier .xlsx ou .csv.']);
         }
         $zip = new ZipArchive();
-        if ($zip->open($file->getRealPath()) !== true) throw new \RuntimeException('Impossible de lire le fichier Excel.');
+        if ($zip->open($file->getRealPath()) !== true) throw ValidationException::withMessages(['fichier' => 'Impossible de lire le fichier Excel.']);
+        // Texte d'une chaîne simple (<t>) ou enrichie (<r><t>…</t></r>…), partagée ou en ligne.
+        $text = function (?\SimpleXMLElement $node): string {
+            if ($node === null) return '';
+            if (isset($node->t)) return (string) $node->t;
+            $value = '';
+            foreach ($node->r as $run) $value .= (string) $run->t;
+            return $value;
+        };
         $shared = [];
-        if (($xml = $zip->getFromName('xl/sharedStrings.xml')) !== false) {
-            $sharedXml = simplexml_load_string($xml);
-            foreach ($sharedXml->si as $item) $shared[] = (string) ($item->t ?? implode('', array_map('strval', $item->r->t ?? [])));
+        if (($xml = $zip->getFromName('xl/sharedStrings.xml')) !== false && ($sharedXml = simplexml_load_string($xml)) !== false) {
+            foreach ($sharedXml->si as $item) $shared[] = $text($item);
         }
-        $sheet = simplexml_load_string($zip->getFromName('xl/worksheets/sheet1.xml'));
+        $sheetXml = $zip->getFromName($this->firstWorksheetPath($zip));
+        $sheet = $sheetXml !== false ? simplexml_load_string($sheetXml) : false;
+        if ($sheet === false || !isset($sheet->sheetData)) {
+            $zip->close();
+            throw ValidationException::withMessages(['fichier' => 'Impossible de lire la première feuille du fichier Excel.']);
+        }
         $rows = [];
         foreach ($sheet->sheetData->row as $row) {
             $values = [];
+            $column = 0;
             foreach ($row->c as $cell) {
-                $reference = (string) $cell['r'];
-                preg_match('/([A-Z]+)/', $reference, $match);
-                $column = 0;
-                foreach (str_split($match[1] ?? '') as $letter) $column = $column * 26 + ord($letter) - 64;
-                $value = (string) ($cell->v ?? '');
-                if ((string) $cell['t'] === 'inlineStr') $value = (string) ($cell->is->t ?? '');
-                if ((string) $cell['t'] === 's') $value = $shared[(int) $value] ?? $value;
+                // L'attribut r (ex. « C2 ») est facultatif : à défaut, la cellule suit la précédente.
+                if (preg_match('/^([A-Z]+)/', (string) $cell['r'], $match)) {
+                    $column = 0;
+                    foreach (str_split($match[1]) as $letter) $column = $column * 26 + ord($letter) - 64;
+                } else {
+                    $column++;
+                }
+                $type = (string) $cell['t'];
+                $value = match ($type) {
+                    'inlineStr' => $text($cell->is),
+                    's' => $shared[(int) $cell->v] ?? '',
+                    default => (string) ($cell->v ?? ''),
+                };
                 $values[$column - 1] = $value;
             }
             $rows[] = $values;
@@ -739,5 +837,25 @@ class etudiantController extends Controller
             $result[] = array_combine($headerValues, $values);
         }
         return $result;
+    }
+
+    /** Chemin de la première feuille du classeur (pas forcément sheet1.xml une fois le fichier réenregistré). */
+    private function firstWorksheetPath(ZipArchive $zip): string
+    {
+        $workbook = $zip->getFromName('xl/workbook.xml');
+        $rels = $zip->getFromName('xl/_rels/workbook.xml.rels');
+        if ($workbook !== false && $rels !== false) {
+            $workbookXml = simplexml_load_string($workbook);
+            $relsXml = simplexml_load_string($rels);
+            $first = $workbookXml?->sheets?->sheet[0] ?? null;
+            $id = $first ? (string) ($first->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships')['id'] ?? '') : '';
+            foreach ($relsXml?->Relationship ?? [] as $relation) {
+                if ((string) $relation['Id'] === $id) {
+                    $target = ltrim((string) $relation['Target'], '/');
+                    return str_starts_with($target, 'xl/') ? $target : 'xl/' . $target;
+                }
+            }
+        }
+        return 'xl/worksheets/sheet1.xml';
     }
 }

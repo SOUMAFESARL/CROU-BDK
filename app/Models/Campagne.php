@@ -58,6 +58,7 @@ class Campagne extends Model
         'periode_fin',
         'date_echeance_demande',
         'date_echeance_contrat',
+        'statut',
         'admission',
        // 'old_bachelier',
         'readmission',

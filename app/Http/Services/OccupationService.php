@@ -148,7 +148,7 @@ class OccupationService implements OccupationServiceInterface
             // Si le bâtiment n'est pas mixte, forcer TOUTES les chambres
             //if ($nouveauType !== 'mixte') {
                 $this->chambreModel
-                    ->where('id_batiment', $batimentCode)
+                    ->where('batiment_id', $batimentCode)
                     ->update([
                         'type_occupation_id' => $nouveauType,
                         'updated_by'      => getInfoAdmin()->users->id_user,

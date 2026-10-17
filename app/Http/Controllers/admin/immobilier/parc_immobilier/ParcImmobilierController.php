@@ -389,7 +389,7 @@ class ParcImmobilierController extends Controller
                     'id' => (string) $c->id_cite,
                     'name' => $c->name,
                     'type_cite_id' => $c->type_cite_id,
-                    'actif' => $c->statut !== 'desactive',
+                    'actif' => $c->estActive(),
                 ])->values(),
             'selection' => [
                 'cite' => $request->query('cite'),
@@ -2167,8 +2167,10 @@ private function formaterNumeroChambre(string $prefix, int $suffixe): string
 
                 switch ($type) {
                     case 'cite':
+                        // `cite.statut` est un enum (ouvert, ferme, en_renovation, en_construction) :
+                        // une cité se désactive en « ferme » et se réactive en « ouvert ».
                         $cite = Cite::where('id_cite', $code)->lockForUpdate()->firstOrFail();
-                        $isDeactivating = $cite->statut !== $inactiveStatus;
+                        $isDeactivating = $cite->statut !== Cite::STATUT_FERME;
                         $batimentIds = Batiment::where('cite_id', $cite->id_cite)->pluck('id_batiment');
                         $chambresDeLaCite = Chambre::where(function ($query) use ($cite, $batimentIds) {
                             $query->where('cite_id', $cite->id_cite)
@@ -2181,7 +2183,7 @@ private function formaterNumeroChambre(string $prefix, int $suffixe): string
                             throw new \RuntimeException('Impossible de désactiver cette cité car elle contient un étudiant.');
                         }
 
-                        $newStatus = $isDeactivating ? $inactiveStatus : $activeStatus;
+                        $newStatus = $isDeactivating ? Cite::STATUT_FERME : Cite::STATUT_OUVERT;
                         $cite->update(['statut' => $newStatus]);
                         if ($isDeactivating) {
                             Batiment::where('cite_id', $cite->id_cite)->update(['statut' => $inactiveStatus]);

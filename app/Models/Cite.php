@@ -10,6 +10,18 @@ use Illuminate\Support\Str;
 
 class Cite extends Model
 {
+    /** Valeurs de l'enum `cite.statut` utilisées par l'activation / désactivation. */
+    public const STATUT_OUVERT = 'ouvert';
+    public const STATUT_FERME = 'ferme';
+
+    /** Statuts d'une cité en service (« actif » : valeur historique encore présente dans certaines données). */
+    public const STATUTS_ACTIFS = [self::STATUT_OUVERT, 'actif'];
+
+    public function estActive(): bool
+    {
+        return in_array($this->statut, self::STATUTS_ACTIFS, true);
+    }
+
     public function equipementAffectations()
     {
         return $this->hasMany(EquipementAffectation::class, 'cite_id', 'id_cite');

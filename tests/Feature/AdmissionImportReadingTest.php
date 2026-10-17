@@ -36,7 +36,7 @@ class AdmissionImportReadingTest extends TestCase
     }
     public function test_missing_date_is_not_invented_and_invalid_date_is_not_rewritten(): void
     {
-        $this->assertSame('', $this->invoke('normalizeImportRow', ['date_entree' => ''])['date_entree']);
+        $this->assertNull($this->invoke('normalizeImportRow', ['date_entree' => ''])['date_entree']);
         $this->assertSame('31/02/2026', $this->invoke('normalizeImportRow', ['date_entree' => '31/02/2026'])['date_entree']);
     }
 }

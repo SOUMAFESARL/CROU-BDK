@@ -113,6 +113,12 @@ class CampagneRepository
                 }
             }
 
+            // Les dates ont pu changer : le statut (active / planifier / terminer) est recalculé.
+            $data['statut'] = $this->determineStatut([
+                'periode_debut' => $data['periode_debut'] ?? $campagne->periode_debut,
+                'periode_fin' => $data['periode_fin'] ?? $campagne->periode_fin,
+            ]);
+
             return $campagne->update($data);
         }
         return false;

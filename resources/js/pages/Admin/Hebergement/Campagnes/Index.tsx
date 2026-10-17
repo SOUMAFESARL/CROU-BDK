@@ -1,13 +1,15 @@
- import { Link } from '@inertiajs/react';
-import { ClipboardList, Eye, Plus } from 'lucide-react';
+ import { Link, router } from '@inertiajs/react';
+import { ClipboardList, Eye, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { CampagneDetailsSheet, StatutCampagneBadge } from '@/components/campagnes/details-sheet';
 import { formatDate, typeCampagne, type CampagneItem, type CampagnesProps, type FiltreCampagne } from '@/components/campagnes/types';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { RowAction, RowActions } from '@/components/data-table/row-action';
+import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { StatCard, type KpiTone } from '@/components/ui/stat-card';
 import { cn } from '@/lib/utils';
@@ -22,6 +24,8 @@ const FILTRES: { filtre: FiltreCampagne; label: string; titre: string; stat: key
 /** Liste des campagnes d'admission et de réadmission (remplace la vue Blade `campagnes.blade.php`). */
 export default function CampagnesIndex({ campagnes, stats, etat, urls }: CampagnesProps) {
     const [details, setDetails] = useState<CampagneItem | null>(null);
+    const [suppression, setSuppression] = useState<CampagneItem | null>(null);
+    const [traitement, setTraitement] = useState(false);
     const filtre = FILTRES.find((item) => item.filtre === etat) ?? FILTRES[0];
 
     const colonnes: DataTableColumn<CampagneItem>[] = [
@@ -66,21 +70,33 @@ export default function CampagnesIndex({ campagnes, stats, etat, urls }: Campagn
         {
             key: 'actions',
             header: <span className="sr-only">Actions</span>,
-            headClassName: 'w-12',
+            headClassName: 'w-28',
             className: 'text-right',
             cell: (campagne) => (
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setDetails(campagne)}
-                    title="Voir le détail"
-                    aria-label={`Voir le détail de la campagne ${campagne.annee}`}
-                >
-                    <Eye {...ICON} aria-hidden />
-                </Button>
+                <RowActions>
+                    <RowAction label="Voir le détail" icon={Eye} tone="view" onClick={() => setDetails(campagne)} />
+                    {campagne.urls.edit && (
+                        <RowAction label="Modifier" icon={Pencil} tone="edit" onClick={() => router.visit(campagne.urls.edit!)} />
+                    )}
+                    {campagne.urls.destroy && (
+                        <RowAction label="Supprimer" icon={Trash2} tone="danger" onClick={() => setSuppression(campagne)} />
+                    )}
+                </RowActions>
             ),
         },
     ];
+
+    const supprimer = () => {
+        if (!suppression?.urls.destroy) return;
+        router.delete(suppression.urls.destroy, {
+            preserveScroll: true,
+            onStart: () => setTraitement(true),
+            onFinish: () => {
+                setTraitement(false);
+                setSuppression(null);
+            },
+        });
+    };
 
     return (
         <AdminLayout title="Campagnes">
@@ -139,6 +155,25 @@ export default function CampagnesIndex({ campagnes, stats, etat, urls }: Campagn
             </section>
 
             <CampagneDetailsSheet campagne={details} onClose={() => setDetails(null)} />
+
+            <ConfirmDialog
+                open={suppression !== null}
+                onOpenChange={(ouvert) => !ouvert && setSuppression(null)}
+                title="Supprimer cette campagne ?"
+                description={
+                    suppression && (
+                        <>
+                            La campagne {suppression.annee} ne sera plus proposée aux étudiants. Une campagne pour laquelle des demandes ont déjà été déposées
+                            ne peut pas être supprimée.
+                        </>
+                    )
+                }
+                confirmLabel="Supprimer"
+                confirmIcon={<Trash2 className="size-4" aria-hidden />}
+                danger
+                processing={traitement}
+                onConfirm={supprimer}
+            />
         </AdminLayout>
     );
 }

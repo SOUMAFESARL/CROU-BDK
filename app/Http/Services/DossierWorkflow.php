@@ -187,7 +187,8 @@ class DossierWorkflow
             }
             $rules = app(AttributionRules::class);
             $room = $rules->verrouillerChambre($room->getKey());
-            $rules->verifier($student, $room, $campaign);
+            // Étudiant déjà installé : pas d'exigence de statut PMR confirmé.
+            $rules->verifier($student, $room, $campaign, null, false);
             $assignment = AssignationChambre::create([
                 'etudiant_id' => $student->getKey(), 'chambre_id' => $room->getKey(),
                 'campagne_id' => $campaign->getKey(),

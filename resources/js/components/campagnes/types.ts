@@ -58,6 +58,8 @@ export type CampagneItem = {
     conditions: Record<Condition, boolean>;
     residences: { name: string; places: number }[];
     documents: string[];
+    /** Actions autorisées pour l'administrateur connecté (null = non autorisée). */
+    urls: { edit: string | null; destroy: string | null };
 };
 
 export type CampagnesProps = {
@@ -78,6 +80,28 @@ export type CreateCampagneProps = {
     residences: ResidenceOption[];
     documents: { id: string; name: string }[];
     urls: { hebergement: string; index: string; submit: string | null };
+};
+
+/** Valeurs saisies dans l'assistant (nombres en texte, dates `aaaa-mm-jj`, identifiants des cités et documents). */
+export type CampagneFormValues = {
+    annee_campagne: string;
+    description: string;
+    periode_debut: string;
+    periode_fin: string;
+    date_echeance_demande: string;
+    date_echeance_contrat: string;
+    moyenne_min: string;
+    pourcentage_validate: string;
+    distance_min: string;
+    residences: string[];
+    documents: string[];
+} & Record<`age_${Niveau}_max`, string> &
+    Record<Condition, boolean>;
+
+export type EditCampagneProps = CreateCampagneProps & {
+    campagne: CampagneFormValues & { id: string };
+    /** Dossiers (demandes, attributions, dérogations) déjà rattachés à la campagne. */
+    dossiers: number;
 };
 
 /** `aaaa-mm-jj` → `jj/mm/aaaa` (sans passer par Date, donc sans décalage de fuseau). */

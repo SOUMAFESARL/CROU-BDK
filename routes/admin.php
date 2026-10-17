@@ -240,6 +240,9 @@ Route::middleware(['admin'])->group(function () {
             Route::get('/campagnes/nouvelle', 'createCampagne')->name('create_campagne');
             Route::get('/campagnes/{etat?}', 'campagnes')->name('campagnes');
             Route::post('/campagnes', 'storeCampagne')->name('post_campagnes');
+            Route::get('/campagnes/{id}/modifier', 'editCampagne')->name('edit_campagne');
+            Route::put('/campagnes/{id}', 'updateCampagne')->name('update_campagne');
+            Route::delete('/campagnes/{id}', 'destroyCampagne')->name('destroy_campagne');
             Route::get('/validateDocument/{documentId}/{statut}/{message?}', 'valideDocument')->name('validate_document');
             Route::get('campagne/{id}','getCampagne')->name('getCampagne');
             Route::get('/{id}',  'show')->name('show');

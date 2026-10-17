@@ -26,13 +26,13 @@ type Props = {
     genres: Option[];
     cites: Option[];
     batiments: (Option & { cite_id: string })[];
-    chambres: { id: string; numero: string; cite_id: string; batiment_id: string; libres: number }[];
+    chambres: { id: string; numero: string; cite_id: string; batiment_id: string; libres: number; disponible: boolean }[];
     aujourdhui: string;
     import: { message: string; lignes: string[] } | null;
     urls: { admissions: string | null; store: string | null; template: string | null; import: string | null };
 };
 
-const COLONNES_OBLIGATOIRES = ['name', 'civilite', 'matricule', 'telephone1', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree'];
+const COLONNES_OBLIGATOIRES = ['nom_prenoms', 'civilite', 'matricule', 'telephone', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree'];
 
 const schema = (aujourdhui: string) =>
     z.object({
@@ -63,7 +63,7 @@ const CHAMPS: (keyof Saisie)[][] = [
 /** Admission directe d'un étudiant déjà logé + import en masse (remplace `admin/etudiant/admission-directe.blade.php`). */
 export default function AdmissionDirecte(props: Props) {
     const { campagnes, chambres, urls } = props;
-    const bloque = campagnes.length === 0 || chambres.length === 0;
+    const bloque = campagnes.length === 0 || !chambres.some((chambre) => chambre.disponible);
 
     return (
         <AdminLayout title="Admission directe">
@@ -85,7 +85,7 @@ export default function AdmissionDirecte(props: Props) {
             {campagnes.length === 0 ? (
                 <Alerte>Aucune année académique n’est configurée. Créez d’abord une campagne.</Alerte>
             ) : (
-                chambres.length === 0 && <Alerte>Aucune place n’est actuellement disponible dans les chambres.</Alerte>
+                !chambres.some((chambre) => chambre.disponible) && <Alerte>Aucune place n’est actuellement disponible dans les chambres.</Alerte>
             )}
 
             <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -109,7 +109,6 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
         trigger,
         setValue,
         setError,
-        reset,
         formState: { errors, isSubmitting },
     } = useForm<Saisie, unknown, Valeurs>({
         resolver: zodResolver(schema(aujourdhui)),
@@ -136,13 +135,8 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
     };
 
     const onSubmit = (valeurs: Valeurs) =>
+        // Étudiant enregistré : le serveur redirige vers la liste des admissions.
         envoyer(url, { ...valeurs, numero_lit: valeurs.numero_lit === '' ? '' : String(valeurs.numero_lit) }, {
-            // Étudiant enregistré : formulaire vidé pour la saisie suivante.
-            onSuccess: () => {
-                reset();
-                setEtape(0);
-                setAtteinte(0);
-            },
             onError: (erreurs) => {
                 // Erreurs de champ affichées sous le champ ; retour à l'étape « Identité » si elle est concernée.
                 let premiere = -1;
@@ -219,7 +213,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
 
                 {etape === 1 && (
                     <>
-                        <Section icone={BedDouble} titre="Logement occupé" description="Seules les chambres disponibles ayant encore une place libre sont proposées.">
+                        <Section icone={BedDouble} titre="Logement occupé" description="Toutes les chambres du bâtiment sélectionné sont listées ; seules celles ayant encore une place libre peuvent être choisies.">
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <Field id="ad-cite_id" label="Cité" required error={errors.cite_id?.message}>
                                     {combobox('cite_id', cites.map((cite) => ({ value: cite.id, label: cite.name })), 'Sélectionnez une cité', {
@@ -246,7 +240,10 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
                                             .map((chambre) => ({
                                                 value: chambre.id,
                                                 label: `Chambre ${chambre.numero}`,
-                                                description: `${chambre.libres} place${chambre.libres > 1 ? 's' : ''} libre${chambre.libres > 1 ? 's' : ''}`,
+                                                description: chambre.disponible
+                                                    ? `${chambre.libres} place${chambre.libres > 1 ? 's' : ''} libre${chambre.libres > 1 ? 's' : ''}`
+                                                    : 'Indisponible',
+                                                disabled: !chambre.disponible,
                                             })),
                                         batimentId ? 'Sélectionnez une chambre' : 'Sélectionnez d’abord un bâtiment',
                                         { disabled: !batimentId, recherche: 'Rechercher une chambre…' },
@@ -363,6 +360,9 @@ function Import({ url, template }: { url: string; template: string | null }) {
                     </div>
                     <p className="mt-1.5 text-xs text-muted">
                         Seul <code>numero_lit</code> est facultatif.
+                    </p>
+                    <p className="mt-1.5 text-xs text-muted">
+                        Le modèle contient une ligne d’exemple (nom commençant par « EXEMPLE ») : remplacez-la ; si elle reste, elle est ignorée.
                     </p>
                 </li>
                 <li className="flex flex-col gap-3 px-4 py-3">

@@ -31,7 +31,7 @@ class ParcImmobilierPageTest extends TestCase
         Schema::create('type_chambre', function (Blueprint $t) { $t->string('id_type_chambre')->primary(); $t->string('name'); $t->timestamps(); $t->softDeletes(); });
         Schema::create('cite', function (Blueprint $t) {
             $t->string('id_cite')->primary(); $t->string('code_cite')->nullable(); $t->string('name');
-            foreach (['type_cite_id', 'campus_id', 'adresse', 'responsable_id', 'statut', 'telephone1'] as $column) {
+            foreach (['type_cite_id', 'campus_id', 'adresse', 'responsable_id', 'statut', 'telephone1', 'updated_by'] as $column) {
                 $t->string($column)->nullable();
             }
             foreach (['wifi_gratuit', 'salle_etude', 'infirmerie', 'restaurant'] as $column) {
@@ -42,7 +42,7 @@ class ParcImmobilierPageTest extends TestCase
         });
         Schema::create('batiment', function (Blueprint $t) {
             $t->string('id_batiment')->primary(); $t->string('name');
-            foreach (['cite_id', 'campus_id', 'responsable_id', 'type_occupation_id'] as $column) {
+            foreach (['cite_id', 'campus_id', 'responsable_id', 'type_occupation_id', 'updated_by'] as $column) {
                 $t->string($column)->nullable();
             }
             $t->string('statut')->default('actif'); $t->integer('total_etages')->default(0);
@@ -51,7 +51,7 @@ class ParcImmobilierPageTest extends TestCase
         });
         Schema::create('chambre', function (Blueprint $t) {
             $t->string('id_chambre')->primary();
-            foreach (['numero_chambre', 'type_chambre_id', 'type_occupation_id', 'batiment_id', 'cite_id', 'niveau_aile_code', 'niveau_confort'] as $column) {
+            foreach (['numero_chambre', 'type_chambre_id', 'type_occupation_id', 'batiment_id', 'cite_id', 'niveau_aile_code', 'niveau_confort', 'updated_by'] as $column) {
                 $t->string($column)->nullable();
             }
             $t->string('statut')->default('actif'); $t->string('etat')->default('disponible');
@@ -232,6 +232,43 @@ class ParcImmobilierPageTest extends TestCase
         $this->assertSame(['lat' => 8.041, 'lng' => -2.801], collect($props['batiments'])->firstWhere('id', 'b1')['position']);
         $this->assertNotNull($cites['cA']['urls']['parc']);
         $this->assertSame(['k1'], array_column($props['campus'], 'id'));
+    }
+
+    public function test_desactivation_d_une_cite_utilise_les_valeurs_de_l_enum_statut(): void
+    {
+        // `cite.statut` est un enum MySQL (ouvert, ferme, en_renovation, en_construction) : « desactive » y est refusé.
+        DB::table('cite')->where('id_cite', 'cB')->update(['statut' => 'ouvert']);
+        DB::table('batiment')->insert(['id_batiment' => 'bB', 'name' => 'Bâtiment B', 'cite_id' => 'cB']);
+
+        $reponse = $this->basculerStatut('cite', 'cB');
+        $this->assertTrue($reponse['success']);
+        $this->assertSame('ferme', $reponse['status']);
+        $this->assertSame('ferme', DB::table('cite')->where('id_cite', 'cB')->value('statut'));
+        $this->assertSame('desactive', DB::table('batiment')->where('id_batiment', 'bB')->value('statut'));
+
+        $reponse = $this->basculerStatut('cite', 'cB');
+        $this->assertSame('ouvert', $reponse['status']);
+        $this->assertSame('ouvert', DB::table('cite')->where('id_cite', 'cB')->value('statut'));
+    }
+
+    public function test_cite_occupee_ne_peut_pas_etre_desactivee(): void
+    {
+        $reponse = $this->basculerStatut('cite', 'cA', 422);
+
+        $this->assertFalse($reponse['success']);
+        $this->assertSame('actif', DB::table('cite')->where('id_cite', 'cA')->value('statut'));
+    }
+
+    private function basculerStatut(string $type, string $code, int $statutHttp = 200): array
+    {
+        $request = Request::create("/admin/gestion-hebergement/parc-immobilier/toggle-status/{$type}/{$code}", 'POST');
+        $request->headers->set('Accept', 'application/json');
+        $this->app->instance('request', $request);
+
+        $response = app(ParcImmobilierController::class)->toggleStatus($type, $code);
+        $this->assertSame($statutHttp, $response->getStatusCode(), json_encode($response->getData(true)));
+
+        return $response->getData(true);
     }
 
     private function parcPage(array $query): array

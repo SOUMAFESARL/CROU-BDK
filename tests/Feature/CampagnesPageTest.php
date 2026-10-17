@@ -59,6 +59,17 @@ class CampagnesPageTest extends TestCase
             $t->string('etat')->default('disponible'); $t->integer('capacite_max')->default(1); $t->timestamps(); $t->softDeletes();
         });
 
+        // Dossiers rattachés à une campagne : ils empêchent sa suppression.
+        Schema::create('demande', function (Blueprint $t) {
+            $t->string('id_demande')->primary(); $t->string('etudiant_id')->nullable(); $t->string('campagne_id'); $t->timestamps(); $t->softDeletes();
+        });
+        Schema::create('assignation_chambres', function (Blueprint $t) {
+            $t->id(); $t->string('campagne_id'); $t->timestamps();
+        });
+        Schema::create('admission_derogations', function (Blueprint $t) {
+            $t->id(); $t->string('campagne_id')->nullable(); $t->timestamps();
+        });
+
         DB::table('cite')->insert([
             ['id_cite' => 'cA', 'name' => 'Cité A', 'statut' => 'ouvert'],
             ['id_cite' => 'cF', 'name' => 'Cité fermée', 'statut' => 'ferme'],
@@ -158,6 +169,100 @@ class CampagnesPageTest extends TestCase
             ->post(route('admin.hebergement.campagnes_admission.post_campagnes'), $this->donnees(['age_L1_max' => '', 'age_L2_max' => 24]))
             ->assertSessionHasErrors('age_L2_max');
         $this->assertSame(0, DB::table('campagne')->where('annee_campagne', '2030-2031')->count());
+    }
+
+    public function test_la_liste_propose_modifier_et_supprimer(): void
+    {
+        $k1 = $this->page('campagnes', '/admin/gestion-hebergement/campagnes_admissions/campagnes')['props']['campagnes']['data'][0];
+
+        $this->assertSame(route('admin.hebergement.campagnes_admission.edit_campagne', 'k1'), $k1['urls']['edit']);
+        $this->assertSame(route('admin.hebergement.campagnes_admission.destroy_campagne', 'k1'), $k1['urls']['destroy']);
+    }
+
+    public function test_formulaire_de_modification_prerempli(): void
+    {
+        DB::table('cite')->where('id_cite', 'cA')->update(['statut' => 'ferme']);
+
+        $page = $this->page('editCampagne', '/admin/gestion-hebergement/campagnes_admissions/campagnes/k1/modifier', ['id' => 'k1']);
+
+        $this->assertSame('Admin/Hebergement/Campagnes/Edit', $page['component']);
+        $campagne = $page['props']['campagne'];
+        $this->assertSame('2025-2026', $campagne['annee_campagne']);
+        $this->assertSame('2025-09-01', $campagne['periode_debut']);
+        $this->assertSame('10.5', $campagne['moyenne_min']);
+        $this->assertSame('22', $campagne['age_L1_max']);
+        $this->assertSame('', $campagne['age_L3_max']);
+        $this->assertTrue($campagne['admission']);
+        $this->assertFalse($campagne['pmr']);
+        $this->assertSame(['cA'], $campagne['residences']);
+        $this->assertSame(['d1'], $campagne['documents']);
+        // La cité liée reste proposée même fermée depuis, pour ne pas la retirer à l'insu de l'utilisateur.
+        $this->assertSame(['cA'], array_column($page['props']['residences'], 'id'));
+        $this->assertSame(0, $page['props']['dossiers']);
+        $this->assertSame(route('admin.hebergement.campagnes_admission.update_campagne', 'k1'), $page['props']['urls']['submit']);
+    }
+
+    public function test_modification_d_une_campagne_et_de_ses_liens(): void
+    {
+        $this->withoutMiddleware();
+        DB::table('cite')->insert(['id_cite' => 'cB', 'name' => 'Cité B', 'statut' => 'ouvert']);
+        DB::table('document')->insert(['id_document' => 'd3', 'name' => 'Extrait de naissance', 'statut' => 1]);
+
+        $this->put(route('admin.hebergement.campagnes_admission.update_campagne', 'k1'), $this->donnees([
+            'description' => 'Campagne principale modifiée',
+            'pmr' => true,
+            'residences' => ['cB'],
+            'documents' => ['d1', 'd3'],
+        ]))
+            ->assertRedirect(route('admin.hebergement.campagnes_admission.campagnes'))
+            ->assertSessionHas('success');
+
+        $campagne = DB::table('campagne')->where('id_campagne', 'k1')->first();
+        $this->assertSame('Campagne principale modifiée', $campagne->description);
+        $this->assertSame('2030-2031', $campagne->annee_campagne);
+        $this->assertSame(2030, (int) $campagne->annee_debut);
+        $this->assertSame(1, (int) $campagne->pmr);
+        $this->assertSame('planifier', $campagne->statut); // dates futures : statut recalculé
+        $this->assertSame(['cB'], DB::table('residence_campagne')->where('campagne_id', 'k1')->pluck('cite_id')->all());
+        $this->assertEqualsCanonicalizing(['d1', 'd3'], DB::table('document_campagne')->where('id_campagne', 'k1')->pluck('document_id')->all());
+        // Le lien conservé n'est pas recréé.
+        $this->assertTrue(DB::table('document_campagne')->where('id_document_campagne', 'dc1')->exists());
+    }
+
+    public function test_modification_soumise_aux_memes_regles_que_la_creation(): void
+    {
+        $this->withoutMiddleware();
+
+        $this->from(route('admin.hebergement.campagnes_admission.edit_campagne', 'k1'))
+            ->put(route('admin.hebergement.campagnes_admission.update_campagne', 'k1'), $this->donnees(['residences' => [], 'periode_fin' => '2030-08-01']))
+            ->assertSessionHasErrors(['residences', 'periode_fin']);
+        $this->assertSame('Campagne principale', DB::table('campagne')->where('id_campagne', 'k1')->value('description'));
+    }
+
+    public function test_suppression_d_une_campagne_sans_dossier(): void
+    {
+        $this->withoutMiddleware();
+
+        $this->delete(route('admin.hebergement.campagnes_admission.destroy_campagne', 'k2'))
+            ->assertRedirect(route('admin.hebergement.campagnes_admission.campagnes'))
+            ->assertSessionHas('success');
+
+        $this->assertNotNull(DB::table('campagne')->where('id_campagne', 'k2')->value('deleted_at'));
+        $props = $this->page('campagnes', '/admin/gestion-hebergement/campagnes_admissions/campagnes')['props'];
+        $this->assertSame(['k1'], array_column($props['campagnes']['data'], 'id'));
+    }
+
+    public function test_une_campagne_avec_des_demandes_ne_peut_pas_etre_supprimee(): void
+    {
+        $this->withoutMiddleware();
+        DB::table('demande')->insert(['id_demande' => 'dm1', 'etudiant_id' => 'e1', 'campagne_id' => 'k1']);
+
+        $this->from(route('admin.hebergement.campagnes_admission.campagnes'))
+            ->delete(route('admin.hebergement.campagnes_admission.destroy_campagne', 'k1'))
+            ->assertRedirect(route('admin.hebergement.campagnes_admission.campagnes'))
+            ->assertSessionHas('error');
+
+        $this->assertNull(DB::table('campagne')->where('id_campagne', 'k1')->value('deleted_at'));
     }
 
     private function donnees(array $surcharge = []): array

@@ -28,6 +28,7 @@ use App\Models\Etudiant;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 
 
@@ -418,7 +419,14 @@ class CampagnesAdmissionController extends Controller
 
         return Inertia::render('Admin/Hebergement/Campagnes/Index', [
             'campagnes' => (new LengthAwarePaginator(
-                $campagnes->forPage($page, 10)->map(fn (Campagne $campagne) => $this->campagneListe($campagne))->values(),
+                $campagnes->forPage($page, 10)->map(fn (Campagne $campagne) => $this->campagneListe($campagne) + [
+                    'urls' => [
+                        'edit' => $access->allows($admin, 'admin.hebergement.campagnes_admission.edit_campagne')
+                            ? route('admin.hebergement.campagnes_admission.edit_campagne', $campagne->id_campagne) : null,
+                        'destroy' => $access->allows($admin, 'admin.hebergement.campagnes_admission.destroy_campagne')
+                            ? route('admin.hebergement.campagnes_admission.destroy_campagne', $campagne->id_campagne) : null,
+                    ],
+                ])->values(),
                 $campagnes->count(),
                 10,
                 $page,
@@ -441,17 +449,7 @@ class CampagnesAdmissionController extends Controller
     {
         $admin = $request->user('admin');
 
-        return Inertia::render('Admin/Hebergement/Campagnes/Create', [
-            'residences' => Cite::query()->where('statut', 'ouvert')->orderBy('name')
-                ->with('batiment.chambresDisponibles')->get()
-                ->map(fn (Cite $cite) => [
-                    'id' => (string) $cite->id_cite,
-                    'name' => $cite->name,
-                    'chambres' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->count()),
-                    'places' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->sum('capacite_max')),
-                ])->values(),
-            'documents' => Document::getAllDocuments(1)
-                ->map(fn ($document) => ['id' => (string) $document->id_document, 'name' => $document->name])->values(),
+        return Inertia::render('Admin/Hebergement/Campagnes/Create', $this->optionsFormulaire() + [
             'urls' => [
                 'hebergement' => route('admin.hebergement.index'),
                 'index' => route('admin.hebergement.campagnes_admission.campagnes'),
@@ -459,6 +457,96 @@ class CampagnesAdmissionController extends Controller
                     ? route('admin.hebergement.campagnes_admission.post_campagnes') : null,
             ],
         ]);
+    }
+
+    /** Formulaire de modification d'une campagne : même assistant que la création, prérempli. */
+    public function editCampagne(Request $request, AdminAccess $access, string $id)
+    {
+        $campagne = Campagne::with(['residences', 'documentCampagnes'])->findOrFail($id);
+        $admin = $request->user('admin');
+        $citeIds = $campagne->residences->pluck('cite_id')->map(fn ($cite) => (string) $cite)->unique()->values()->all();
+        $documentIds = $campagne->documentCampagnes->pluck('document_id')->map(fn ($document) => (string) $document)->unique()->values()->all();
+        $date = fn ($valeur) => $valeur ? Carbon::parse($valeur)->toDateString() : '';
+        $texte = fn ($valeur) => $valeur === null ? '' : (string) $valeur;
+
+        return Inertia::render('Admin/Hebergement/Campagnes/Edit', $this->optionsFormulaire($citeIds, $documentIds) + [
+            'campagne' => [
+                'id' => (string) $campagne->id_campagne,
+                'annee_campagne' => (string) $campagne->annee_campagne,
+                'description' => (string) $campagne->description,
+                'periode_debut' => $date($campagne->periode_debut),
+                'periode_fin' => $date($campagne->periode_fin),
+                'date_echeance_demande' => $date($campagne->date_echeance_demande),
+                'date_echeance_contrat' => $date($campagne->date_echeance_contrat),
+                'moyenne_min' => $texte($campagne->moyenne_min),
+                'pourcentage_validate' => $texte($campagne->pourcentage_validate),
+                'distance_min' => $texte($campagne->distance_min),
+                ...collect(self::NIVEAUX)->mapWithKeys(fn ($niveau) => ['age_'.$niveau.'_max' => $texte($campagne->{'age_'.$niveau.'_max'})])->all(),
+                ...collect(['admission', 'readmission', 'internationnaux', 'redoublement', 'pmr', 'is_participate', 'is_discipline'])
+                    ->mapWithKeys(fn ($champ) => [$champ => (bool) $campagne->{$champ}])->all(),
+                'residences' => $citeIds,
+                'documents' => $documentIds,
+            ],
+            'dossiers' => $this->campagneService->nombreDossiers($campagne->id_campagne),
+            'urls' => [
+                'hebergement' => route('admin.hebergement.index'),
+                'index' => route('admin.hebergement.campagnes_admission.campagnes'),
+                'submit' => $access->allows($admin, 'admin.hebergement.campagnes_admission.update_campagne')
+                    ? route('admin.hebergement.campagnes_admission.update_campagne', $campagne->id_campagne) : null,
+            ],
+        ]);
+    }
+
+    /**
+     * Résidences (cités ouvertes) et documents (actifs) proposés par le formulaire.
+     * En modification, les cités et documents déjà liés restent proposés même s'ils ont été fermés ou désactivés,
+     * pour ne pas les retirer de la campagne à l'insu de l'utilisateur.
+     */
+    private function optionsFormulaire(array $citeIds = [], array $documentIds = []): array
+    {
+        $documents = Document::getAllDocuments(1);
+        if ($documentIds) {
+            $documents = $documents->merge(Document::whereIn('id_document', $documentIds)->get())->unique('id_document');
+        }
+
+        return [
+            'residences' => Cite::query()
+                ->where(fn ($query) => $query->where('statut', 'ouvert')->orWhereIn('id_cite', $citeIds))
+                ->orderBy('name')
+                ->with('batiment.chambresDisponibles')->get()
+                ->map(fn (Cite $cite) => [
+                    'id' => (string) $cite->id_cite,
+                    'name' => $cite->name,
+                    'chambres' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->count()),
+                    'places' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->sum('capacite_max')),
+                ])->values(),
+            'documents' => $documents
+                ->map(fn ($document) => ['id' => (string) $document->id_document, 'name' => $document->name])->values(),
+        ];
+    }
+
+    /** Enregistre les modifications d'une campagne. */
+    public function updateCampagne(CampagneRequest $request, string $id): RedirectResponse
+    {
+        $this->campagneService->updateCampagne($id, $request->validated());
+
+        return redirect()
+            ->route('admin.hebergement.campagnes_admission.campagnes')
+            ->with('success', 'Campagne modifiée avec succès');
+    }
+
+    /** Supprime une campagne sans dossier rattaché (suppression logique). */
+    public function destroyCampagne(string $id): RedirectResponse
+    {
+        try {
+            $this->campagneService->deleteCampagne($id);
+        } catch (ValidationException $e) {
+            return back()->with('error', collect($e->errors())->flatten()->first());
+        }
+
+        return redirect()
+            ->route('admin.hebergement.campagnes_admission.campagnes')
+            ->with('success', 'Campagne supprimée avec succès');
     }
 
     /** Ligne de la liste des campagnes, avec tout ce qu'affiche le panneau de détail. */

@@ -9,8 +9,11 @@ export const TYPE_ICONS: Record<Niveau, LucideIcon> = { cite: Building2, batimen
 
 export const TYPE_LABELS: Record<Niveau, string> = { cite: 'Cité', batiment: 'Bâtiment', chambre: 'Chambre' };
 
+/** Statuts posés par la désactivation (`toggleStatus`) : « ferme » pour une cité, « desactive » pour un bâtiment ou une chambre. */
+export const STATUTS_DESACTIVES = ['desactive', 'ferme'];
+
 /** Une cité, un bâtiment ou une chambre est actif tant qu'il n'a pas été désactivé (`toggleStatus`). */
-export const estActif = (item: Pick<ParcItem, 'statut'>) => item.statut !== 'desactive';
+export const estActif = (item: Pick<ParcItem, 'statut'>) => !STATUTS_DESACTIVES.includes(item.statut);
 
 export const STATUTS: Record<string, string> = {
     actif: 'Actif',

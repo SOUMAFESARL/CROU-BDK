@@ -24,7 +24,7 @@ import { ChambreDialog } from '@/components/parc-immobilier/chambre-dialog';
 import { DetailsSheet } from '@/components/parc-immobilier/details-sheet';
 import { EntityCard } from '@/components/parc-immobilier/entity-card';
 import { messageErreur, parcHttp } from '@/components/parc-immobilier/http';
-import { ETATS, EtatBadge, estActif, nombre, pluriel, STATUTS, StatutBadge, TYPE_ICONS, TYPE_LABELS } from '@/components/parc-immobilier/labels';
+import { ETATS, EtatBadge, estActif, nombre, pluriel, STATUTS, STATUTS_DESACTIVES, StatutBadge, TYPE_ICONS, TYPE_LABELS } from '@/components/parc-immobilier/labels';
 import { OccupationBar, tauxOccupation } from '@/components/parc-immobilier/occupation-bar';
 import { RoomPlan } from '@/components/parc-immobilier/room-plan';
 import { StatCard } from '@/components/ui/stat-card';
@@ -145,7 +145,7 @@ export default function ParcImmobilierIndex({ niveau, items, plan, filters, stat
         if (!item.urls.status) return;
         try {
             const { data } = await parcHttp.post(item.urls.status);
-            toast.success(data.status === 'desactive' ? `${TYPE_LABELS[item.type]} désactivé(e).` : `${TYPE_LABELS[item.type]} activé(e).`);
+            toast.success(STATUTS_DESACTIVES.includes(data.status) ? `${TYPE_LABELS[item.type]} désactivé(e).` : `${TYPE_LABELS[item.type]} activé(e).`);
             router.reload({ only: RECHARGER });
         } catch (error) {
             toast.error(messageErreur(error, 'La mise à jour du statut a échoué.'));

@@ -27,7 +27,8 @@ class AttributionRules
         return $room->setRelation('cite', $cite)->setRelation('batiment', $batiment);
     }
 
-    public function erreurs(Etudiant $student, Chambre $room, ?Campagne $campaign = null, ?string $ignore = null): array
+    /** $controlePmr = false : régularisation d'un étudiant déjà logé (admission directe), sans exigence PMR. */
+    public function erreurs(Etudiant $student, Chambre $room, ?Campagne $campaign = null, ?string $ignore = null, bool $controlePmr = true): array
     {
         $errors = [];
         $discipline = app(DisciplinaryImpactService::class)->statut($student->getKey());
@@ -43,7 +44,7 @@ class AttributionRules
         if (!in_array($room->etat, $states, true)) {
             $errors[] = 'Cette chambre est indisponible : '.$room->getLabelEtat().'.';
         }
-        if ($room->pmr && !$student->pmr_confirme) {
+        if ($controlePmr && $room->pmr && !$student->pmr_confirme) {
             $errors[] = 'Cette chambre nécessite un statut PMR confirmé par un agent.';
         }
         $sex = $this->sexe($student->genre?->name);
@@ -73,9 +74,9 @@ class AttributionRules
         return array_values(array_unique($errors));
     }
 
-    public function verifier(Etudiant $student, Chambre $room, ?Campagne $campaign = null, ?string $ignore = null): void
+    public function verifier(Etudiant $student, Chambre $room, ?Campagne $campaign = null, ?string $ignore = null, bool $controlePmr = true): void
     {
-        if ($errors = $this->erreurs($student, $room, $campaign, $ignore)) {
+        if ($errors = $this->erreurs($student, $room, $campaign, $ignore, $controlePmr)) {
             throw ValidationException::withMessages(['chambre_id' => $errors]);
         }
     }
