@@ -275,15 +275,17 @@ class ParcImmobilierController extends Controller
             ->whereIn('batiment_id', $batiments->getCollection()->pluck('id_batiment')->all())
             ->get(['id_chambre', 'batiment_id', 'etat', 'capacite_max', 'type_occupation_id', 'niveau_aile_code']);
         $agregats = $this->agregerChambres($chambres, fn ($chambre) => $chambre->batiment_id);
-        $numeroNiveau = Niveau_Aile_Batiment::whereIn('niveau_aile_code', $chambres->pluck('niveau_aile_code')->filter()->unique()->all())
-            ->pluck('niveau_numero', 'niveau_aile_code');
+        // Niveaux lus dans la structure (comme le formulaire de modification), pas déduits des chambres configurées :
+        // un étage dont les chambres restent à configurer compte quand même.
+        $niveauxParBatiment = Niveau_Aile_Batiment::query()
+            ->join('aile_batiment', 'aile_batiment.code_aile', '=', 'niveau_aile_batiment.code_aile')
+            ->whereIn('aile_batiment.batiment_id', $batiments->getCollection()->pluck('id_batiment')->all())
+            ->selectRaw('aile_batiment.batiment_id, count(distinct niveau_aile_batiment.niveau_numero) as total')
+            ->groupBy('aile_batiment.batiment_id')
+            ->pluck('total', 'batiment_id');
 
-        return $batiments->through(function (Batiment $batiment) use ($cite, $chambres, $agregats, $numeroNiveau, $can) {
-            $niveaux = $chambres->where('batiment_id', $batiment->id_batiment)
-                ->map(fn ($chambre) => $numeroNiveau[$chambre->niveau_aile_code] ?? null)
-                ->filter(fn ($numero) => $numero !== null)
-                ->unique()
-                ->count();
+        return $batiments->through(function (Batiment $batiment) use ($cite, $agregats, $niveauxParBatiment, $can) {
+            $niveaux = (int) ($niveauxParBatiment[$batiment->id_batiment] ?? 0);
 
             return [
                 'id' => $batiment->id_batiment,

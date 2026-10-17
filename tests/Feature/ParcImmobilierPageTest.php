@@ -59,8 +59,11 @@ class ParcImmobilierPageTest extends TestCase
             $t->decimal('superficie')->nullable(); $t->boolean('pmr')->default(false);
             $t->timestamps(); $t->softDeletes();
         });
+        Schema::create('aile_batiment', function (Blueprint $t) {
+            $t->increments('id_aile'); $t->string('code_aile'); $t->string('batiment_id'); $t->timestamps();
+        });
         Schema::create('niveau_aile_batiment', function (Blueprint $t) {
-            $t->increments('id_niveau_aile'); $t->string('niveau_aile_code'); $t->integer('niveau_numero'); $t->timestamps();
+            $t->increments('id_niveau_aile'); $t->string('niveau_aile_code'); $t->string('code_aile')->nullable(); $t->integer('niveau_numero'); $t->timestamps();
         });
         Schema::create('etudiants', function (Blueprint $t) {
             $t->string('id_etudiant')->primary(); $t->string('name'); $t->string('matricule')->nullable(); $t->timestamps(); $t->softDeletes();
@@ -80,7 +83,13 @@ class ParcImmobilierPageTest extends TestCase
         foreach (range(1, 11) as $i) {
             DB::table('batiment')->insert(['id_batiment' => "b{$i}", 'name' => sprintf('Bâtiment %02d', $i), 'cite_id' => 'cA', 'type_occupation_id' => 'tg']);
         }
-        DB::table('niveau_aile_batiment')->insert([['niveau_aile_code' => 'n1', 'niveau_numero' => 1], ['niveau_aile_code' => 'n2', 'niveau_numero' => 2]]);
+        DB::table('aile_batiment')->insert(['code_aile' => 'a1', 'batiment_id' => 'b1']);
+        // n3 : étage dont aucune chambre n'est encore configurée, il compte quand même dans les niveaux du bâtiment.
+        DB::table('niveau_aile_batiment')->insert([
+            ['niveau_aile_code' => 'n1', 'code_aile' => 'a1', 'niveau_numero' => 1],
+            ['niveau_aile_code' => 'n2', 'code_aile' => 'a1', 'niveau_numero' => 2],
+            ['niveau_aile_code' => 'n3', 'code_aile' => 'a1', 'niveau_numero' => 3],
+        ]);
         DB::table('chambre')->insert([
             ['id_chambre' => 'r1', 'numero_chambre' => '101', 'type_chambre_id' => 'simple', 'type_occupation_id' => 'tg', 'batiment_id' => 'b1', 'niveau_aile_code' => 'n1', 'etat' => 'occupee', 'capacite_max' => 2],
             ['id_chambre' => 'r2', 'numero_chambre' => '102', 'type_chambre_id' => 'simple', 'type_occupation_id' => 'tg', 'batiment_id' => 'b1', 'niveau_aile_code' => 'n1', 'etat' => 'disponible', 'capacite_max' => 2],
@@ -147,7 +156,7 @@ class ParcImmobilierPageTest extends TestCase
         $this->assertSame(11, $props['items']['total']);
         $b1 = $props['items']['data'][0];
         $this->assertSame('b1', $b1['id']);
-        $this->assertSame(2, $b1['niveaux']);
+        $this->assertSame(3, $b1['niveaux']);
         $this->assertSame(['chambres' => 3, 'disponibles' => 1, 'occupees' => 1, 'reservees' => 0, 'maintenance' => 1], array_intersect_key($b1['resume'], array_flip(['chambres', 'disponibles', 'occupees', 'reservees', 'maintenance'])));
 
         $recherche = $this->parcPage(['cite' => 'cA', 'q' => '11'])['props'];
