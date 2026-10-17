@@ -27,6 +27,15 @@ class DeploymentCommandsTest(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 deploy.commands({**self.env, 'FTP_SERVER_DIR': path})
 
+    def test_parc_controller_is_replaced_in_full_after_application_mirror(self):
+        commands = deploy.commands(self.env)
+        upload = next(line for line in commands.splitlines() if line.startswith('put '))
+        self.assertIn('ParcImmobilierController.php', upload)
+        self.assertIn('-o "/project/app/Http/Controllers/admin/immobilier/parc_immobilier/ParcImmobilierController.php"', upload)
+        self.assertNotIn(' -c ', upload)
+        self.assertGreater(commands.index(upload), commands.index('./deploy-package/ "/project/"'))
+        self.assertNotIn('put ', deploy.commands(self.env, vendor_only=True))
+
     def test_existing_directories_require_access_and_restore_login_directory(self):
         for vendor_only in [False, True]:
             commands = deploy.commands({**self.env, 'FTP_SERVER_DIR': 'project/'}, vendor_only)
