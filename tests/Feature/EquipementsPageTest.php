@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\admin\immobilier\equipements\EquipementController;
 use App\Models\Equipement;
+use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,7 +21,8 @@ class EquipementsPageTest extends TestCase
         Schema::create('type_equipement', function (Blueprint $t) { $t->string('id_type_equipement')->primary(); $t->string('name'); $t->timestamps(); $t->softDeletes(); });
         Schema::create('equipement', function (Blueprint $t) {
             $t->string('equipement_id')->primary(); $t->string('name'); $t->string('reference')->nullable(); $t->string('type_equipement_id')->nullable();
-            $t->decimal('stock_initial'); $t->decimal('stock_actuel')->nullable(); $t->integer('threshold')->default(0); $t->string('photo')->nullable(); $t->timestamps();
+            $t->decimal('stock_initial'); $t->decimal('stock_actuel')->nullable(); $t->integer('threshold')->default(0); $t->string('photo')->nullable();
+            $t->decimal('prix')->default(0); $t->dateTime('date_reception')->nullable(); $t->string('created_by')->nullable(); $t->timestamps();
         });
         Schema::create('equipement_mouvement', function (Blueprint $t) { $t->string('equipement_mouvement_id')->primary(); $t->string('equipement_id'); $t->string('type'); $t->decimal('quantity'); $t->string('reason')->nullable(); $t->string('created_by')->nullable(); $t->timestamps(); });
 
@@ -80,5 +82,40 @@ class EquipementsPageTest extends TestCase
         $this->assertTrue($response->isRedirect());
         $this->assertSame('Équipement supprimé avec succès.', session('success'));
         $this->assertNull(Equipement::find('e2'));
+    }
+
+    public function test_entree_de_stock_sans_photo_enregistre_l_equipement_et_le_mouvement(): void
+    {
+        $this->actingAs(new User(['code' => 'ADM1']), 'admin');
+        $request = Request::create('/admin/gestion-hebergement/equipements', 'POST', [
+            'type_equipement_id' => 'lit', 'name' => 'Matelas 2 places', 'stock_initial' => 12,
+            'prix' => 25000, 'threshold' => 3, 'date_reception' => '2026-10-17',
+        ]);
+        $this->app->instance('request', $request);
+
+        app(EquipementController::class)->store($request);
+
+        $this->assertSame('Équipement enregistré avec succès.', session('success'));
+        $equipement = Equipement::where('name', 'Matelas 2 places')->firstOrFail();
+        $this->assertNull($equipement->photo);
+        $this->assertSame('ADM1', $equipement->created_by);
+        $this->assertEquals(12, $equipement->stock_actuel);
+        $this->assertSame(1, $equipement->mouvements()->where('type', 'entry')->where('quantity', 12)->count());
+    }
+
+    public function test_entree_de_stock_invalide_renvoie_les_erreurs_par_champ(): void
+    {
+        $this->actingAs(new User(['code' => 'ADM1']), 'admin');
+        $request = Request::create('/admin/gestion-hebergement/equipements', 'POST', [
+            'type_equipement_id' => 'inconnu', 'name' => '', 'stock_initial' => -1, 'threshold' => 0,
+        ]);
+
+        try {
+            app(EquipementController::class)->store($request);
+            $this->fail('Une erreur de validation était attendue.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertEqualsCanonicalizing(['type_equipement_id', 'name', 'stock_initial'], array_keys($e->errors()));
+        }
+        $this->assertSame(13, Equipement::count());
     }
 }

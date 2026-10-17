@@ -18,15 +18,29 @@ export const STATUTS: Record<string, string> = {
     ferme: 'Fermé',
     en_renovation: 'En rénovation',
     en_construction: 'En construction',
+    operationnel: 'Opérationnel',
+    renovation: 'En rénovation',
     desactive: 'Désactivé',
 };
 
+/** Couleur du badge par statut : ouvert/actif = vert, travaux = orange, fermé = rouge, désactivé = gris. */
+const COULEURS_STATUT: Record<string, { variant: 'success' | 'warning' | 'danger' | 'info' | 'neutral'; dot: string }> = {
+    actif: { variant: 'success', dot: 'bg-primary' },
+    ouvert: { variant: 'success', dot: 'bg-primary' },
+    operationnel: { variant: 'success', dot: 'bg-primary' },
+    en_renovation: { variant: 'warning', dot: 'bg-accent' },
+    renovation: { variant: 'warning', dot: 'bg-accent' },
+    en_construction: { variant: 'info', dot: 'bg-sky-500' },
+    ferme: { variant: 'danger', dot: 'bg-red-500' },
+    desactive: { variant: 'neutral', dot: 'bg-gray-400' },
+};
+
 export function StatutBadge({ statut }: { statut: string }) {
-    const actif = statut !== 'desactive';
+    const couleur = COULEURS_STATUT[statut] ?? COULEURS_STATUT.actif;
 
     return (
-        <Badge variant={actif ? 'success' : 'neutral'}>
-            <span className={cn('size-1.5 rounded-full', actif ? 'bg-primary' : 'bg-gray-400')} aria-hidden />
+        <Badge variant={couleur.variant}>
+            <span className={cn('size-1.5 rounded-full', couleur.dot)} aria-hidden />
             {STATUTS[statut] ?? statut}
         </Badge>
     );

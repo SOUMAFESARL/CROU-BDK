@@ -244,21 +244,33 @@ export default function ParcImmobilierIndex({ niveau, items, plan, filters, stat
                     Réinitialiser
                 </Button>
             )}
-            <ChoixVue
-                valeur={vue}
-                onChange={setVue}
-                options={
-                    niveau === 'chambre'
-                        ? [
-                              { value: 'plan', label: 'Plan', icon: LayoutGrid },
-                              { value: 'tableau', label: 'Tableau', icon: Rows3 },
-                          ]
-                        : [
-                              { value: 'cartes', label: 'Cartes', icon: LayoutGrid },
-                              { value: 'tableau', label: 'Tableau', icon: Rows3 },
-                          ]
-                }
-            />
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                {urls.create[niveau] && (
+                    // Ajout au niveau affiché ; la cité / le bâtiment ouvert est présélectionné dans le formulaire.
+                    <a
+                        href={urls.create[niveau]}
+                        className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-brand border border-primary bg-transparent px-4 text-sm font-medium text-primary transition-colors hover:bg-soft focus-visible:ring-2 focus-visible:ring-secondary focus-visible:outline-none"
+                    >
+                        <Plus size={16} strokeWidth={1.5} aria-hidden />
+                        {niveau === 'cite' ? 'Ajouter une cité' : niveau === 'batiment' ? 'Ajouter un bâtiment' : 'Ajouter des chambres'}
+                    </a>
+                )}
+                <ChoixVue
+                    valeur={vue}
+                    onChange={setVue}
+                    options={
+                        niveau === 'chambre'
+                            ? [
+                                  { value: 'plan', label: 'Plan', icon: LayoutGrid },
+                                  { value: 'tableau', label: 'Tableau', icon: Rows3 },
+                              ]
+                            : [
+                                  { value: 'cartes', label: 'Cartes', icon: LayoutGrid },
+                                  { value: 'tableau', label: 'Tableau', icon: Rows3 },
+                              ]
+                    }
+                />
+            </div>
         </div>
     );
 
@@ -492,7 +504,7 @@ function Contexte({ niveau, contexte }: { niveau: Niveau; contexte: ParcProps['c
 
 function ChoixVue({ valeur, onChange, options }: { valeur: Vue; onChange: (vue: Vue) => void; options: { value: Vue; label: string; icon: LucideIcon }[] }) {
     return (
-        <div role="radiogroup" aria-label="Affichage" className="inline-flex h-10 shrink-0 rounded-brand border bg-white p-0.5 sm:ml-auto">
+        <div role="radiogroup" aria-label="Affichage" className="inline-flex h-10 shrink-0 rounded-brand border bg-white p-0.5">
             {options.map((option) => {
                 const actif = valeur === option.value;
                 return (

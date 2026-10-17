@@ -266,16 +266,14 @@ export function CiteForm({ item, campusId, typesCite, users, reglements, submitU
 
     const responsable = users.find((user) => user.id === watch('responsable_id')) ?? null;
 
-    /** Reprend les coordonnées du responsable dans les champs encore vides (comme l'ancien formulaire). */
+    /** Reprend les e-mails du responsable dans les champs encore vides ; les téléphones de la cité restent à saisir. */
     const choisirResponsable = (id: string) => {
         setValue('responsable_id', id, { shouldDirty: true });
         const user = users.find((u) => u.id === id);
         if (!user) return;
-        const remplir = (champ: 'telephone1' | 'telephone2' | 'email1' | 'email2', valeur: string | null) => {
-            if (valeur && !getValues(champ)) setValue(champ, champ.startsWith('telephone') ? telephone(valeur) : valeur, { shouldDirty: true });
+        const remplir = (champ: 'email1' | 'email2', valeur: string | null) => {
+            if (valeur && !getValues(champ)) setValue(champ, valeur, { shouldDirty: true });
         };
-        remplir('telephone1', user.telephone);
-        remplir('telephone2', user.telephone2);
         remplir('email1', user.email);
         remplir('email2', user.email2);
     };
@@ -509,6 +507,7 @@ export function CiteForm({ item, campusId, typesCite, users, reglements, submitU
                                                 onBlur={field.onBlur}
                                                 onChange={(event) => field.onChange(formatTelephoneCI(event.target.value))}
                                                 type="tel"
+                                                autoComplete="off"
                                                 inputMode="numeric"
                                                 maxLength={14}
                                                 placeholder="07 00 00 00 00"

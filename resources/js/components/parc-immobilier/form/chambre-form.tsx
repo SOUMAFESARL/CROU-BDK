@@ -1,8 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { router } from '@inertiajs/react';
 import {
     BedDouble,
     Building,
-    CheckCircle2,
     ClipboardCheck,
     DoorClosed,
     DoorOpen,
@@ -169,7 +169,6 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
     const [chargementDetail, setChargementDetail] = useState(false);
     const [erreurEtape, setErreurEtape] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
-    const [succes, setSucces] = useState<string | null>(null);
     const [aModifier, setAModifier] = useState<ChambreModifiable | null>(null);
 
     /* ───────────── Types d'occupation : tous si le bâtiment est mixte, sinon celui du bâtiment ───────────── */
@@ -309,13 +308,13 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
     /* ───────────── Envoi : création en lot (massCreateChambres) ou unitaire (quickCreateChambre) ───────────── */
     const envoyer = async () => {
         const v = getValues();
+        if (v.mode === 'lot' ? !urls.massCreate : !urls.quickCreate || !detail?.nonCrees[0]) return;
         setSubmitting(true);
         setErreurEtape(null);
         try {
             let message: string;
             if (v.mode === 'lot') {
-                if (!urls.massCreate) return;
-                const { data } = await parcHttp.put(urls.massCreate, {
+                const { data } = await parcHttp.put(urls.massCreate!, {
                     niveau_code: v.niveau,
                     batiment_code: v.batiment,
                     configurations: v.lignes.map((ligne) => ({
@@ -331,9 +330,8 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
                 });
                 message = data.message ?? 'Chambres créées.';
             } else {
-                if (!urls.quickCreate || !detail?.nonCrees[0]) return;
-                const { data } = await parcHttp.post(urls.quickCreate, {
-                    code: detail.nonCrees[0].code,
+                const { data } = await parcHttp.post(urls.quickCreate!, {
+                    code: detail!.nonCrees[0].code,
                     numero_chambre: v.unitaire.numero_chambre.trim(),
                     type_chambre_code: v.unitaire.type_chambre_code,
                     niveau_confort: v.unitaire.confort,
@@ -343,22 +341,18 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
                 });
                 message = data.message ?? 'Chambre créée.';
             }
-            toast.success(message);
-            setSucces(message);
-            setValue('lignes', []);
-            setValue('unitaire.numero_chambre', '');
-            await Promise.all([chargerNiveaux(v.batiment), chargerDetail(v.niveau, v.batiment)]);
-            // Retour au choix du niveau : la progression est visible et un autre niveau peut être configuré.
-            wizard.goTo(1);
+            // Retour sur le plan du bâtiment : les chambres créées y apparaissent.
+            router.visit(`${urls.index}?batiment=${encodeURIComponent(v.batiment)}`, {
+                onSuccess: () => toast.success(message),
+                onFinish: () => setSubmitting(false),
+            });
         } catch (error) {
             setErreurEtape(messageErreur(error, 'La configuration des chambres a échoué.'));
-        } finally {
             setSubmitting(false);
         }
     };
 
     const suivant = async () => {
-        setSucces(null);
         if (wizard.isLast) {
             for (let index = 0; index < STEPS.length - 1; index++) {
                 if (!(await validerEtape(index))) {
@@ -427,18 +421,6 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
                 submitLabel={values.mode === 'lot' ? `Créer ${nombre.format(totalLot)} chambre(s)` : 'Créer la chambre'}
                 submitDisabled={values.mode === 'lot' ? !urls.massCreate : !urls.quickCreate}
             >
-                {succes && (
-                    <p role="status" className="flex items-start gap-2 rounded-brand border border-secondary/50 bg-soft px-4 py-3 text-sm text-primary">
-                        <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
-                        <span>
-                            {succes} Choisissez un autre niveau ou{' '}
-                            <a href={`${urls.index}?batiment=${encodeURIComponent(values.batiment)}`} className="underline">
-                                voyez le plan du bâtiment
-                            </a>
-                            .
-                        </span>
-                    </p>
-                )}
                 {erreurEtape && <FormAlert>{erreurEtape}</FormAlert>}
 
                 {wizard.current === 0 && (
@@ -546,7 +528,6 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
                                                             onChange={() => {
                                                                 setValue('niveau', n.niveau_aile_code, { shouldValidate: true });
                                                                 setErreurEtape(null);
-                                                                setSucces(null);
                                                             }}
                                                         />
                                                         <span className="flex items-center justify-between gap-2">

@@ -183,71 +183,68 @@ class EquipementController extends Controller
 
     public function store(Request $request)
     {
+        // Validation hors du try : les erreurs de saisie reviennent champ par champ au formulaire.
+        $validated = $request->validate([
+            'type_equipement_id' => 'required|string|exists:type_equipement,id_type_equipement',
+            'name' => 'required|string|max:150',
+            'stock_initial' => 'required|integer|min:0',
+            'prix' => 'nullable|numeric|min:0',
+            'threshold' => 'required|integer|min:0',
+            'date_reception' => 'nullable|date',
+            'photo' => 'nullable|file|mimes:jpg,jpeg,png,gif|max:10240',
+        ]);
+        unset($validated['photo']);
+
         try {
+            $acteur = getInfoAdmin()->users->code;
+            // Photo facultative : le helper `upload` lit $_FILES['photo'] et plante si aucun fichier n'est envoyé.
+            $photo = $request->hasFile('photo') ? upload('equipement', 'png', $request, 'photo') : null;
 
+            \Illuminate\Support\Facades\DB::transaction(function () use ($validated, $photo, $acteur) {
+                $equipement = Equipement::create([
+                    ...$validated,
+                    'prix' => $validated['prix'] ?? 0,
+                    'stock_actuel' => $validated['stock_initial'],
+                    'photo' => $photo,
+                    'created_by' => $acteur,
+                ]);
 
-            $validated = $request->validate([
-                'threshold' => 'required',
-                'date_reception' =>'sometimes',
-                'prix' => 'sometimes',
-                'stock_initial' =>'sometimes',
-                'name' =>'sometimes',
-                'type_equipement_id'=> 'required',
+                if ($validated['stock_initial'] > 0) {
+                    $equipement->mouvements()->create([
+                        'type' => 'entry',
+                        'quantity' => $validated['stock_initial'],
+                        'reason' => 'Entrée de stock initiale',
+                        'created_by' => $acteur,
+                    ]);
+                }
+            });
 
-
-            ]);
-
-
-            $equipement = Equipement::firstOrCreate($validated, [
-                'stock_actuel' => $validated['stock_initial'],
-            'photo' => upload('equipement','png', $request, 'photo'),
-            'created_by' => getInfoAdmin()->users->code
-            ]);
-
-            $data=[
-                'equipement_id' => $equipement->equipement_id,
-                'type' => 'entry',
-                'quantity' => $validated['stock_initial'],
-                'reason' => 'Entree de stock ',
-                'created_by' => getInfoAdmin()->users->code
-            ];
-
-
-
-
-            $equipement->mouvements()->create($data);
-
-
-            return back()->with('success', 'Equipement créé avec succès !');
-
-        }catch (\Exception $e){
-          //  dd($e->getMessage());
-            return back()->withErrors(['error' => 'Probleme survenu lors de l\'enregistrement']);
+            return back()->with('success', 'Équipement enregistré avec succès.');
+        } catch (\Exception $e) {
+            return back()->withInput()->withErrors(['error' => 'Problème survenu lors de l\'enregistrement : ' . \App\Support\UserFacingErrors::caught($e)]);
         }
     }
 
-    public function update(Request $request){
+    public function update(Request $request)
+    {
+        $validated = $request->validate([
+            'equipement_id' => 'required|string',
+            'threshold' => 'required|integer|min:0',
+            'name' => 'sometimes|required|string|max:150',
+            'type_equipement_id' => 'required|string|exists:type_equipement,id_type_equipement',
+            'photo' => 'nullable|file|mimes:jpg,jpeg,png,gif|max:10240',
+        ]);
+        unset($validated['equipement_id'], $validated['photo']);
 
         try {
-            $validated = $request->validate([
-                'threshold' => 'required',
-
-
-
-                'name' =>'sometimes',
-                'type_equipement_id'=> 'required',
-
-
-            ]);
             $equipement = Equipement::where('equipement_id', $request['equipement_id'])->firstOrFail();
 
             $validated['photo'] = $request->hasFile('photo') ?  update('equipement', $equipement->photo,'png',$request,'photo') : $equipement->photo;
 
             $equipement->update($validated);
-            return back()->with('success', 'Equipement créé avec succès !');
-        }catch (\Exception $e){
-            report($e);
-            return back()->withErrors(['error' => 'Probleme survenu lors de l\'enregistrement']);
+            return back()->with('success', 'Équipement modifié avec succès.');
+        } catch (\Exception $e) {
+            return back()->withInput()->withErrors(['error' => 'Problème survenu lors de la modification : ' . \App\Support\UserFacingErrors::caught($e)]);
         }
     }
 

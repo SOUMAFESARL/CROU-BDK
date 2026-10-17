@@ -815,7 +815,7 @@ class ParcImmobilierController extends Controller
                     'message'       => 'Bâtiment enregistré avec succès!',
                     'batiment_id'   => $batiment->id_batiment,
                     'code_batiment' => $batiment->code_batiment,
-                    'redirect'      => route('admin.hebergement.parc-immobilier.index')
+                    'redirect'      => route('admin.hebergement.parc-immobilier.index', ['cite' => $batiment->cite_id])
                 ], 201);
 
             } catch (\Throwable $e) {
@@ -905,7 +905,7 @@ class ParcImmobilierController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Bâtiment modifié avec succès.',
-                'redirect' => route('admin.hebergement.parc-immobilier.index'),
+                'redirect' => route('admin.hebergement.parc-immobilier.index', ['cite' => $batiment->cite_id]),
             ]);
         } catch (\Throwable $e) {
             return response()->json([

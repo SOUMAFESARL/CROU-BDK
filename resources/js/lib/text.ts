@@ -9,6 +9,13 @@ export const sansAccents = (texte: string | null | undefined) =>
 export const nombre = (valeur: number | string | null | undefined, decimales = 0) =>
     new Intl.NumberFormat('fr-FR', { maximumFractionDigits: decimales }).format(Number(valeur ?? 0));
 
+/** Saisie d'un montant entier : garde les chiffres et les groupe par milliers (« 25000 » → « 25 000 »). */
+export const saisieMilliers = (valeur: string | null | undefined) =>
+    (valeur ?? '')
+        .replace(/\D/g, '')
+        .replace(/^0+(?=\d)/, '')
+        .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
 /** Date `aaaa-mm-jj` (ou ISO) → jj/mm/aaaa ; « — » si vide. */
 export const dateFr = (valeur: string | null | undefined) => {
     if (!valeur) return '—';

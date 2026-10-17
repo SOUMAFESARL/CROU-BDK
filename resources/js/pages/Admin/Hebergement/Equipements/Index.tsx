@@ -24,7 +24,7 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
-import { nombre } from '@/lib/text';
+import { nombre, saisieMilliers } from '@/lib/text';
 import type { Paginated } from '@/types/global';
 
 type Ligne = EquipementItem & { urls: { mouvements: string | null; destroy: string | null } };
@@ -267,9 +267,14 @@ const entier = (message: string) => z.coerce.number({ error: message }).int('Nom
 
 const creationSchema = z.object({
     type_equipement_id: z.string().min(1, 'Choisissez le type d’équipement.'),
-    name: z.string().trim().min(1, 'La désignation est obligatoire.').max(255, '255 caractères au maximum.'),
+    name: z.string().trim().min(1, 'La désignation est obligatoire.').max(150, '150 caractères au maximum.'),
     stock_initial: entier('Indiquez la quantité reçue.'),
-    prix: z.coerce.number({ error: 'Indiquez le coût unitaire.' }).min(0, 'Le coût ne peut pas être négatif.'),
+    // Saisi en texte avec séparateur de milliers (« 25 000 »), envoyé au serveur en nombre.
+    prix: z
+        .string()
+        .trim()
+        .min(1, 'Indiquez le coût unitaire.')
+        .transform((valeur) => Number(valeur.replace(/\s/g, ''))),
     threshold: entier('Indiquez le seuil d’alerte.'),
     date_reception: z.string().min(1, 'Indiquez la date de réception.'),
 });
@@ -290,7 +295,7 @@ function CreationDialog({ open, onClose, url, types }: { open: boolean; onClose:
 
     useEffect(() => {
         if (open) {
-            reset({ type_equipement_id: '', name: '', stock_initial: '', prix: 0, threshold: 0, date_reception: aujourdhui() });
+            reset({ type_equipement_id: '', name: '', stock_initial: '', prix: '0', threshold: 0, date_reception: aujourdhui() });
             setPhoto(null);
         }
     }, [open, reset]);
@@ -317,13 +322,31 @@ function CreationDialog({ open, onClose, url, types }: { open: boolean; onClose:
                             />
                         </Field>
                         <Field id="eq-name" label="Désignation" required error={errors.name?.message}>
-                            <Input id="eq-name" maxLength={255} placeholder="Ex. Matelas 1 place" invalid={!!errors.name} {...register('name')} />
+                            <Input id="eq-name" maxLength={150} placeholder="Ex. Matelas 1 place" invalid={!!errors.name} {...register('name')} />
                         </Field>
                         <Field id="eq-qty" label="Quantité reçue" required error={errors.stock_initial?.message}>
                             <Input id="eq-qty" type="number" min={0} step={1} placeholder="0" invalid={!!errors.stock_initial} {...register('stock_initial')} />
                         </Field>
                         <Field id="eq-prix" label="Coût unitaire (FCFA)" required error={errors.prix?.message}>
-                            <Input id="eq-prix" type="number" min={0} step="0.01" invalid={!!errors.prix} {...register('prix')} />
+                            <Controller
+                                control={control}
+                                name="prix"
+                                render={({ field }) => (
+                                    <Input
+                                        id="eq-prix"
+                                        ref={field.ref}
+                                        value={field.value ?? ''}
+                                        onBlur={field.onBlur}
+                                        onChange={(event) => field.onChange(saisieMilliers(event.target.value))}
+                                        type="text"
+                                        inputMode="numeric"
+                                        autoComplete="off"
+                                        placeholder="Ex. 25 000"
+                                        className="tabular-nums"
+                                        invalid={!!errors.prix}
+                                    />
+                                )}
+                            />
                         </Field>
                         <Field id="eq-seuil" label="Seuil d’alerte" required error={errors.threshold?.message} hint="Statut « Stock faible » à partir de cette quantité.">
                             <Input id="eq-seuil" type="number" min={0} step={1} invalid={!!errors.threshold} {...register('threshold')} />
@@ -349,7 +372,7 @@ function CreationDialog({ open, onClose, url, types }: { open: boolean; onClose:
 }
 
 const editionSchema = z.object({
-    name: z.string().trim().min(1, 'La désignation est obligatoire.').max(255, '255 caractères au maximum.'),
+    name: z.string().trim().min(1, 'La désignation est obligatoire.').max(150, '150 caractères au maximum.'),
     type_equipement_id: z.string().min(1, 'Choisissez le type d’équipement.'),
     threshold: entier('Indiquez le seuil d’alerte.'),
 });
@@ -392,7 +415,7 @@ function EditionDialog({ equipement, onClose, url, types }: { equipement: Ligne 
                     </DialogHeader>
                     <DialogBody className="space-y-4">
                         <Field id="ed-name" label="Désignation" required error={errors.name?.message}>
-                            <Input id="ed-name" maxLength={255} invalid={!!errors.name} {...register('name')} />
+                            <Input id="ed-name" maxLength={150} invalid={!!errors.name} {...register('name')} />
                         </Field>
                         <Field id="ed-type" label="Type d’équipement" required error={errors.type_equipement_id?.message}>
                             <Controller
