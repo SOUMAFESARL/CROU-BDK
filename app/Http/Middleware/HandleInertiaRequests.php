@@ -31,6 +31,8 @@ class HandleInertiaRequests extends Middleware
             'csrfToken' => fn () => csrf_token(),
             // Cookie écrit par la barre latérale (React et Blade) : 'false' = repliée.
             'sidebarOpen' => $request->cookie('sidebar_state') !== 'false',
+            // Via asset() : en prod (racine du projet comme docroot) les fichiers publics sont sous /public.
+            'logoUrl' => asset('admin/assets/images/logos/crou_bdk.jpeg'),
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
