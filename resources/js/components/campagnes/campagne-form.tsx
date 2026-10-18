@@ -173,7 +173,8 @@ type CampagneFormProps = CreateCampagneProps & {
 /** Assistant de saisie d'une campagne d'admission, en création comme en modification. */
 export function CampagneForm({ residences, documents, urls, campagne, dossiers = 0 }: CampagneFormProps) {
     const { errors: serverErrors } = usePage<SharedProps>().props;
-    const wizard = useWizard(STEPS.length);
+    // Modification : toutes les étapes sont cliquables d'emblée (les étapes intermédiaires restent validées par `allerA`).
+    const wizard = useWizard(STEPS.length, { toutesAccessibles: campagne !== undefined });
     const [submitting, setSubmitting] = useState(false);
 
     const {
