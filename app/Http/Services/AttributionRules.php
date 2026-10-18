@@ -113,11 +113,16 @@ class AttributionRules
         return $this->sexe($student->genre?->name);
     }
 
+    /** Reconnaît aussi les libellés du référentiel type_cite (« Uniquement Homme », « Uniquement Femme »). */
     private function sexe(?string $value): ?string
     {
-        return match (Str::lower(Str::ascii(trim((string) $value)))) {
-            'm', 'masculin', 'homme', 'hommes', 'garcon', 'garcons' => 'm',
-            'f', 'feminin', 'femme', 'femmes', 'fille', 'filles' => 'f',
+        $value = Str::lower(Str::ascii(trim((string) $value)));
+
+        return match (true) {
+            in_array($value, ['m', 'masculin'], true) => 'm',
+            in_array($value, ['f', 'feminin'], true) => 'f',
+            (bool) preg_match('/\b(femmes?|filles?)\b/', $value) => 'f',
+            (bool) preg_match('/\b(hommes?|garcons?)\b/', $value) => 'm',
             default => null,
         };
     }

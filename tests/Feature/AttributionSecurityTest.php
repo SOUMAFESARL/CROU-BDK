@@ -111,6 +111,25 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
         $this->assertNotNull($this->allocate());
     }
 
+    public function test_reference_labels_of_type_cite_are_recognized(): void
+    {
+        // Libellés réels du référentiel en production.
+        DB::table('type_cite')->insert([
+            ['id_type_cite' => 'uh', 'name' => 'Uniquement Homme'],
+            ['id_type_cite' => 'uf', 'name' => 'Uniquement Femme'],
+        ]);
+        DB::table('chambre')->update(['type_occupation_id' => 'uf']);
+        try {
+            $this->allocate();
+            $this->fail('Libellé « Uniquement Femme » ignoré');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('sexe', $e->getMessage());
+        }
+
+        DB::table('chambre')->update(['type_occupation_id' => 'uh']);
+        $this->assertNotNull($this->allocate());
+    }
+
     public function test_confirmation_does_not_count_its_own_reservation_twice(): void
     {
         $assignment = $this->allocate();
