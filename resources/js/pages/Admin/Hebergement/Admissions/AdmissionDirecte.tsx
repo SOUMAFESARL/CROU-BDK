@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { FileDrop } from '@/components/ui/file-drop';
 import { Input } from '@/components/ui/input';
@@ -92,9 +93,13 @@ export default function AdmissionDirecte(props: Props) {
                 {urls.store ? <Formulaire {...props} url={urls.store} bloque={bloque} /> : <div />}
                 <aside className="flex flex-col gap-6">
                     {urls.import && <Import url={urls.import} template={urls.template} />}
-                    {props.import && props.import.lignes.length > 0 && <LignesRefusees rapport={props.import} />}
                 </aside>
             </div>
+
+            {props.import && props.import.lignes.length > 0 && (
+                // `key` : un nouvel import rouvre la fenêtre même si la précédente a été fermée.
+                <LignesRefusees key={props.import.message + props.import.lignes.join('|')} rapport={props.import} admissions={urls.admissions} />
+            )}
         </AdminLayout>
     );
 }
@@ -394,27 +399,43 @@ function Import({ url, template }: { url: string; template: string | null }) {
     );
 }
 
-function LignesRefusees({ rapport }: { rapport: NonNullable<Props['import']> }) {
+/** Rapport d'import affiché en fenêtre modale dès le retour sur la page. */
+function LignesRefusees({ rapport, admissions }: { rapport: NonNullable<Props['import']>; admissions: string | null }) {
+    const [ouvert, setOuvert] = useState(true);
+    const importes = parseInt(rapport.message, 10) || 0;
+
     return (
-        <section className="overflow-hidden rounded-brand border bg-white">
-            <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
-                <h2 className="flex items-center gap-2 text-base font-medium text-gray-900">
-                    <span className="flex size-8 items-center justify-center rounded-brand bg-red-50 text-red-700" aria-hidden>
-                        <TriangleAlert size={18} strokeWidth={1.25} />
-                    </span>
-                    Lignes non enregistrées
-                </h2>
-                <span className="text-sm text-muted">{rapport.lignes.length}</span>
-            </div>
-            <div className="p-4 text-sm">
-                <p className="mb-2 text-muted">{rapport.message}</p>
-                <ul className="list-disc space-y-1.5 pl-5">
-                    {rapport.lignes.map((ligne) => (
-                        <li key={ligne}>{ligne}</li>
-                    ))}
-                </ul>
-            </div>
-        </section>
+        <Dialog open={ouvert} onOpenChange={setOuvert}>
+            <DialogContent className="max-w-xl">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <span className="flex size-8 items-center justify-center rounded-brand bg-red-50 text-red-700" aria-hidden>
+                            <TriangleAlert size={18} strokeWidth={1.25} />
+                        </span>
+                        {rapport.lignes.length} ligne(s) non enregistrée(s)
+                    </DialogTitle>
+                    <DialogDescription>{rapport.message}</DialogDescription>
+                </DialogHeader>
+                <DialogBody className="text-sm">
+                    <ul className="list-disc space-y-1.5 pl-5">
+                        {rapport.lignes.map((ligne) => (
+                            <li key={ligne}>{ligne}</li>
+                        ))}
+                    </ul>
+                    <p className="mt-4 text-xs text-muted">Corrigez ces lignes dans le fichier puis importez-le de nouveau : les lignes déjà enregistrées seront signalées comme doublons.</p>
+                </DialogBody>
+                <DialogFooter>
+                    {importes > 0 && admissions && (
+                        <Link href={admissions} className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'h-10')}>
+                            Voir les admissions
+                        </Link>
+                    )}
+                    <Button size="sm" className="h-10" onClick={() => setOuvert(false)}>
+                        Fermer
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 

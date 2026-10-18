@@ -557,11 +557,13 @@ class etudiantController extends Controller
         }
 
         $message = $successCount . ' étudiant(s) déjà logé(s) importé(s). Les dossiers et les affectations sont validés automatiquement.';
-        if ($errors) {
-            $message .= ' Certaines lignes n’ont pas été enregistrées : ' . implode(' | ', $errors);
+        if (!$errors) {
+            return redirect()->route('admin.hebergement.campagnes_admission.admission')->with('success', $message);
         }
+        $message .= ' Certaines lignes n’ont pas été enregistrées : ' . implode(' | ', $errors);
 
-        return back()->with($errors ? 'warning' : 'success', $message);
+        // Lignes refusées : retour sur la page d'import, où le rapport s'affiche dans une fenêtre modale.
+        return back()->with('warning', $message);
     }
 
     private function registerImportedAdmission(array $data): void
@@ -582,6 +584,13 @@ class etudiantController extends Controller
             $existing = app(\App\Http\Services\StudentIdentityResolver::class)->existingForAdmin($data);
             if ($existing) {
                 $existing = Etudiant::whereKey($existing->getKey())->lockForUpdate()->firstOrFail();
+                // Message adapté à l'admin (celui de ReadmissionService s'adresse à l'étudiant).
+                $dossierEnCours = DemandeEtudiant::where('etudiant_id', $existing->getKey())->where('campagne_id', $campagne->getKey())
+                    ->whereNotIn('etat_dossier', ['cloture', 'refuse', 'annule', 'expire'])->value('etat_dossier');
+                if ($dossierEnCours !== null) {
+                    throw ValidationException::withMessages(['ligne' => "L'étudiant « {$existing->name} » (matricule {$existing->matricule}) a déjà un dossier "
+                        . "« " . str_replace('_', ' ', (string) $dossierEnCours) . " » pour la campagne {$campagne->annee_campagne}. Traitez-le depuis la liste des admissions."]);
+                }
                 app(\App\Http\Services\ReadmissionService::class)->ensureCanApply($existing, $campagne);
             }
             $etudiant = $existing ?? Etudiant::create([
