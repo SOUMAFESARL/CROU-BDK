@@ -77,7 +77,7 @@ export default function AdmissionDirecte(props: Props) {
                             href={urls.admissions}
                             className="inline-flex h-10 items-center gap-2 rounded-brand border border-gray-300 bg-white px-4 text-sm font-medium text-muted hover:bg-surface hover:text-primary"
                         >
-                            <ArrowLeft {...ICON} aria-hidden /> Retour aux admissions
+                            <ArrowLeft {...ICON} aria-hidden /> Retour aux résidents
                         </Link>
                     )
                 }
@@ -140,7 +140,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
     };
 
     const onSubmit = (valeurs: Valeurs) =>
-        // Étudiant enregistré : le serveur redirige vers la liste des admissions.
+        // Étudiant enregistré : le serveur redirige vers la liste des résidents.
         envoyer(url, { ...valeurs, numero_lit: valeurs.numero_lit === '' ? '' : String(valeurs.numero_lit) }, {
             onError: (erreurs) => {
                 // Erreurs de champ affichées sous le champ ; retour à l'étape « Identité » si elle est concernée.
@@ -427,7 +427,7 @@ function LignesRefusees({ rapport, admissions }: { rapport: NonNullable<Props['i
                 <DialogFooter>
                     {importes > 0 && admissions && (
                         <Link href={admissions} className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'h-10')}>
-                            Voir les admissions
+                            Voir les résidents
                         </Link>
                     )}
                     <Button size="sm" className="h-10" onClick={() => setOuvert(false)}>

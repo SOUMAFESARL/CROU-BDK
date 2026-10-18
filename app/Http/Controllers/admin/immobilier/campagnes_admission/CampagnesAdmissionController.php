@@ -49,8 +49,11 @@ class CampagnesAdmissionController extends Controller
     }
 
 
-    /** Filtres de la liste des admissions (statut d'inscription de l'étudiant). */
-    private const FILTRES_ADMISSION = ['nouvelles_demandes', 'en_attente', 'annuler', 'en_verification', 'residents'];
+    /**
+     * Filtres de la liste des admissions (statut d'inscription de l'étudiant) : demandes uniquement,
+     * les étudiants logés et les dossiers en vérification sont suivis sur la page « Résidents & contrats ».
+     */
+    private const FILTRES_ADMISSION = ['nouvelles_demandes', 'en_attente', 'annuler'];
 
     public function liste(Request $request, ?string $etat = null)
     {
@@ -85,14 +88,17 @@ class CampagnesAdmissionController extends Controller
         $vues = app(AdminViewAccess::class);
         $personnel = $vues->allows($admin, 'admissions.personal');
         $historique = $vues->allows($admin, 'admissions.history');
-        $etat = in_array($filtre, self::FILTRES_ADMISSION, true) ? $filtre : 'residents';
+        $etat = in_array($filtre, self::FILTRES_ADMISSION, true) ? $filtre : 'nouvelles_demandes';
+        $recherche = trim((string) $request->query('q', ''));
+        $etatDossier = (string) $request->query('etat_dossier', '');
+        $etatDossier = array_key_exists($etatDossier, DossierWorkflow::LABELS) ? $etatDossier : '';
         $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
         $repository = app(\App\Repositories\EtudiantRepository::class);
         // Bandeau : campagne au statut « active » (comme la page Campagnes), pas celle de l'année universitaire.
         $campagne = $this->campagneActive();
 
         return Inertia::render('Admin/Hebergement/Admissions/Index', [
-            'dossiers' => $repository->getAdmissionsPage($etat, 10)->through(fn (Etudiant $etudiant) => [
+            'dossiers' => $repository->getAdmissionsPage($etat, 10, $recherche, $etatDossier)->through(fn (Etudiant $etudiant) => [
                 'id' => (string) $etudiant->id_etudiant,
                 'name' => $etudiant->name,
                 'numero_demande' => $etudiant->derniereDemande?->numero_demande,
@@ -110,6 +116,8 @@ class CampagnesAdmissionController extends Controller
             ]),
             'stats' => $repository->getStats(),
             'etat' => $etat,
+            'filters' => ['q' => $recherche, 'etat_dossier' => $etatDossier],
+            'etatsDossier' => collect(DossierWorkflow::LABELS)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values(),
             'colonnes' => ['personnel' => $personnel, 'historique' => $historique],
             'campagneActive' => $campagne ? [
                 'annee' => $campagne->annee_campagne,
@@ -119,7 +127,6 @@ class CampagnesAdmissionController extends Controller
             ] : null,
             'urls' => [
                 'campagnes' => $url('admin.hebergement.campagnes_admission.campagnes'),
-                'admissionDirecte' => $url('admin.etudiant.admission_directe'),
                 'filtres' => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
                     ? collect(self::FILTRES_ADMISSION)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.campagnes_admission.admission', ['etat' => $f])])
                     : null,

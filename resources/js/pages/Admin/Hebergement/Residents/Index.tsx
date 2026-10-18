@@ -1,6 +1,6 @@
 import { Link, router } from '@inertiajs/react';
-import { BedDouble, ClipboardCheck, Eye, FileText, ListChecks, Search, Users, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { BedDouble, ClipboardCheck, Eye, FileText, ListChecks, Pencil, Search, UserPlus, Users, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
 import { AdminLayout } from '@/components/layout/admin-layout';
@@ -9,6 +9,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
+import { EtudiantEditDialog, type ValeursEtudiant } from '@/components/residents/etudiant-edit-dialog';
 import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
@@ -23,7 +24,9 @@ type Resident = {
     personnel: { telephone: string | null; adresse: string | null; region: string | null; ville: string | null; date_naissance: string | null } | null;
     demandes: number | null;
     chambre: { numero: string | null; lieu: string | null } | null;
-    urls: { dossier: string | null; traiter: string | null; contrat: string | null };
+    urls: { dossier: string | null; traiter: string | null; contrat: string | null; modifier: string | null };
+    /** Valeurs du formulaire de modification (envoyées seulement avec le droit de modifier). */
+    edition: ValeursEtudiant | null;
 };
 
 type Props = {
@@ -33,7 +36,8 @@ type Props = {
     filters: { q: string };
     colonnes: { personnel: boolean; historique: boolean };
     campagneActive: { annee: string } | null;
-    urls: { attributions: string | null; filtres: Record<Filtre, string> | null };
+    genres: { id: string; name: string }[];
+    urls: { admissionDirecte: string | null; attributions: string | null; filtres: Record<Filtre, string> | null };
 };
 
 const TITRES: Record<Filtre, string> = {
@@ -42,8 +46,14 @@ const TITRES: Record<Filtre, string> = {
 };
 
 /** Résidents et contrats (remplace `resident_contrat/index.blade.php`). */
-export default function ResidentsIndex({ residents, stats, etat, filters, colonnes, campagneActive, urls }: Props) {
+export default function ResidentsIndex({ residents, stats, etat, filters, colonnes, campagneActive, genres, urls }: Props) {
     const [recherche, setRecherche] = useState(filters.q);
+    const [enEdition, setEnEdition] = useState<Resident | null>(null);
+    // Objet stable : la fenêtre réinitialise son formulaire quand l'étudiant change.
+    const etudiantEdite = useMemo(
+        () => (enEdition?.urls.modifier && enEdition.edition ? { name: enEdition.name, url: enEdition.urls.modifier, valeurs: enEdition.edition } : null),
+        [enEdition],
+    );
     const premierRendu = useRef(true);
 
     // Recherche côté serveur, 350 ms après la dernière frappe (retour en page 1, filtre conservé).
@@ -140,6 +150,7 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
             cell: (r) => (
                 <RowActions>
                     {r.urls.traiter && <RowAction label="Traiter la demande" icon={ClipboardCheck} href={r.urls.traiter} tone="success" />}
+                    {r.urls.modifier && r.edition && <RowAction label="Modifier les informations" icon={Pencil} onClick={() => setEnEdition(r)} tone="edit" />}
                     {r.urls.contrat && <RowAction label="Consulter le contrat (PDF)" icon={FileText} href={r.urls.contrat} newTab />}
                     {r.urls.dossier && <RowAction label="Voir le dossier" icon={Eye} href={r.urls.dossier} tone="view" />}
                 </RowActions>
@@ -153,10 +164,22 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                 title="Résidents & contrats"
                 description="Suivez les étudiants logés, leur chambre et leur contrat."
                 actions={
-                    urls.attributions && (
-                        <Link href={urls.attributions} className={cn(buttonVariants({ size: 'sm' }), 'h-10 px-4')}>
-                            <ListChecks {...ICON} aria-hidden /> Suivi des attributions
-                        </Link>
+                    (urls.attributions || urls.admissionDirecte) && (
+                        <>
+                            {urls.attributions && (
+                                <Link
+                                    href={urls.attributions}
+                                    className="inline-flex h-10 items-center gap-2 rounded-brand border border-gray-300 bg-white px-4 text-sm font-medium text-muted hover:bg-surface hover:text-primary"
+                                >
+                                    <ListChecks {...ICON} aria-hidden /> Suivi des attributions
+                                </Link>
+                            )}
+                            {urls.admissionDirecte && (
+                                <Link href={urls.admissionDirecte} className={cn(buttonVariants({ size: 'sm' }), 'h-10 px-4')}>
+                                    <UserPlus {...ICON} aria-hidden /> Enregistrer un étudiant déjà logé
+                                </Link>
+                            )}
+                        </>
                     )
                 }
             />
@@ -225,6 +248,12 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                     }
                 />
             </section>
+
+            <EtudiantEditDialog
+                etudiant={etudiantEdite}
+                genres={genres}
+                onClose={() => setEnEdition(null)}
+            />
         </AdminLayout>
     );
 }

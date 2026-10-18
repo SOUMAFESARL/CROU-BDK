@@ -91,7 +91,7 @@ class etudiantController extends Controller
             'aujourdhui' => today()->toDateString(),
             'import' => $avertissement ? ['message' => \Illuminate\Support\Str::before((string) $avertissement, ' Certaines lignes'), 'lignes' => $lignesRefusees] : null,
             'urls' => [
-                'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
+                'admissions' => $url('admin.hebergement.residents_contrat.admission'),
                 'store' => $url('admin.etudiant.admission_directe.store'),
                 'template' => $url('admin.etudiant.admission_directe.template'),
                 'import' => $url('admin.etudiant.admission_directe.import'),
@@ -257,7 +257,7 @@ class etudiantController extends Controller
         });
 
         return redirect()
-            ->route('admin.hebergement.campagnes_admission.admission')
+            ->route('admin.hebergement.residents_contrat.admission')
             ->with('success', 'Étudiant déjà logé enregistré : dossier validé et chambre confirmée.');
     }
 
@@ -576,7 +576,7 @@ class etudiantController extends Controller
 
         $message = $successCount . ' étudiant(s) déjà logé(s) importé(s). Les dossiers et les affectations sont validés automatiquement.';
         if (!$errors) {
-            return redirect()->route('admin.hebergement.campagnes_admission.admission')->with('success', $message);
+            return redirect()->route('admin.hebergement.residents_contrat.admission')->with('success', $message);
         }
         $message .= ' Certaines lignes n’ont pas été enregistrées : ' . implode(' | ', $errors);
 

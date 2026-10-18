@@ -375,7 +375,7 @@ Route::middleware(['admin'])->group(function () {
         ->group(function () {
 
             Route::get('/liste/{etat?}', 'liste')->name('admission');
-
+            Route::put('/etudiants/{etudiant}', 'updateEtudiant')->name('update_etudiant');
 
         });
 

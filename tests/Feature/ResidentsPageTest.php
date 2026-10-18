@@ -17,6 +17,11 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         parent::setUp();
         Schema::table('etudiants', function (Blueprint $t) {
             $t->date('date_inscription')->nullable();
+            foreach (['matricule', 'numero_etudiant', 'telephone1', 'telephone2', 'email1', 'email2', 'lieu_naissance', 'nationalite',
+                'adresse', 'name_tuteur', 'telephone_tuteur', 'adresse_tuteur'] as $colonne) {
+                $t->string($colonne)->nullable();
+            }
+            $t->date('date_naissance')->nullable();
         });
         Schema::table('campagne', function (Blueprint $t) {
             $t->string('annee_campagne')->nullable();
@@ -86,6 +91,49 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertArrayNotHasKey('allouer', $urls);
         $this->assertNotNull($urls['contrat']);
         $this->assertNull($props['urls']['attributions']);
+        $this->assertNull($props['urls']['admissionDirecte']);
+        // Sans le droit de modifier : ni action, ni valeurs du formulaire, ni liste des civilités.
+        $this->assertNull($urls['modifier']);
+        $this->assertNull(collect($props['residents']['data'])->firstWhere('id', 'student')['edition']);
+        $this->assertSame([], $props['genres']);
+    }
+
+    public function test_modification_des_informations_d_un_etudiant(): void
+    {
+        $this->agent(['hebergement.residents.view', 'hebergement.residents.update', 'hebergement.admissions.create']);
+        DB::table('etudiants')->where('id_etudiant', 'other')->update(['matricule' => 'M-002', 'telephone1' => '0700000002']);
+
+        $props = $this->page('residents')['props'];
+        $ligne = collect($props['residents']['data'])->firstWhere('id', 'student');
+        $this->assertStringContainsString('/residents_contrat/etudiants/student', $ligne['urls']['modifier']);
+        $this->assertSame('Konan Awa', $ligne['edition']['name']);
+        $this->assertCount(2, $props['genres']);
+        $this->assertNotNull($props['urls']['admissionDirecte']);
+
+        $donnees = ['name' => 'Konan Awa Marie', 'genre_id' => 2, 'matricule' => 'M-001', 'telephone1' => '0700000001',
+            'email1' => 'awa@example.com', 'date_naissance' => '2003-05-12', 'name_tuteur' => 'Konan Yao'];
+        $this->put(route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => 'student']), $donnees)
+            ->assertSessionHasNoErrors()->assertSessionHas('success');
+
+        $etudiant = DB::table('etudiants')->where('id_etudiant', 'student')->first();
+        $this->assertSame('Konan Awa Marie', $etudiant->name);
+        $this->assertSame('awa@example.com', $etudiant->email1);
+        $this->assertSame('Konan Yao', $etudiant->name_tuteur);
+        $this->assertSame('residents', $etudiant->statut_inscription);
+
+        // Matricule et téléphone déjà utilisés par un autre étudiant : refusés.
+        $this->put(route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => 'student']),
+            ['matricule' => 'M-002', 'telephone1' => '0700000002'] + $donnees)
+            ->assertSessionHasErrors(['matricule', 'telephone1']);
+    }
+
+    public function test_modification_refusee_sans_droit(): void
+    {
+        $this->agent(['hebergement.residents.view']);
+
+        $this->put(route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => 'student']), ['name' => 'Pirate'])
+            ->assertForbidden();
+        $this->assertSame('Konan Awa', DB::table('etudiants')->where('id_etudiant', 'student')->value('name'));
     }
 
     public function test_dossiers_en_verification_proposent_le_traitement(): void

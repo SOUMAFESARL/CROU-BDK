@@ -153,6 +153,7 @@ return [
         'admin.hebergement.reporting.index' => 'hebergement.reporting.view',
         'admin.hebergement.reporting.module' => 'hebergement.reporting.view',
         'admin.hebergement.residents_contrat.admission' => 'hebergement.residents.view',
+        'admin.hebergement.residents_contrat.update_etudiant' => 'hebergement.residents.update',
         'admin.hebergement.vie_residentielle.incidents.index' => 'hebergement.discipline.view',
         'admin.hebergement.vie_residentielle.incidents.store' => 'hebergement.discipline.create',
         'admin.hebergement.vie_residentielle.incidents.transition' => 'hebergement.discipline.update',

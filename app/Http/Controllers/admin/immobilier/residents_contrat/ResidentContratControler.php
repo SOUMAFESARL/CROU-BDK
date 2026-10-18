@@ -7,10 +7,13 @@ use App\Http\Services\CampagneValidationService;
 use App\Http\Services\EtudiantService;
 use App\Models\AssignationChambre;
 use App\Models\Etudiant;
+use App\Models\Genre;
 use App\Repositories\EtudiantRepository;
 use App\Services\AdminAccess;
 use App\Services\AdminViewAccess;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
 class ResidentContratControler extends Controller
@@ -18,9 +21,7 @@ class ResidentContratControler extends Controller
     /** Filtres de la page : dossiers en vérification et étudiants déjà logés. */
     private const FILTRES = ['en_verification', 'residents'];
 
-    public function __construct(protected EtudiantService $etudiantService)
-    {
-    }
+    public function __construct(protected EtudiantService $etudiantService) {}
 
     public function liste(Request $request, ?string $etat = null)
     {
@@ -67,13 +68,15 @@ class ResidentContratControler extends Controller
         $page->getCollection()->load(['assignationsChambre' => fn ($q) => $q->where('statut', 'confirmee')
             ->with(['chambre.batiment', 'chambre.cite'])]);
 
+        $modifiable = $access->allows($admin, 'admin.hebergement.residents_contrat.update_etudiant');
+
         $stats = $repository->getStats();
         $stats['sans_chambre'] = Etudiant::whereRaw('LOWER(statut_inscription) = ?', ['residents'])
             ->whereDoesntHave('assignationsChambre', fn ($q) => $q->where('statut', 'confirmee'))
             ->count();
 
         return Inertia::render('Admin/Hebergement/Residents/Index', [
-            'residents' => $page->through(function (Etudiant $etudiant) use ($personnel, $historique, $url, $etat) {
+            'residents' => $page->through(function (Etudiant $etudiant) use ($personnel, $historique, $url, $etat, $modifiable) {
                 /** @var AssignationChambre|null $assignation */
                 $assignation = $etudiant->assignationsChambre->sortByDesc('created_at')->first();
                 $chambre = $assignation?->chambre;
@@ -101,7 +104,12 @@ class ResidentContratControler extends Controller
                             ? $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant])
                             : null,
                         'contrat' => $url('admin.etudiant.contrat', ['etudiant' => $etudiant->id_etudiant]),
+                        'modifier' => $modifiable
+                            ? route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => $etudiant->id_etudiant])
+                            : null,
                     ],
+                    // Valeurs du formulaire de modification : envoyées seulement avec le droit de modifier.
+                    'edition' => $modifiable ? $this->valeursEdition($etudiant) : null,
                 ];
             }),
             'stats' => [
@@ -113,12 +121,66 @@ class ResidentContratControler extends Controller
             'filters' => ['q' => $recherche],
             'colonnes' => ['personnel' => $personnel, 'historique' => $historique],
             'campagneActive' => $campagne ? ['annee' => $campagne->annee_campagne] : null,
+            'genres' => $modifiable
+                ? Genre::query()->orderBy('name')->get()->map(fn ($genre) => ['id' => (string) $genre->id, 'name' => $genre->name])->values()
+                : [],
             'urls' => [
+                'admissionDirecte' => $url('admin.etudiant.admission_directe'),
                 'attributions' => $campagne ? $url('admin.allocation.show', ['campagneId' => $campagne->id_campagne]) : null,
                 'filtres' => $access->allows($admin, 'admin.hebergement.residents_contrat.admission')
                     ? collect(self::FILTRES)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.residents_contrat.admission', ['etat' => $f])])
                     : null,
             ],
         ]);
+    }
+
+    /** Champs modifiables de la fiche étudiant (identité, coordonnées, tuteur). */
+    private const CHAMPS_EDITION = ['name', 'genre_id', 'matricule', 'numero_etudiant', 'date_naissance', 'lieu_naissance', 'nationalite',
+        'telephone1', 'telephone2', 'email1', 'email2', 'adresse', 'name_tuteur', 'telephone_tuteur', 'adresse_tuteur'];
+
+    private function valeursEdition(Etudiant $etudiant): array
+    {
+        return collect(self::CHAMPS_EDITION)->mapWithKeys(fn ($champ) => [$champ => match ($champ) {
+            'date_naissance' => $etudiant->date_naissance?->toDateString() ?? '',
+            default => (string) ($etudiant->{$champ} ?? ''),
+        }])->all();
+    }
+
+    /**
+     * Modification des informations personnelles d'un étudiant depuis la liste des résidents.
+     * Le statut, le dossier et l'affectation ne sont pas modifiables ici (cycle géré par `DossierWorkflow`).
+     */
+    public function updateEtudiant(Request $request, string $etudiant): RedirectResponse
+    {
+        $etudiant = Etudiant::findOrFail($etudiant);
+        $unique = fn (string $colonne) => Rule::unique('etudiants', $colonne)->ignore($etudiant->getKey(), 'id_etudiant');
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'genre_id' => ['required', 'integer', Rule::exists('genre', 'id')],
+            'matricule' => ['required', 'string', 'max:100', $unique('matricule')],
+            'numero_etudiant' => ['nullable', 'string', 'max:100', $unique('numero_etudiant')],
+            'date_naissance' => ['nullable', 'date', 'before:today'],
+            'lieu_naissance' => ['nullable', 'string', 'max:255'],
+            'nationalite' => ['nullable', 'string', 'max:100'],
+            'telephone1' => ['required', 'string', 'max:30', $unique('telephone1')],
+            'telephone2' => ['nullable', 'string', 'max:30'],
+            'email1' => ['nullable', 'email', 'max:255', $unique('email1')],
+            'email2' => ['nullable', 'email', 'max:255'],
+            'adresse' => ['nullable', 'string', 'max:255'],
+            'name_tuteur' => ['nullable', 'string', 'max:255'],
+            'telephone_tuteur' => ['nullable', 'string', 'max:30'],
+            'adresse_tuteur' => ['nullable', 'string', 'max:255'],
+        ], [
+            'matricule.unique' => 'Un autre étudiant possède déjà ce matricule.',
+            'numero_etudiant.unique' => 'Un autre étudiant possède déjà ce numéro étudiant.',
+            'telephone1.unique' => 'Un autre étudiant possède déjà ce numéro de téléphone.',
+            'email1.unique' => 'Un autre étudiant possède déjà cette adresse e-mail.',
+            'date_naissance.before' => 'La date de naissance doit être antérieure à aujourd’hui.',
+        ]);
+
+        $etudiant->update($data);
+
+        return back()->with('success', 'Informations de l’étudiant mises à jour.');
     }
 }

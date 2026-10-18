@@ -1,18 +1,20 @@
-import { Link } from '@inertiajs/react';
-import { CalendarClock, CalendarDays, CirclePlay, Eye, FolderOpen, GraduationCap, Info, MapPin, UserPlus } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Link, router } from '@inertiajs/react';
+import { CalendarClock, CalendarDays, CirclePlay, Eye, FolderOpen, GraduationCap, Info, MapPin, Search, X } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
 
-type Filtre = 'nouvelles_demandes' | 'en_attente' | 'annuler' | 'en_verification' | 'residents';
+type Filtre = 'nouvelles_demandes' | 'en_attente' | 'annuler';
 
 type Dossier = {
     id: string;
@@ -29,21 +31,46 @@ type Props = {
     dossiers: Paginated<Dossier>;
     stats: { nouvelles_demandes: number; en_attente: number; annulees: number; residents: number; en_verification: number; total: number };
     etat: Filtre;
+    filters: { q: string; etat_dossier: string };
+    /** États possibles de `Demande.etat_dossier` (`DossierWorkflow::LABELS`). */
+    etatsDossier: { value: string; label: string }[];
     colonnes: { personnel: boolean; historique: boolean };
     campagneActive: { annee: string; echeance: string | null; moyenne_min: number | string | null; distance_min: number | string | null } | null;
-    urls: { campagnes: string | null; admissionDirecte: string | null; filtres: Record<Filtre, string> | null };
+    urls: { campagnes: string | null; filtres: Record<Filtre, string> | null };
 };
 
 const TITRES: Record<Filtre, string> = {
     nouvelles_demandes: 'Nouvelles demandes',
     en_attente: 'Demandes en attente',
     annuler: 'Demandes rejetées',
-    en_verification: 'Demandes en vérification',
-    residents: 'Résidents',
 };
 
-/** Liste des dossiers de candidature (remplace `admission/admission.blade.php`). */
-export default function AdmissionsIndex({ dossiers, stats, etat, colonnes, campagneActive, urls }: Props) {
+/**
+ * Liste des demandes de logement (remplace `admission/admission.blade.php`).
+ * Les étudiants déjà logés sont suivis sur la page « Résidents & contrats ».
+ */
+export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsDossier, colonnes, campagneActive, urls }: Props) {
+    const [recherche, setRecherche] = useState(filters.q);
+    const premierRendu = useRef(true);
+
+    // Recherche et filtre côté serveur (retour en page 1, onglet KPI conservé par l'URL).
+    const appliquer = (valeurs: { q: string; etat_dossier: string }) => {
+        const parametres = Object.fromEntries(Object.entries(valeurs).filter(([, valeur]) => valeur.trim() !== '').map(([cle, valeur]) => [cle, valeur.trim()]));
+        router.get(window.location.pathname, parametres, { preserveState: true, preserveScroll: true, replace: true });
+    };
+
+    // Recherche lancée 350 ms après la dernière frappe.
+    useEffect(() => {
+        if (premierRendu.current) {
+            premierRendu.current = false;
+            return;
+        }
+        if (recherche.trim() === filters.q) return;
+        const minuteur = window.setTimeout(() => appliquer({ q: recherche, etat_dossier: filters.etat_dossier }), 350);
+        return () => window.clearTimeout(minuteur);
+    }, [recherche]);
+
+    const filtre = filters.q !== '' || filters.etat_dossier !== '';
     const vide = (valeur: string | null | undefined) => valeur || <span className="text-muted">—</span>;
 
     const colonnesTableau: DataTableColumn<Dossier>[] = [
@@ -114,22 +141,13 @@ export default function AdmissionsIndex({ dossiers, stats, etat, colonnes, campa
                 title="Admissions"
                 description="Suivez les demandes de logement et traitez chaque dossier de candidature."
                 actions={
-                    (urls.campagnes || urls.admissionDirecte) && (
-                        <>
-                            {urls.campagnes && (
-                                <Link
-                                    href={urls.campagnes}
-                                    className="inline-flex h-10 items-center gap-2 rounded-brand border border-gray-300 bg-white px-4 text-sm font-medium text-muted hover:bg-surface hover:text-primary"
-                                >
-                                    <CalendarDays {...ICON} aria-hidden /> Campagnes
-                                </Link>
-                            )}
-                            {urls.admissionDirecte && (
-                                <Link href={urls.admissionDirecte} className={cn(buttonVariants({ size: 'sm' }), 'h-10 px-4')}>
-                                    <UserPlus {...ICON} aria-hidden /> Enregistrer un étudiant déjà logé
-                                </Link>
-                            )}
-                        </>
+                    urls.campagnes && (
+                        <Link
+                            href={urls.campagnes}
+                            className={cn(buttonVariants({ variant: 'primary' }), 'h-10 px-4 font-medium shadow-sm')}
+                        >
+                            <CalendarDays {...ICON} aria-hidden /> Campagnes
+                        </Link>
                     )
                 }
             />
@@ -179,10 +197,55 @@ export default function AdmissionsIndex({ dossiers, stats, etat, colonnes, campa
                     columns={colonnesTableau}
                     data={dossiers}
                     rowKey={(d) => d.id}
+                    toolbar={
+                        <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                            <div className="w-full sm:max-w-sm">
+                                <Input
+                                    type="search"
+                                    value={recherche}
+                                    onChange={(event) => setRecherche(event.target.value)}
+                                    placeholder="Rechercher par nom, matricule, téléphone ou n° de demande…"
+                                    aria-label="Rechercher une demande"
+                                    icon={<Search />}
+                                    className="h-10"
+                                />
+                            </div>
+                            <Select
+                                value={filters.etat_dossier || 'tous'}
+                                onValueChange={(valeur) => appliquer({ q: recherche, etat_dossier: valeur === 'tous' ? '' : valeur })}
+                            >
+                                <SelectTrigger aria-label="Filtrer par statut de la demande" className="h-10 w-full sm:w-56">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="tous">Tous les statuts</SelectItem>
+                                    {etatsDossier.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                            {option.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {filtre && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-10"
+                                    onClick={() => {
+                                        setRecherche('');
+                                        appliquer({ q: '', etat_dossier: '' });
+                                    }}
+                                >
+                                    <X className="size-4" aria-hidden />
+                                    Réinitialiser
+                                </Button>
+                            )}
+                        </div>
+                    }
                     emptyMessage={
                         <span className="flex flex-col items-center gap-2">
                             <FolderOpen {...ICON} aria-hidden />
-                            Aucun dossier trouvé pour ce filtre.
+                            {filtre ? 'Aucune demande ne correspond à ces critères.' : 'Aucun dossier trouvé pour ce filtre.'}
                         </span>
                     }
                 />

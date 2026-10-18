@@ -188,10 +188,14 @@ class EtudiantRepository implements EtudiantRepositoryInterface
         ];
     }
 
-    /** `$recherche` : nom de l'étudiant, numéro de demande ou numéro de chambre (affectation confirmée). */
-    public function getAdmissionsPage(?string $etat = null, int $parPage = 25, ?string $recherche = null): \Illuminate\Pagination\LengthAwarePaginator
+    /**
+     * `$recherche` : nom, matricule, téléphone, numéro de demande ou numéro de chambre (affectation confirmée).
+     * `$etatDossier` : état (`Demande.etat_dossier`) de la dernière demande de l'étudiant.
+     */
+    public function getAdmissionsPage(?string $etat = null, int $parPage = 25, ?string $recherche = null, ?string $etatDossier = null): \Illuminate\Pagination\LengthAwarePaginator
     {
         $recherche = trim((string) $recherche);
+        $etatDossier = trim((string) $etatDossier);
         $status = match($etat) {
             'nouvelles_demandes'=>'demande', 'en_attente'=>'en_attente',
             'en_verification'=>'en_verification', 'annuler'=>'annuler', default=>'residents',
@@ -201,10 +205,13 @@ class EtudiantRepository implements EtudiantRepositoryInterface
             ->when($recherche !== '', function ($query) use ($recherche) {
                 $motif = '%'.addcslashes($recherche, '%_\\').'%';
                 $query->where(fn ($q) => $q->where('name', 'like', $motif)
+                    ->orWhere('matricule', 'like', $motif)
+                    ->orWhere('telephone1', 'like', $motif)
                     ->orWhereHas('demandes', fn ($d) => $d->where('numero_demande', 'like', $motif))
                     ->orWhereHas('assignationsChambre', fn ($a) => $a->where('statut', 'confirmee')
                         ->whereHas('chambre', fn ($c) => $c->where('numero_chambre', 'like', $motif))));
             })
+            ->when($etatDossier !== '', fn ($query) => $query->whereHas('derniereDemande', fn ($d) => $d->where('etat_dossier', $etatDossier)))
             ->orderByDesc('date_inscription')->orderByDesc('id_etudiant')
             ->paginate($parPage)->withQueryString();
     }

@@ -104,7 +104,7 @@ class AdmissionImportTest extends \Tests\Support\DossierTestCase
     {
         $this->import($this->csv("\xEF\xBB\xBFnom_prenoms;civilite;matricule;telephone;cite;batiment;campagne;chambre;date_entree;numero_lit\n"
             . "Kouassi Jean;Masculin;MAT001;0700000001;Cité Universitaire;Bâtiment A;2026-2027;101;01/10/2026;\n"))
-            ->assertRedirect(route('admin.hebergement.campagnes_admission.admission'))->assertSessionHas('success')->assertSessionMissing('warning');
+            ->assertRedirect(route('admin.hebergement.residents_contrat.admission'))->assertSessionHas('success')->assertSessionMissing('warning');
 
         $student = Etudiant::where('matricule', 'MAT001')->firstOrFail();
         $this->assertSame('Kouassi Jean', $student->name);

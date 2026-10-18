@@ -39,9 +39,9 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->actingAs($actor, 'admin');
     }
 
-    private function page(string $action, array $parametres = [], string $uri = '/admin/gestion-hebergement/campagnes_admissions/liste'): array
+    private function page(string $action, array $parametres = [], string $uri = '/admin/gestion-hebergement/campagnes_admissions/liste', array $query = []): array
     {
-        $request = Request::create($uri, 'GET');
+        $request = Request::create($uri, 'GET', $query);
         $request->headers->set('X-Inertia', 'true');
         $request->setUserResolver(fn ($guard = null) => auth('admin')->user());
         $this->app->instance('request', $request);
@@ -66,13 +66,40 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNull($props['dossiers']['data'][0]['demandes']);
         $this->assertSame(2, $props['stats']['nouvelles_demandes']);
         $this->assertSame('active', DB::table('campagne')->value('statut'));
+        $this->assertArrayNotHasKey('admissionDirecte', $props['urls']);
     }
 
-    public function test_filtre_inconnu_ramene_aux_residents(): void
+    public function test_filtre_inconnu_ou_residents_ramene_aux_nouvelles_demandes(): void
+    {
+        $this->agentLimite();
+        DB::table('etudiants')->where('id_etudiant', 'other')->update(['statut_inscription' => 'residents']);
+
+        foreach (['nimporte', 'residents', null] as $etat) {
+            $props = $this->page('liste', ['etat' => $etat])['props'];
+            $this->assertSame('nouvelles_demandes', $props['etat']);
+            // Les étudiants logés ne figurent pas dans la liste des demandes.
+            $this->assertSame(['student'], collect($props['dossiers']['data'])->pluck('id')->all());
+        }
+    }
+
+    public function test_recherche_et_filtre_par_statut_de_la_demande(): void
     {
         $this->agentLimite();
 
-        $this->assertSame('residents', $this->page('liste', ['etat' => 'nimporte'])['props']['etat']);
+        $parNom = $this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['q' => 'konan'])['props'];
+        $this->assertSame(['q' => 'konan', 'etat_dossier' => ''], $parNom['filters']);
+        $this->assertSame(['student'], collect($parNom['dossiers']['data'])->pluck('id')->all());
+        $this->assertSame(['student'], collect($this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['q' => 'M-001'])['props']['dossiers']['data'])->pluck('id')->all());
+
+        $soumis = $this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['etat_dossier' => 'soumis'])['props'];
+        $this->assertSame(['student'], collect($soumis['dossiers']['data'])->pluck('id')->all());
+        $this->assertContains('soumis', array_column($soumis['etatsDossier'], 'value'));
+        $this->assertSame(0, $this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['etat_dossier' => 'refuse'])['props']['dossiers']['total']);
+
+        // Valeur inconnue : filtre ignoré.
+        $inconnu = $this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['etat_dossier' => 'pirate'])['props'];
+        $this->assertSame('', $inconnu['filters']['etat_dossier']);
+        $this->assertSame(2, $inconnu['dossiers']['total']);
     }
 
     public function test_traitement_d_une_demande_avec_droits_limites(): void
