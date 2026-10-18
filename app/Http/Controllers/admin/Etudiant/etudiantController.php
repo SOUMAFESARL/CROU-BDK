@@ -110,6 +110,7 @@ class etudiantController extends Controller
         ]);
         $identity = $request->validate(['telephone1'=>'nullable|string|max:30','numero_piece'=>'nullable|string|max:100']);
         $existing = app(\App\Http\Services\StudentIdentityResolver::class)->existingForAdmin($identity);
+        $this->ensureSameStudent($existing, $request->only('matricule', 'telephone1'));
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'genre_id' => ['required', 'integer', Rule::exists('genre', 'id')],
@@ -260,6 +261,21 @@ class etudiantController extends Controller
             ->with('success', 'Étudiant déjà logé enregistré : dossier validé et chambre confirmée.');
     }
 
+    /**
+     * L'étudiant existant est retrouvé par téléphone (ou pièce) : si le matricule saisi est différent,
+     * ce n'est pas la même personne (numéro réutilisé ou erroné) et on refuse plutôt que de rattacher le dossier à un autre étudiant.
+     */
+    private function ensureSameStudent(?Etudiant $existing, array $data): void
+    {
+        $normaliser = fn ($valeur) => mb_strtoupper(preg_replace('/[\s-]+/u', '', (string) $valeur));
+        $matricule = $normaliser($data['matricule'] ?? '');
+        if (!$existing || $matricule === '' || $normaliser($existing->matricule) === $matricule) {
+            return;
+        }
+        throw ValidationException::withMessages(['telephone1' => 'Le téléphone ' . ($data['telephone1'] ?? '')
+            . " est déjà utilisé par l'étudiant « {$existing->name} » (matricule {$existing->matricule}). Vérifiez le numéro de téléphone ou le matricule."]);
+    }
+
     /** En-têtes du modèle d'import, en français (les anciens en-têtes `name`/`telephone1` restent acceptés à l'import). */
     private const IMPORT_HEADERS = ['nom_prenoms', 'civilite', 'matricule', 'telephone', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree', 'numero_lit'];
 
@@ -394,11 +410,12 @@ class etudiantController extends Controller
             'G' => '=Campagnes',
             'H' => '=INDIRECT("BAT_"&MATCH($E2&"|"&$F2,Listes!$O$2:$O$1000,0))',
         ];
-        $sheet = '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' . $cols . '<sheetData>' . $sheetRows . '</sheetData><dataValidations count="' . (count($validations) + 1) . '">';
+        // Listes déroulantes à titre de suggestion uniquement : showErrorMessage="0" laisse saisir ou coller
+        // n'importe quelle valeur (le contrôle se fait côté serveur à l'import).
+        $sheet = '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' . $cols . '<sheetData>' . $sheetRows . '</sheetData><dataValidations count="' . count($validations) . '">';
         foreach ($validations as $column => $formula) {
-            $sheet .= '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="' . $column . '2:' . $column . '1000"><formula1>' . htmlspecialchars($formula, ENT_XML1) . '</formula1></dataValidation>';
+            $sheet .= '<dataValidation type="list" allowBlank="1" showErrorMessage="0" sqref="' . $column . '2:' . $column . '1000"><formula1>' . htmlspecialchars($formula, ENT_XML1) . '</formula1></dataValidation>';
         }
-        $sheet .= '<dataValidation type="whole" operator="greaterThanOrEqual" allowBlank="1" showErrorMessage="1" error="' . htmlspecialchars('Le numéro de lit doit être un entier positif.', ENT_XML1) . '" sqref="J2:J1000"><formula1>1</formula1></dataValidation>';
         $sheet .= '</dataValidations></worksheet>';
         $zip->addFromString('xl/worksheets/sheet1.xml', $sheet);
 
@@ -477,6 +494,7 @@ class etudiantController extends Controller
             try {
                 $data = $this->resolveImportReferences($data);
                 $existing = app(\App\Http\Services\StudentIdentityResolver::class)->existingForAdmin($data);
+                $this->ensureSameStudent($existing, $data);
             } catch (\Throwable $exception) {
                 $errors[] = 'Ligne ' . $line . ' : ' . \App\Support\UserFacingErrors::caught($exception);
                 continue;

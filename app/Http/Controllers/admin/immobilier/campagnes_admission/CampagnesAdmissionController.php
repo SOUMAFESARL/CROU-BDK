@@ -88,7 +88,8 @@ class CampagnesAdmissionController extends Controller
         $etat = in_array($filtre, self::FILTRES_ADMISSION, true) ? $filtre : 'residents';
         $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
         $repository = app(\App\Repositories\EtudiantRepository::class);
-        $campagne = app(CampagneValidationService::class)->getCampagneActive();
+        // Bandeau : campagne au statut « active » (comme la page Campagnes), pas celle de l'année universitaire.
+        $campagne = $this->campagneActive();
 
         return Inertia::render('Admin/Hebergement/Admissions/Index', [
             'dossiers' => $repository->getAdmissionsPage($etat, 10)->through(fn (Etudiant $etudiant) => [
@@ -336,12 +337,10 @@ class CampagnesAdmissionController extends Controller
         ];
     }
 
-    /** Campagne active servant de référence aux critères (liste vide si le service échoue). */
+    /** Campagne au statut « active » la plus récente : référence du bandeau et des critères d'éligibilité. */
     private function campagneActive(): ?Campagne
     {
-        $campagnes = $this->campagneService->getListeCampagnesWithStats('active')['data']['campagnes'] ?? null;
-
-        return $campagnes instanceof \Illuminate\Support\Collection ? $campagnes->first() : null;
+        return Campagne::where('statut', 'active')->orderByDesc('created_at')->first();
     }
 
     /** Suivi du dossier (équivalent admin du partiel `dossier-cycle`) : parcours, actions permises et historique. */

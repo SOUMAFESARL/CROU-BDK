@@ -146,6 +146,21 @@ class AdmissionImportTest extends \Tests\Support\DossierTestCase
             ->assertSessionHas('warning', fn (string $message) => str_contains($message, 'Ligne 3 : La chambre « 101 » n\'est plus disponible'));
     }
 
+    public function test_phone_already_used_by_another_student_is_reported_instead_of_reusing_his_record(): void
+    {
+        $this->import($this->csv("nom_prenoms;civilite;matricule;telephone;cite;batiment;campagne;chambre;date_entree;numero_lit\n"
+            . "Akesse Martin;Masculin;MAT040;0700000040;Cité Universitaire;Bâtiment A;2026-2027;101;01/10/2026;\n"))
+            ->assertSessionHas('success');
+
+        // Nouveau fichier : autre étudiant, autre matricule, mais même téléphone.
+        $this->import($this->csv("nom_prenoms;civilite;matricule;telephone;cite;batiment;campagne;chambre;date_entree;numero_lit\n"
+            . "Yao Jacques;Masculin;MAT041;0700000040;Cité Universitaire;Bâtiment A;2026-2027;101;01/10/2026;\n"))
+            ->assertSessionHas('warning', fn (string $message) => str_contains($message,
+                "Ligne 2 : Le téléphone 0700000040 est déjà utilisé par l'étudiant « Akesse Martin » (matricule MAT040)"));
+
+        $this->assertNull(Etudiant::where('matricule', 'MAT041')->first());
+    }
+
     public function test_missing_columns_are_listed_before_any_line_is_processed(): void
     {
         $this->import($this->csv("nom_prenoms;matricule\nKouassi;MAT030\n"))
