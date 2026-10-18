@@ -40,8 +40,12 @@ class EtudiantRequest extends FormRequest
             'cas_social' => 'nullable|string|max:500',
 
             // Situation géographique
-            'region' => 'required|exists:regions,id',
-            'ville' => 'required|exists:villes,id',
+            // Saisie libre possible (valeur absente des référentiels) : rattachée ou créée par ReferentielLibreService.
+            'region' => 'required_without:region_autre|nullable|exists:regions,id',
+            'region_autre' => 'nullable|string|max:150',
+            'ville' => 'required_without:ville_autre|nullable|exists:villes,id',
+            'ville_autre' => 'nullable|required_with:region_autre|string|max:150',
+            'filiere_autre' => 'nullable|string|max:150',
             'adresse' => 'required|string|max:255',
             'nationalite' => 'required|string|max:100',
             'distance' => 'sometimes',
@@ -85,6 +89,12 @@ class EtudiantRequest extends FormRequest
             'telephone.unique' => 'Un compte existe déjà. Connectez-vous à votre espace étudiant pour déposer une réadmission.',
             'region.required' => 'La région est obligatoire.',
             'ville.required' => 'La ville est obligatoire.',
+            'region.required_without' => 'La région est obligatoire.',
+            'ville.required_without' => 'La ville est obligatoire.',
+            'ville_autre.required_with' => 'Saisissez le nom de votre ville.',
+            'region_autre.max' => 'Le nom de la région ne doit pas dépasser 150 caractères.',
+            'ville_autre.max' => 'Le nom de la ville ne doit pas dépasser 150 caractères.',
+            'filiere_autre.max' => 'Le nom de la filière ne doit pas dépasser 150 caractères.',
             'adresse.required' => 'L\'adresse est obligatoire.',
             'nationalite.required' => 'La nationalité est obligatoire.',
             'type_piece.required' => 'Le type de piece est obligatoire.',
@@ -98,6 +108,12 @@ class EtudiantRequest extends FormRequest
 
 
         ];
+    }
+
+    /** Rattache ou crée la filière, la région et la ville saisies librement, une fois la requête validée. */
+    protected function passedValidation(): void
+    {
+        app(\App\Http\Services\ReferentielLibreService::class)->appliquer($this);
     }
 
     protected function prepareForValidation()

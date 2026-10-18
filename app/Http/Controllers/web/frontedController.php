@@ -9,8 +9,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\EtudiantRequest;
 use App\Http\Services\EtudiantService;
 use Illuminate\Http\Request;
+use App\Models\Campagne;
 use App\Models\Document;
 use App\Models\Region;
+use App\Models\Ville;
 use App\Models\TypeChambre;
 use App\Models\NiveauEtude;
 use App\Models\Filiere;
@@ -76,6 +78,8 @@ class  frontedController extends Controller
         return Inertia::render('Etudiant/Auth/Login', [
             'loginUrl' => route('login.etudiant'),
             'forgotUrl' => route('etudiant.password.request'),
+            // Lien vers le formulaire de demande, proposé uniquement pendant une période d'admission ouverte.
+            'registerUrl' => Campagne::admissionsOuvertes()->exists() ? route('etudiant.register') : null,
             'csrfToken' => csrf_token(),
             'oldEmail' => old('email'),
             'logoUrl' => asset('admin/assets/images/logos/crou_bdk.jpeg'),
@@ -84,26 +88,64 @@ class  frontedController extends Controller
         ]);
     }
 
-    public function create(){
-        $result = $this->campagneService->getListeCampagnesWithStats($this->etat );
-        return view('web.auth.register',$result);
-    }
+    /**
+     * Formulaire public de demande d'hébergement (nouvel étudiant), proposé pendant une période d'admission ouverte.
+     * L'envoi reste traité par postRegister() : les règles serveur ne changent pas.
+     */
+    public function register(): InertiaResponse
+    {
+        $campagne = Campagne::admissionsOuvertes()
+            ->with('documentCampagnes.documents')
+            ->orderByDesc('created_at')
+            ->first();
 
-    public function register(){
+        $options = fn ($items, string $cle = 'id') => $items
+            ->map(fn ($item) => ['id' => (string) $item->{$cle}, 'libelle' => (string) $item->name])
+            ->values();
 
-        $data =[
-           // "document" => Document::getAllDocuments(1),
-            "region" => Region::all(),
-            "type_chanbre" => TypeChambre::all(),
-            "niveau_etude" => NiveauEtude::all(),
-            "filiere" => Filiere::all(),
-            "genre" => Genre::all(),
-            "groupeSanguin" => groupeSanguin::all(),
-            "typePiece" => TypePiece::all(),
-            'result' => $this->campagneService->getListeCampagnesWithStats($this->etat )
-        ];
+        $documents = $campagne
+            ? $campagne->documentCampagnes
+                ->flatMap(fn ($lien) => $lien->documents)
+                ->unique('id_document')
+                ->sortBy('ordre_affiche')
+                ->map(fn (Document $document) => [
+                    'slug' => $document->slug,
+                    'nom' => $document->name,
+                    'requis' => (bool) $document->champs_requis,
+                    'formats' => collect(preg_split('/[\s,;|]+/', (string) $document->format_accepte))
+                        ->map(fn ($format) => strtolower(ltrim($format, '.')))
+                        ->filter()
+                        ->values(),
+                ])
+                ->values()
+            : [];
 
-        return view('web.auth.register',$data );
+        return Inertia::render('Etudiant/Auth/Demande', [
+            'campagne' => $campagne ? [
+                'id' => $campagne->id_campagne,
+                'annee' => $campagne->annee_campagne,
+                'dateLimite' => $campagne->periode_fin ? \Illuminate\Support\Carbon::parse($campagne->periode_fin)->format('d/m/Y') : null,
+            ] : null,
+            'documents' => $documents,
+            'genres' => $options(Genre::all()),
+            'typesPiece' => $options(TypePiece::all()),
+            'groupesSanguins' => $options(groupeSanguin::all()),
+            'niveaux' => $options(NiveauEtude::all(), 'id_niveau_etude'),
+            'filieres' => $options(Filiere::orderBy('name')->get(), 'id_filiere'),
+            'regions' => $options(Region::orderBy('name')->get()),
+            // Toutes les villes d'un coup : la liste admin/list/city est réservée aux administrateurs.
+            'villes' => Ville::orderBy('name')->get(['id', 'name', 'region_id'])
+                ->map(fn ($ville) => ['id' => (string) $ville->id, 'libelle' => (string) $ville->name, 'region' => (string) $ville->region_id])
+                ->values(),
+            'liens' => [
+                'envoyer' => route('register.post'),
+                'connexion' => route('etudiant.login'),
+                // Le compte est créé sans mot de passe : l'étudiant le définit via « Mot de passe oublié ».
+                'motDePasse' => route('etudiant.password.request'),
+            ],
+            'logoUrl' => asset('admin/assets/images/logos/crou_bdk.jpeg'),
+            'year' => now()->year,
+        ]);
     }
 
 

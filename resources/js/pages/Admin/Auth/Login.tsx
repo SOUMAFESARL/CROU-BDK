@@ -7,6 +7,7 @@ export default function Login(props: LoginPageProps) {
             subtitle="Accédez à votre espace administratif."
             emailPlaceholder="admin@crou.ci"
             storageKey="crou_admin_login_email"
+            withCaptcha={false}
         />
     );
 }

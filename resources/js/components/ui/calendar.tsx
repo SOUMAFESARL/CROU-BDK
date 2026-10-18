@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { DayPicker, getDefaultClassNames } from 'react-day-picker';
 import { fr } from 'react-day-picker/locale';
@@ -30,7 +30,14 @@ function Calendar({ className, classNames, showOutsideDays = true, ...props }: C
                     defaults.button_next,
                 ),
                 month_caption: cn('flex h-8 w-full items-center justify-center px-8', defaults.month_caption),
-                caption_label: cn('text-sm font-semibold text-gray-900 capitalize', defaults.caption_label),
+                caption_label: cn('flex items-center gap-1 text-sm font-semibold text-gray-900 capitalize [&>svg]:size-3.5 [&>svg]:text-muted', defaults.caption_label),
+                // Listes mois / année (captionLayout="dropdown") : le <select> natif, transparent, couvre le libellé.
+                dropdowns: cn('flex items-center gap-2', defaults.dropdowns),
+                dropdown_root: cn(
+                    'relative flex h-8 items-center rounded-brand border border-gray-300 px-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-soft',
+                    defaults.dropdown_root,
+                ),
+                dropdown: cn('absolute inset-0 cursor-pointer opacity-0', defaults.dropdown),
                 weekdays: cn('flex', defaults.weekdays),
                 weekday: cn('w-9 text-[0.75rem] font-normal text-muted capitalize', defaults.weekday),
                 week: cn('mt-1 flex w-full', defaults.week),
@@ -49,7 +56,9 @@ function Calendar({ className, classNames, showOutsideDays = true, ...props }: C
             }}
             components={{
                 Chevron: ({ orientation, className: chevronClass }) =>
-                    orientation === 'left' ? (
+                    orientation === 'down' ? (
+                        <ChevronDown className={cn('size-4', chevronClass)} aria-hidden />
+                    ) : orientation === 'left' ? (
                         <ChevronLeft className={cn('size-4', chevronClass)} aria-hidden />
                     ) : (
                         <ChevronRight className={cn('size-4', chevronClass)} aria-hidden />

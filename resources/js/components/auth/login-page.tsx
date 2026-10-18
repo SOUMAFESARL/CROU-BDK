@@ -1,6 +1,6 @@
 import { usePage } from '@inertiajs/react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Eye, EyeOff, KeyRound, Loader2, Lock, LogIn, Mail, RefreshCw } from 'lucide-react';
+import { Eye, EyeOff, FilePlus2, KeyRound, Loader2, Lock, LogIn, Mail, RefreshCw } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
@@ -14,6 +14,8 @@ import type { SharedProps } from '@/types/global';
 export type LoginPageProps = {
     loginUrl: string;
     forgotUrl?: string | null;
+    /** Lien vers le formulaire de demande d'hébergement (null hors campagne ouverte). */
+    registerUrl?: string | null;
     csrfToken: string;
     oldEmail: string | null;
     logoUrl: string;
@@ -28,6 +30,8 @@ type LoginPageOptions = LoginPageProps & {
     /** Clé sessionStorage où l'e-mail saisi est conservé entre deux tentatives. */
     storageKey: string;
     buttonVariant?: 'primary' | 'accent';
+    /** Code de vérification affiché une fois l'e-mail et le mot de passe saisis. */
+    withCaptcha?: boolean;
     /** Contenu affiché sous le bouton de connexion (ex. lien d'inscription). */
     footer?: ReactNode;
 };
@@ -46,14 +50,17 @@ function readStoredEmail(storageKey: string) {
     }
 }
 
-const buildSchema = (captcha: string) =>
+const buildSchema = (captcha: string | null) =>
     z.object({
         email: z.string().trim().min(1, "L'adresse e-mail est obligatoire.").pipe(z.email('Adresse e-mail invalide.')),
         password: z.string().min(1, 'Le mot de passe est obligatoire.'),
-        captcha: z
-            .string()
-            .min(1, 'Recopiez le code de vérification.')
-            .refine((value) => value === captcha, 'Le code ne correspond pas. Respectez les majuscules.'),
+        captcha:
+            captcha === null
+                ? z.string()
+                : z
+                      .string()
+                      .min(1, 'Recopiez le code de vérification.')
+                      .refine((value) => value === captcha, 'Le code ne correspond pas. Respectez les majuscules.'),
     });
 
 type LoginValues = z.infer<ReturnType<typeof buildSchema>>;
@@ -61,6 +68,7 @@ type LoginValues = z.infer<ReturnType<typeof buildSchema>>;
 export function LoginPage({
     loginUrl,
     forgotUrl,
+    registerUrl,
     csrfToken,
     oldEmail,
     logoUrl,
@@ -70,6 +78,7 @@ export function LoginPage({
     emailPlaceholder,
     storageKey,
     buttonVariant = 'primary',
+    withCaptcha = true,
     footer,
 }: LoginPageOptions) {
     const { errors: serverErrors, flash } = usePage<SharedProps>().props;
@@ -80,7 +89,7 @@ export function LoginPage({
 
     const initialEmail = oldEmail || readStoredEmail(storageKey);
 
-    const schema = useMemo(() => buildSchema(captcha), [captcha]);
+    const schema = useMemo(() => buildSchema(withCaptcha ? captcha : null), [withCaptcha, captcha]);
     const {
         register,
         control,
@@ -101,7 +110,7 @@ export function LoginPage({
         control,
         name: ['email', 'password'],
     });
-    const captchaVisible = email.trim() !== '' && password !== '';
+    const captchaVisible = withCaptcha && email.trim() !== '' && password !== '';
 
     useEffect(() => {
         if (serverErrors.email) setError('email', { message: serverErrors.email });
@@ -192,6 +201,7 @@ export function LoginPage({
                 )}
 
                 {/* Captcha : déplié avec un zoom doux dès que les deux champs sont remplis */}
+                {withCaptcha && (
                 <div
                     inert={!captchaVisible}
                     aria-hidden={!captchaVisible}
@@ -233,12 +243,23 @@ export function LoginPage({
                         </div>
                     </div>
                 </div>
+                )}
 
                 <Button type="submit" variant={buttonVariant} className="w-full" disabled={submitting}>
                     {submitting ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
                     {submitting ? 'Connexion…' : 'Se connecter'}
                 </Button>
             </form>
+
+            {registerUrl && (
+                <div className="mt-6 rounded-brand border border-dashed border-secondary bg-soft px-4 py-3 text-center text-sm">
+                    <p className="text-muted">Une campagne d'admission est en cours.</p>
+                    <a href={registerUrl} className="mt-1 inline-flex items-center gap-1.5 font-semibold text-primary hover:underline">
+                        <FilePlus2 className="size-4" />
+                        Faire une demande d'hébergement
+                    </a>
+                </div>
+            )}
 
             {footer && <div className="mt-6 text-center text-sm text-muted">{footer}</div>}
         </AuthLayout>

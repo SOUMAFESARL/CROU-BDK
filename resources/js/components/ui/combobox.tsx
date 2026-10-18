@@ -24,6 +24,9 @@ type ComboboxProps = {
     invalid?: boolean;
     className?: string;
     onBlur?: () => void;
+    /** Saisie libre : propose « Ajouter … » quand le texte recherché n'est pas dans la liste. */
+    onCreate?: (texte: string) => void;
+    createLabel?: string;
 };
 
 /**
@@ -42,6 +45,8 @@ export function Combobox({
     invalid,
     className,
     onBlur,
+    onCreate,
+    createLabel = 'Ajouter',
 }: ComboboxProps) {
     const [open, setOpen] = useState(false);
     const [recherche, setRecherche] = useState('');
@@ -54,15 +59,23 @@ export function Combobox({
         return terme ? options.filter((option) => sansAccents(`${option.label} ${option.description ?? ''}`).includes(terme)) : options;
     }, [options, recherche]);
 
+    const saisie = recherche.trim();
+    const creation: ComboboxOption | null =
+        onCreate && saisie && !options.some((option) => sansAccents(option.label) === sansAccents(saisie))
+            ? { value: '__creation__', label: `${createLabel} « ${saisie} »` }
+            : null;
+    const affichees = creation ? [...filtrees, creation] : filtrees;
+
     const choisir = (option: ComboboxOption) => {
         if (option.disabled) return;
-        onChange(option.value);
+        if (option === creation) onCreate?.(saisie);
+        else onChange(option.value);
         setOpen(false);
     };
 
     const deplacer = (pas: number) => {
-        if (filtrees.length === 0) return;
-        const suivant = (actif + pas + filtrees.length) % filtrees.length;
+        if (affichees.length === 0) return;
+        const suivant = (actif + pas + affichees.length) % affichees.length;
         setActif(suivant);
         liste.current?.children[suivant]?.scrollIntoView({ block: 'nearest' });
     };
@@ -119,7 +132,7 @@ export function Combobox({
                                 deplacer(-1);
                             } else if (event.key === 'Enter') {
                                 event.preventDefault();
-                                const option = filtrees[actif];
+                                const option = affichees[actif];
                                 if (option) choisir(option);
                             }
                         }}
@@ -129,10 +142,10 @@ export function Combobox({
                     />
                 </div>
                 <ul ref={liste} role="listbox" className="max-h-64 overflow-y-auto p-1">
-                    {filtrees.length === 0 ? (
+                    {affichees.length === 0 ? (
                         <li className="px-3 py-6 text-center text-sm text-muted">{emptyMessage}</li>
                     ) : (
-                        filtrees.map((option, index) => {
+                        affichees.map((option, index) => {
                             const selectionnee = option.value === value;
                             return (
                                 <li
@@ -147,6 +160,7 @@ export function Combobox({
                                         index === actif && 'bg-soft text-primary',
                                         selectionnee && 'font-medium text-primary',
                                         option.disabled && 'cursor-not-allowed opacity-50',
+                                        option === creation && 'border-t font-medium text-primary',
                                     )}
                                 >
                                     <span className="truncate">{option.label}</span>

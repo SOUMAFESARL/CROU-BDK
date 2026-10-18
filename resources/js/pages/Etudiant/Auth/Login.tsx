@@ -8,6 +8,7 @@ export default function Login(props: LoginPageProps) {
             emailPlaceholder="etudiant@exemple.com"
             storageKey="crou_etudiant_login_email"
             buttonVariant="accent"
+            withCaptcha={false}
         />
     );
 }

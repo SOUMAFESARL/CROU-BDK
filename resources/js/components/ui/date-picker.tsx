@@ -14,6 +14,8 @@ type DatePickerProps = {
     min?: string;
     max?: string;
     invalid?: boolean;
+    /** Listes mois / année dans l'en-tête du calendrier (dates éloignées : naissance, expiration). */
+    listesMoisAnnee?: boolean;
     className?: string;
     'aria-label'?: string;
     'aria-describedby'?: string;
@@ -31,7 +33,7 @@ const toIso = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}
 const toDisplay = (date: Date) => `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 
 /** Sélecteur de date shadcn/ui (Popover + Calendar), affiché au format jj/mm/aaaa. */
-export function DatePicker({ id, value, onChange, placeholder = 'jj/mm/aaaa', min, max, invalid, className, ...props }: DatePickerProps) {
+export function DatePicker({ id, value, onChange, placeholder = 'jj/mm/aaaa', min, max, invalid, listesMoisAnnee, className, ...props }: DatePickerProps) {
     const [open, setOpen] = useState(false);
     const selected = parse(value);
     const fromDate = parse(min);
@@ -63,6 +65,11 @@ export function DatePicker({ id, value, onChange, placeholder = 'jj/mm/aaaa', mi
                     mode="single"
                     selected={selected}
                     defaultMonth={selected ?? toDate ?? fromDate}
+                    {...(listesMoisAnnee && {
+                        captionLayout: 'dropdown' as const,
+                        startMonth: fromDate ?? new Date(new Date().getFullYear() - 80, 0),
+                        endMonth: toDate ?? new Date(new Date().getFullYear() + 20, 11),
+                    })}
                     disabled={[...(fromDate ? [{ before: fromDate }] : []), ...(toDate ? [{ after: toDate }] : [])]}
                     onSelect={(date) => {
                         onChange(date ? toIso(date) : '');
