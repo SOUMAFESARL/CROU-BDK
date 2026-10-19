@@ -4,33 +4,59 @@ namespace App\Http\Controllers\admin\immobilier\parametrage\type_chambre;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Http\Controllers\admin\immobilier\parametrage\ReferentielInertia;
+use App\Models\Chambre;
 use App\Models\TypeChambre;
+use Inertia\Inertia;
 
 class TypeChambreController extends Controller
 {
+    use ReferentielInertia;
+
+    /** Équipements proposés à la case à cocher (mêmes libellés que l'ancien formulaire, clés du JSON `equipement`). */
+    public const EQUIPEMENTS = ['Chaise', 'Table', 'Courant', 'Eau', 'Cuisine', 'Placard', 'Matelas', 'Prise', 'Douche', 'WC', 'Climatiseur', 'Ventilateur'];
+
     /**
      * Afficher la liste des types de chambre
      */
-    public function index()
+    public function index(Request $request)
     {
-        $chambres = TypeChambre::orderBy('name', 'asc')->get();
+        $url = $this->urlSiAutorise($request);
+        $query = TypeChambre::query()->orderBy('name');
+        $q = $this->rechercher($request, $query);
+        // Seules les chambres numérotées sont des chambres réelles (les autres sont des gabarits de niveau).
+        $chambres = Chambre::query()->whereNotNull('numero_chambre')->selectRaw('type_chambre_id, count(*) as total')->groupBy('type_chambre_id')->pluck('total', 'type_chambre_id');
+        $total = TypeChambre::count();
 
-        // Transformer les données pour Alpine.js
-        $chambresData = $chambres->map(function ($chambre) {
-            return [
-                'id' => $chambre->id_type_chambre,
-                'nom' => $chambre->name ?? '—',
-                'description' => $chambre->description ?? '—',
-                'superficie' => $chambre->superficie ?? '—',
-                'equipement' => $chambre->equipement ?? '—',
-                'montant' => $chambre->montant ?? '0',
-                'avance' => $chambre->avance ?? '0',
-                'caution' => $chambre->caution ?? '0',
-            ];
-        });
-
-        return view('admin.hebergement.parametrage-herb.type-chambre.index', [
-            'chambresData' => $chambresData,
+        return Inertia::render('Admin/Hebergement/Parametrage/TypesChambre', [
+            'types' => $query->paginate(10)->withQueryString()->through(fn (TypeChambre $type) => [
+                'id' => (string) $type->id_type_chambre,
+                'name' => $type->name,
+                'description' => $type->description === '—' ? null : $type->description,
+                'superficie' => $type->superficie !== null ? (int) $type->superficie : null,
+                'montant' => (int) $type->montant,
+                'avance' => (int) $type->avance,
+                'caution' => (int) $type->caution,
+                // Stocké en JSON {"Chaise":"Chaise", …} : seules les clés cochées comptent.
+                'equipements' => array_values(array_keys(array_filter((array) (json_decode((string) $type->equipement, true) ?: [])))),
+                'chambres' => (int) ($chambres[$type->id_type_chambre] ?? 0),
+                'urls' => [
+                    'update' => $url('admin.hebergement.parametrage-herb.type-chambre.update', $type->id_type_chambre),
+                    'destroy' => $url('admin.hebergement.parametrage-herb.type-chambre.destroy', $type->id_type_chambre),
+                ],
+            ]),
+            'stats' => [
+                'total' => $total,
+                'chambres' => (int) $chambres->only(TypeChambre::pluck('id_type_chambre')->all())->sum(),
+                'loyer_min' => $total ? (int) TypeChambre::min('montant') : null,
+                'loyer_max' => $total ? (int) TypeChambre::max('montant') : null,
+            ],
+            'equipementsDisponibles' => self::EQUIPEMENTS,
+            'filters' => ['q' => $q],
+            'urls' => [
+                'index' => route('admin.hebergement.parametrage-herb.type-chambre.index'),
+                'store' => $url('admin.hebergement.parametrage-herb.type-chambre.store'),
+            ],
         ]);
     }
 

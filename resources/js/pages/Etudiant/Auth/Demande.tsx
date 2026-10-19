@@ -1,6 +1,6 @@
 import { Head, usePage } from '@inertiajs/react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, FileText, Info, KeyRound, Loader2, LogIn, Mail, Phone, Save, Send } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, FileText, Info, Loader2, LogIn, Mail, Phone, Save, Send } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { type Control, Controller, type FieldPath, useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -40,7 +40,7 @@ type DemandeProps = {
     filieres: Option[];
     regions: Option[];
     villes: (Option & { region: string })[];
-    liens: { envoyer: string; connexion: string; motDePasse: string };
+    liens: { envoyer: string; connexion: string };
     logoUrl: string;
     year: number;
 };
@@ -84,20 +84,7 @@ export default function Demande(props: DemandeProps) {
         contenu = (
             <Carte surtitre={`Campagne ${props.campagne.annee}`} titre="Demande enregistrée">
                 <Notice icone={CheckCircle2}>{flash.success}</Notice>
-                <p className="mt-3 text-sm text-muted">
-                    Suivez l’avancement de votre dossier depuis votre espace étudiant. Pour votre première connexion, créez votre mot de passe avec l’adresse e-mail saisie dans la
-                    demande.
-                </p>
-                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                    <a href={props.liens.motDePasse} className={cn(buttonVariants({ variant: 'accent' }), 'font-medium')}>
-                        <KeyRound {...ICON} />
-                        Créer mon mot de passe
-                    </a>
-                    <a href={props.liens.connexion} className={cn(buttonVariants({ variant: 'soft-accent' }), 'font-medium')}>
-                        <LogIn {...ICON} />
-                        Se connecter
-                    </a>
-                </div>
+                <p className="mt-3 text-sm text-muted">Vous pourrez suivre l’avancement de votre dossier depuis votre espace étudiant avec les identifiants reçus par e-mail.</p>
             </Carte>
         );
     } else if (!demarre) {
@@ -362,7 +349,7 @@ function Formulaire({
                         <Field id="dh-telephone" label="Téléphone" required error={errors.telephone?.message} hint="Numéro ivoirien, indicatif +225 facultatif.">
                             <Input id="dh-telephone" type="tel" inputMode="tel" autoComplete="tel" placeholder="Ex. : 07 00 00 00 00" icon={<Phone />} invalid={!!errors.telephone} {...register('telephone')} />
                         </Field>
-                        <Field id="dh-email" label="Adresse e-mail" required error={errors.email?.message} hint="Elle servira d’identifiant de connexion.">
+                        <Field id="dh-email" label="Adresse e-mail" required error={errors.email?.message} hint="Votre mot de passe y sera envoyé ; elle servira d’identifiant de connexion.">
                             <Input id="dh-email" type="email" autoComplete="email" placeholder="votre.email@exemple.com" icon={<Mail />} invalid={!!errors.email} {...register('email')} />
                         </Field>
                         <ChampListe control={control} name="type_piece" id="dh-type-piece" label="Type de pièce" options={typesPiece} placeholder="Choisir le type de pièce" erreur={errors.type_piece?.message} requis />

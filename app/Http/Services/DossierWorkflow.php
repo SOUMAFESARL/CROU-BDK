@@ -152,6 +152,10 @@ class DossierWorkflow
                     'cloture'=>'archivee',default=>'demande',
                 }]);
             }
+            // Le mot de passe de l'espace étudiant n'est créé et envoyé qu'au premier passage en « Éligible ».
+            if ($to==='eligible' && app(IdentifiantsEtudiant::class)->aEnvoyer($student)) {
+                DB::afterCommit(fn () => app(IdentifiantsEtudiant::class)->envoyer($student->fresh()));
+            }
             return $request->fresh();
         },3);
     }

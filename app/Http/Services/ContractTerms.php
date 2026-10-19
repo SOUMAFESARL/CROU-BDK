@@ -28,6 +28,33 @@ class ContractTerms
         'lieu_signature' => 'Abidjan',
         'bailleur_representant' => 'Le Directeur Général',
     ];
+    /** Libellés affichés dans le paramétrage de l'entrée (clés de DEFAULTS). */
+    public const LABELS = [
+        'duree' => 'Durée du contrat',
+        'charges_comprises' => 'Charges comprises',
+        'depot_garantie' => 'Dépôt de garantie',
+        'jour_paiement' => 'Jour de paiement du loyer',
+        'mode_paiement' => 'Mode de paiement',
+        'delai_retard' => 'Délai de retard toléré (jours)',
+        'delai_restituion' => 'Délai de restitution (jours)',
+        'heure_silence_debut' => 'Début des heures de silence',
+        'heure_silence_fin' => 'Fin des heures de silence',
+        'plage_visites' => 'Plage des visites',
+        'nb_nuitees' => 'Nuitées autorisées pour un invité',
+        'modalites_equipements' => 'Usage des équipements communs',
+        'conditions_internet' => 'Accès à Internet',
+        'fumeur_autorise' => 'Tabac',
+        'animaux_autorises' => 'Animaux',
+        'conditions_animaux' => 'Conditions pour les animaux',
+        'dispositions_diverses' => 'Dispositions diverses',
+        'mode_notification' => 'Mode de notification',
+        'delai_mise_demeure' => 'Délai de mise en demeure',
+        'juridiction' => 'Juridiction compétente',
+        'dispositions_complementaires' => 'Dispositions complémentaires',
+        'lieu_signature' => 'Lieu de signature',
+        'bailleur_representant' => 'Représentant du bailleur',
+    ];
+
     public function values(): array
     {
         return array_replace(self::DEFAULTS, array_intersect_key(HousingEntrySetting::options()['contract'] ?? [], self::DEFAULTS));

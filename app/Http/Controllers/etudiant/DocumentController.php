@@ -83,7 +83,7 @@ class DocumentController extends Controller
         $path = parse_url($stored, PHP_URL_PATH);
         $path = is_string($path) ? rawurldecode($path) : $path;
         abort_unless(is_string($path) && $path !== '', 404);
-        foreach ([public_path('admin/assets/images/etudiant-document'), storage_path('app/public')] as $root) {
+        foreach ([\App\Repositories\DocumentEtudiantRepository::dossierPieces(), public_path('admin/assets/images/etudiant-document'), storage_path('app/public')] as $root) {
             $root = realpath($root);
             if (!$root) continue;
             $relative = str_contains($path, '/etudiant-document/')

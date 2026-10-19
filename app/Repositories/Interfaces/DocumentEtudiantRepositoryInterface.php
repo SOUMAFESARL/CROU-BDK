@@ -8,7 +8,9 @@ use Illuminate\Support\Collection;
 
 interface DocumentEtudiantRepositoryInterface
 {
-    public function create(array $data): DocumentEtudiant;
+    public function create(array $data): ?DocumentEtudiant;
+    public function stockerPieces(array $datas): array;
+    public function enregistrerPieces(array $pieces, string $etudiantId, ?string $campagneId): ?DocumentEtudiant;
     public function update(string $id, array $data): DocumentEtudiant;
     public function find(string $id): ?DocumentEtudiant;
     public function delete(int $id): bool;

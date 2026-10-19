@@ -246,4 +246,20 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->postJson(route('admin.dossiers.transition',$dossier),['etat'=>'en_etude'])->assertForbidden();
         $this->assertSame('soumis',$dossier->fresh()->etat_dossier);
     }
+    public function test_credentials_are_sent_once_when_the_request_becomes_eligible(): void
+    {
+        Schema::table('etudiants', function (Blueprint $t) { $t->string('email1')->nullable(); $t->string('password')->nullable(); });
+        DB::table('etudiants')->where('id_etudiant','student')->update(['email1'=>'etudiant@example.com']);
+        \Illuminate\Support\Facades\Notification::fake();
+        $dossier=$this->dossier();
+        $this->workflow->admin($dossier->getKey(),'en_etude');
+        \Illuminate\Support\Facades\Notification::assertNothingSent();
+        $this->workflow->admin($dossier->getKey(),'eligible');
+        \Illuminate\Support\Facades\Notification::assertSentOnDemandTimes(\App\Notifications\EtudiantIdentifiantsNotification::class,1);
+        $this->assertNotNull(DB::table('etudiants')->where('id_etudiant','student')->value('password'));
+        // Un nouveau passage en « Éligible » ne remplace pas le mot de passe déjà transmis.
+        $this->workflow->admin($dossier->getKey(),'en_etude','Réexamen.');
+        $this->workflow->admin($dossier->getKey(),'eligible');
+        \Illuminate\Support\Facades\Notification::assertSentOnDemandTimes(\App\Notifications\EtudiantIdentifiantsNotification::class,1);
+    }
 }

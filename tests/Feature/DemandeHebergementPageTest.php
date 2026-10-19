@@ -5,7 +5,12 @@ namespace Tests\Feature;
 use App\Http\Middleware\EnforceSystemSecurity;
 use App\Http\Middleware\LogUserActivity;
 use Illuminate\Database\Schema\Blueprint;
+use App\Http\Controllers\web\frontedController;
+use App\Models\Etudiant;
+use App\Notifications\EtudiantIdentifiantsNotification;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -135,5 +140,59 @@ class DemandeHebergementPageTest extends TestCase
 
         $this->assertNull($props['campagne']);
         $this->assertSame([], $props['documents']);
+    }
+
+    public function test_le_serveur_exige_les_pieces_obligatoires_dans_le_bon_format(): void
+    {
+        $this->campagneOuverte();
+        Schema::create('etudiants', function (Blueprint $t) {
+            $t->string('id_etudiant')->primary();
+            $t->string('email1')->nullable();
+            $t->string('telephone1')->nullable();
+            $t->string('numero_piece')->nullable();
+            $t->string('matricule')->nullable();
+        });
+        $this->withoutMiddleware([EnforceSystemSecurity::class, LogUserActivity::class, \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class]);
+
+        $this->from('/register')->post('/register', [
+            'id_campagne' => 'c1',
+            'cmu' => \Illuminate\Http\UploadedFile::fake()->create('cmu.txt', 10, 'text/plain'),
+        ])->assertSessionHasErrors([
+            'extrait-de-naissance' => 'Le document Extrait de naissance est obligatoire.',
+            'cmu' => 'Le document CMU doit être au format pdf, jpg.',
+        ]);
+
+        $this->from('/register')->post('/register', [
+            'id_campagne' => 'c1',
+            'extrait-de-naissance' => \Illuminate\Http\UploadedFile::fake()->create('extrait.pdf', 3000, 'application/pdf'),
+        ])->assertSessionHasErrors(['extrait-de-naissance' => 'Le document Extrait de naissance ne doit pas dépasser 2 Mo.'])
+            ->assertSessionDoesntHaveErrors('cmu');
+    }
+
+    public function test_le_mot_de_passe_est_envoye_a_l_email_saisi_dans_la_demande(): void
+    {
+        Notification::fake();
+        Schema::create('etudiants', function (Blueprint $t) {
+            $t->string('id_etudiant')->primary();
+            $t->string('email1');
+            $t->string('password')->nullable();
+            $t->timestamps();
+            $t->softDeletes();
+        });
+        DB::table('etudiants')->insert(['id_etudiant' => 'e1', 'email1' => 'aya@exemple.com']);
+        $etudiant = Etudiant::findOrFail('e1');
+
+        $message = (new \ReflectionMethod(frontedController::class, 'envoyerIdentifiants'))->invoke(app(frontedController::class), $etudiant);
+
+        $this->assertStringContainsString('aya@exemple.com', $message);
+        $motDePasse = null;
+        Notification::assertSentOnDemand(EtudiantIdentifiantsNotification::class, function ($notification, $canaux, $destinataire) use (&$motDePasse) {
+            $ligne = collect($notification->toMail($destinataire)->introLines)->first(fn ($ligne) => str_starts_with($ligne, 'Mot de passe : '));
+            $motDePasse = substr((string) $ligne, strlen('Mot de passe : '));
+
+            return $destinataire->routes['mail'] === 'aya@exemple.com';
+        });
+        $this->assertNotSame('', $motDePasse);
+        $this->assertTrue(Hash::check($motDePasse, $etudiant->fresh()->password));
     }
 }

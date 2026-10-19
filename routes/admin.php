@@ -397,9 +397,11 @@ Route::middleware(['admin'])->group(function () {
         ->name('hebergement.parametrage-herb.')
         ->group(function () {
 
-            // Route pour la page d'accueil du paramétrage (vue statique)
-            Route::get('/', function () {
-                return view('admin.hebergement.parametrage-herb.index');
+            // Accueil du paramétrage : rubriques et modules accessibles (App\Services\ParametrageHebergement).
+            Route::get('/', function (\Illuminate\Http\Request $request) {
+                return \Inertia\Inertia::render('Admin/Hebergement/Parametrage/Index', [
+                    'sections' => app(\App\Services\ParametrageHebergement::class)->accueil($request->user('admin')),
+                ]);
             })->name('index');
 
             // ROUTE TYPE CITE

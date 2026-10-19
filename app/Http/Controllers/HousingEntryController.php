@@ -1,6 +1,7 @@
 <?php
 namespace App\Http\Controllers;
 use App\Models\{HousingEntrySetting,HousingEntryMessage,HousingEntryAppointment,StudentContractApproval};
+use App\Services\AdminAccess;
 use App\Services\EtudiantMaintenance;
 use Inertia\Inertia;
 use App\Http\Services\ContractTerms;
@@ -15,11 +16,37 @@ class HousingEntryController extends Controller
     public function settings()
     {
         $this->authorizeSettings();
-        return view('admin.hebergement.entry-settings',[
-            'options'=>HousingEntrySetting::current()->values,
-            'terms'=>app(ContractTerms::class)->values(),
-            'appointments'=>HousingEntryAppointment::with('student')->latest('starts_at')->paginate(20),
+        $options=HousingEntrySetting::current()->values;
+        $access=app(AdminAccess::class);
+        $admin=auth('admin')->user();
+        $url=fn(string $route)=>$access->allows($admin,$route) ? route($route) : null;
+        return Inertia::render('Admin/Hebergement/Parametrage/EntreeLogement',[
+            'options'=>[
+                'enabled'=>(bool)($options['enabled'] ?? false),
+                'proposal_hours'=>(int)($options['proposal_hours'] ?? 72),
+                'appointments_enabled'=>(bool)($options['appointments_enabled'] ?? false),
+                'start_date'=>(string)($options['start_date'] ?? ''),
+                'weekdays'=>array_values(array_map('intval',(array)($options['weekdays'] ?? []))),
+                'opening_time'=>(string)($options['opening_time'] ?? ''),
+                'closing_time'=>(string)($options['closing_time'] ?? ''),
+                'slot_minutes'=>(int)($options['slot_minutes'] ?? 30),
+                'capacity'=>(int)($options['capacity'] ?? 1),
+                'lead_hours'=>(int)($options['lead_hours'] ?? 24),
+                'location'=>(string)($options['location'] ?? ''),
+            ],
+            'terms'=>collect(app(ContractTerms::class)->values())
+                ->map(fn($value,$key)=>['key'=>$key,'label'=>ContractTerms::LABELS[$key] ?? ucfirst(str_replace('_',' ',$key)),'value'=>(string)$value])
+                ->values(),
+            'appointments'=>HousingEntryAppointment::with('student')->latest('starts_at')->paginate(10)->through(fn($appointment)=>[
+                'id'=>$appointment->getKey(),
+                'etudiant'=>$appointment->student?->name,
+                'date'=>$appointment->starts_at?->format('d/m/Y H:i'),
+                'lieu'=>$appointment->location,
+                'statut'=>$appointment->status==='scheduled' ? 'programme' : 'annule',
+            ]),
             'failed'=>HousingEntryMessage::where('status','failed')->count(),
+            'timezone'=>config('app.timezone'),
+            'urls'=>['update'=>$url('admin.housing-entry.update'),'retry'=>$url('admin.housing-entry.retry')],
         ]);
     }
     public function update(Request $request)

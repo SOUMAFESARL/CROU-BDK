@@ -6,6 +6,9 @@ use App\Rules\Etudiant;
 
 class EtudiantRequest extends FormRequest
 {
+    /** Documents de la campagne visée, chargés une seule fois (règles + messages). */
+    private $documentsCampagne = null;
+
     public function authorize()
     {
         return true; // À modifier selon vos besoins d'autorisation
@@ -56,10 +59,48 @@ class EtudiantRequest extends FormRequest
        //     'type_chambre' => 'nullable|exists:type_chambre,id_type_chambre',
         ];
 
-        //dd($rules);
+        // Pièces jointes de la campagne, envoyées sous le slug du document.
+        // Les pièces obligatoires ne sont exigées que sur le formulaire web : le contrat de l'API mobile reste inchangé.
+        $exigerPieces = $this->routeIs('register.post');
+        foreach ($this->documentsCampagne() as $document) {
+            $rules[$document->slug] = [
+                $exigerPieces && $document->champs_requis ? 'required' : 'nullable',
+                'file',
+                'max:2048',
+                'mimes:'.implode(',', $this->formatsAcceptes($document)),
+            ];
+        }
 
         return $rules;
     }
+
+    /** @return \Illuminate\Support\Collection<int, \App\Models\Document> */
+    private function documentsCampagne()
+    {
+        if (! is_string($this->id_campagne) || $this->id_campagne === '') {
+            return collect();
+        }
+
+        return $this->documentsCampagne ??= \App\Models\DocumentCampagne::with('documents')
+            ->where('id_campagne', $this->id_campagne)
+            ->get()
+            ->flatMap(fn ($lien) => $lien->documents)
+            ->unique('id_document')
+            ->values();
+    }
+
+    /** Formats déclarés sur le document, limités à PDF/JPG/PNG (ceux que le stockage accepte). */
+    private function formatsAcceptes(\App\Models\Document $document): array
+    {
+        $formats = collect(preg_split('/[\s,;|]+/', (string) $document->format_accepte))
+            ->map(fn ($format) => strtolower(ltrim($format, '.')))
+            ->intersect(['pdf', 'jpg', 'jpeg', 'png'])
+            ->values()
+            ->all();
+
+        return $formats ?: ['pdf', 'jpg', 'jpeg', 'png'];
+    }
+
 
     public function withValidator($validator): void
     {
@@ -104,7 +145,14 @@ class EtudiantRequest extends FormRequest
             'matricule.required' => 'Le numero matricule est obligatoire.',
             'id_campagne.required' => 'L\'identifiant de la campagne est obligatoire.',
             'annee_academique_actuel.required' => 'L\' annee academique actuel est obligatoire.',
-
+            // Pièces jointes de la campagne.
+            ...$this->documentsCampagne()->flatMap(fn ($document) => [
+                $document->slug.'.required' => "Le document {$document->name} est obligatoire.",
+                $document->slug.'.file' => "Le document {$document->name} n’a pas été reçu correctement. Sélectionnez-le de nouveau.",
+                $document->slug.'.uploaded' => "Le document {$document->name} n’a pas pu être envoyé (2 Mo maximum).",
+                $document->slug.'.max' => "Le document {$document->name} ne doit pas dépasser 2 Mo.",
+                $document->slug.'.mimes' => "Le document {$document->name} doit être au format :values.",
+            ])->all(),
 
 
         ];

@@ -30,6 +30,8 @@ use App\Http\Requests\DocumentEtudiantRequest;
 use App\Http\Services\CampagneService;
 
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\DB;
+use App\Repositories\DocumentEtudiantRepository;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
 use Illuminate\Support\Facades\Auth;
@@ -140,8 +142,6 @@ class  frontedController extends Controller
             'liens' => [
                 'envoyer' => route('register.post'),
                 'connexion' => route('etudiant.login'),
-                // Le compte est créé sans mot de passe : l'étudiant le définit via « Mot de passe oublié ».
-                'motDePasse' => route('etudiant.password.request'),
             ],
             'logoUrl' => asset('admin/assets/images/logos/crou_bdk.jpeg'),
             'year' => now()->year,
@@ -206,36 +206,42 @@ class  frontedController extends Controller
 
   public function postRegister(EtudiantRequest $request)
 {
+    $documents = app()->make(DocumentEtudiantRepositoryInterface::class);
+
+    // Les pièces sont copiées sur disque avant toute écriture en base : si l'une d'elles n'est pas reçue,
+    // aucun compte n'est créé et l'erreur s'affiche sous le document concerné.
+    $pieces = $documents->stockerPieces($request->allFiles());
+
     try {
         $etudiantService = new EtudiantService(
             app()->make(EtudiantRepositoryInterface::class),
             app()->make(CampagneValidationService::class)
         );
 
+        DB::beginTransaction();
+
         $result = $etudiantService->creerDossier($request);
 
         if (!$result['success']) {
-            return back()->withInput()->with('error', $result['message']);
+            throw new \DomainException($result['message']);
         }
 
         $demandeService = new DemandeService(
             app()->make(DemandeRepositoryInterface::class)
         );
 
-        $documentService = new DocumentEtudiantService(
-            app()->make(DocumentEtudiantRepositoryInterface::class)
-        );
-
         $requestData = $request->all();
         $requestData['id_etudiant'] = $result['data']['id_etudiant'];
 
-        $demandeRequest  = new DemandeRequest();
-        $documentRequest = new DocumentEtudiantRequest();
+        $demandeRequest = new DemandeRequest();
         $demandeRequest->merge($requestData);
-        $documentRequest->merge($requestData);
 
-        $demande  = $demandeService->creerDemande($demandeRequest);
-        $document = $documentService->uploadDocument($documentRequest);
+        $demande = $demandeService->creerDemande($demandeRequest);
+        if (! ($demande['success'] ?? false)) {
+            throw new \DomainException($demande['message'] ?? 'La demande n’a pas pu être enregistrée.');
+        }
+
+        $documents->enregistrerPieces($pieces, $result['data']['id_etudiant'], $request->id_campagne);
 
         // --- Vérification automatique de l'éligibilité (documents non bloquants) ---
         $finalisation = $etudiantService->finaliserInscriptionAutomatique(
@@ -243,17 +249,49 @@ class  frontedController extends Controller
             $demande['data']['id_demande'] ?? null
         );
 
-        $type = ($finalisation['success'] ?? false) ? 'success' : 'error';
+        if (! ($finalisation['success'] ?? false)) {
+            throw new \DomainException($finalisation['message']);
+        }
 
-        return back()->with($type, $finalisation['message']);
+        DB::commit();
+
+        return back()->with('success', $finalisation['message'].' '.$this->envoyerIdentifiants($result['data'], $finalisation['data']['etat_dossier'] ?? null));
 
     } catch (\Exception $e) {
+        DB::rollBack();
+        DocumentEtudiantRepository::supprimerFichiers($pieces);
+        if ($e instanceof \Illuminate\Validation\ValidationException) {
+            throw $e;
+        }
+        if ($e instanceof \DomainException) {
+            return back()->withInput()->with('error', $e->getMessage());
+        }
         return back()
             ->withInput()
             ->with('error', 'Une erreur inattendue est survenue : ' . \App\Support\UserFacingErrors::caught($e));
     }
 }
 
+    /**
+     * Le mot de passe est envoyé à l'e-mail saisi à l'étape « Identité » quand le dossier devient « Éligible »
+     * (`DossierWorkflow`). Seul un brouillon le reçoit dès l'inscription, l'étudiant devant se connecter pour le soumettre.
+     * Retourne la phrase ajoutée au message de confirmation.
+     */
+    private function envoyerIdentifiants(\App\Models\Etudiant $etudiant, ?string $etatDossier): string
+    {
+        if ($etatDossier !== 'brouillon') {
+            return "Vos identifiants de connexion vous seront envoyés à {$etudiant->email1} dès que votre dossier sera déclaré éligible.";
+        }
+
+        $envoye = app(\App\Http\Services\IdentifiantsEtudiant::class)->envoyer(
+            $etudiant->refresh(),
+            'Votre brouillon de demande d’hébergement a bien été enregistré. Voici vos identifiants pour le compléter et le soumettre depuis l’espace étudiant :',
+        );
+
+        return $envoye
+            ? "Votre mot de passe a été envoyé à {$etudiant->email1}. Pensez à vérifier vos courriers indésirables."
+            : "Vos identifiants n’ont pas pu être envoyés à {$etudiant->email1} pour le moment : contactez le service Logement du CROU.";
+    }
 
     public function authenticateEtudiant(Request $request): RedirectResponse
     {

@@ -2,8 +2,10 @@
 namespace App\Http\Controllers\admin\immobilier\parametrage\scoring_campagne;
 use App\Http\Controllers\Controller;
 use App\Http\Services\CampaignScoringService;
-use App\Models\{Campagne, CampaignScoring};
+use App\Models\{Campagne, CampaignScoring, User};
+use App\Services\{AdminAccess, ParametrageHebergement};
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 class ScoringCampagneController extends Controller
@@ -14,9 +16,28 @@ class ScoringCampagneController extends Controller
         $campagne=$campagnes->first(fn($c)=>(string)$c->getKey()===(string)$selected);
         abort_if($selected && !$campagne,404);
         $history=$campagne?CampaignScoring::where('campagne_id',$campagne->getKey())->latest('id')->limit(10)->get():collect();
-        return view('admin.hebergement.parametrage-herb.scoring-campagne.index',[
-            'campagnes'=>$campagnes,'campagne'=>$campagne,'scoring'=>$history->first(),'history'=>$history,
+        $scoring=$history->first();
+        $access=app(AdminAccess::class);
+        $ids=$history->pluck('created_by')->filter()->unique();
+        $auteurs=$ids->isEmpty() ? collect() : User::whereIn('id_user',$ids)->pluck('name','id_user');
+        return Inertia::render('Admin/Hebergement/Parametrage/Scoring',[
+            'campagnes'=>app(ParametrageHebergement::class)->options($campagnes),
+            'campagneId'=>$campagne ? (string)$campagne->getKey() : null,
+            // Dernière version enregistrée ; sans version, la page propose les valeurs d'exemple de l'ancien formulaire.
+            'scoring'=>$scoring ? [
+                'weights'=>$scoring->weights,'points'=>$scoring->points,'minimum_score'=>(float)$scoring->minimum_score,
+                'pmr_first'=>(bool)$scoring->pmr_first,'active'=>(bool)$scoring->active,
+            ] : null,
+            'history'=>$history->map(fn(CampaignScoring $version)=>[
+                'id'=>$version->id,'date'=>$version->created_at?->format('d/m/Y H:i'),'active'=>(bool)$version->active,
+                'minimum_score'=>(float)$version->minimum_score,'auteur'=>$auteurs[$version->created_by] ?? $version->created_by,
+            ])->values(),
             'groups'=>CampaignScoringService::GROUPS,'fields'=>CampaignScoringService::FIELDS,
+            'urls'=>[
+                'index'=>route('admin.hebergement.parametrage-herb.scoring-campagne.index'),
+                'store'=>$access->allows($request->user('admin'),'admin.hebergement.parametrage-herb.scoring-campagne.store')
+                    ? route('admin.hebergement.parametrage-herb.scoring-campagne.store') : null,
+            ],
         ]);
     }
     public function store(Request $request) {

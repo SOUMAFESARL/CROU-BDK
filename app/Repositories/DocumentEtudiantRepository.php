@@ -10,9 +10,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Document;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\ValidationException;
 
 class DocumentEtudiantRepository implements DocumentEtudiantRepositoryInterface
 {
+    /** Formats acceptés pour les pièces d’un dossier. */
+    private const EXTENSIONS = ['pdf', 'jpg', 'png'];
+
     protected $model;
 
     public function __construct(DocumentEtudiant $document)
@@ -20,63 +25,113 @@ class DocumentEtudiantRepository implements DocumentEtudiantRepositoryInterface
         $this->model = $document;
     }
 
-    public function create(array $datas): DocumentEtudiant
+    /**
+     * Enregistre les pièces jointes reçues (clé = slug du document) et crée une ligne par fichier.
+     * Un fichier illisible ou d'un format refusé fait échouer l'enregistrement : aucune pièce n'est perdue en silence.
+     */
+    public function create(array $datas): ?DocumentEtudiant
     {
+        $pieces = $this->stockerPieces($datas);
+
         try {
-            //dd($datas['id_etudiant']);
-            DB::beginTransaction();
-
-            $liste = Document::getAllDocuments(1);
-
-            if (!$liste->isEmpty()) {
-
-                foreach ($liste as $documents) {
-
-
-                    if (isset($datas[$documents->slug])  && !empty($datas[$documents->slug]) ) {
-
-
-                        $image = upload( 'etudiant-document',  'pdf', $datas, $documents->slug);
-
-                     $data =[
-                         'chemin_fichier'=> $image,
-                         'extension' => $documents->extension ?? 'pdf',
-                         'type_document'=> $documents->name,
-                         'etudiant_id'=> $datas['id_etudiant'],
-                         'taille_octets' => getFileSizeFromUrl($image),
-                         'id_campagne' =>  $datas['id_campagne'],
-
-                     ];
-
-                    }
-                    //dd($data);
-                    $document = DocumentEtudiant::create($data);
-
-
-                }
-
-
-            }
-            // Gestion du fichier si présent
-
-
-
-
-
-
-            DB::commit();
-
-
-
-            return $document;
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Erreur lors de la création du document', [
-                'error' => $e->getMessage(),
-                'data' => $data
-            ]);
+            return $this->enregistrerPieces($pieces, $datas['id_etudiant'], $datas['id_campagne'] ?? null);
+        } catch (\Throwable $e) {
+            self::supprimerFichiers($pieces);
             throw $e;
         }
+    }
+
+    /**
+     * Copie sur disque les fichiers reçus pour des documents connus, dans le dossier public historique
+     * admin/assets/images/etudiant-document (servi tel quel, que la racine web soit public/ ou la racine du projet).
+     * Si un fichier est refusé, ceux déjà copiés sont supprimés et une erreur est levée sous le slug du document.
+     *
+     * @return array<int, array{fichier: string, chemin_fichier: string, extension: string, taille_octets: int, type_document: string}>
+     */
+    public function stockerPieces(array $datas): array
+    {
+        $fichiers = collect($datas)->filter(fn ($valeur) => $valeur instanceof UploadedFile);
+        if ($fichiers->isEmpty()) {
+            return [];
+        }
+
+        $types = Document::whereIn('slug', $fichiers->keys()->all())->get()->keyBy('slug');
+        $dossier = self::dossierPieces();
+        $pieces = [];
+
+        try {
+            foreach ($fichiers as $slug => $fichier) {
+                $type = $types->get($slug);
+                if (! $type) {
+                    continue;
+                }
+                // Extension déduite du contenu, jamais du nom envoyé par le client.
+                $extension = $fichier->isValid() ? strtolower((string) $fichier->guessExtension()) : '';
+                $extension = $extension === 'jpeg' ? 'jpg' : $extension;
+                if (! in_array($extension, self::EXTENSIONS, true)) {
+                    throw ValidationException::withMessages([
+                        $slug => "Le document {$type->name} n’a pas été reçu correctement (PDF, JPG ou PNG attendu).",
+                    ]);
+                }
+
+                $taille = (int) $fichier->getSize();
+                $nom = uniqid('', true).'.'.$extension;
+                try {
+                    $fichier->move($dossier, $nom);
+                } catch (\Throwable $e) {
+                    report($e);
+                    throw ValidationException::withMessages([
+                        $slug => "Le document {$type->name} n’a pas pu être enregistré. Réessayez.",
+                    ]);
+                }
+
+                $pieces[] = [
+                    'fichier' => $dossier.'/'.$nom,
+                    'chemin_fichier' => url('admin/assets/images/etudiant-document/'.$nom),
+                    'extension' => $extension,
+                    'taille_octets' => $taille,
+                    'type_document' => $type->name,
+                ];
+            }
+        } catch (\Throwable $e) {
+            self::supprimerFichiers($pieces);
+            throw $e;
+        }
+
+        return $pieces;
+    }
+
+    /** Crée une ligne document_etudiant par pièce déjà stockée ; retourne la dernière. */
+    public function enregistrerPieces(array $pieces, string $etudiantId, ?string $campagneId): ?DocumentEtudiant
+    {
+        return DB::transaction(function () use ($pieces, $etudiantId, $campagneId) {
+            $document = null;
+            foreach ($pieces as $piece) {
+                $document = DocumentEtudiant::create([
+                    ...collect($piece)->except('fichier')->all(),
+                    'etudiant_id' => $etudiantId,
+                    'id_campagne' => $campagneId,
+                ]);
+            }
+
+            return $document;
+        });
+    }
+
+    /** Supprime du disque des pièces stockées dont l'enregistrement a échoué. */
+    public static function supprimerFichiers(array $pieces): void
+    {
+        foreach ($pieces as $piece) {
+            if (is_file($piece['fichier'])) {
+                @unlink($piece['fichier']);
+            }
+        }
+    }
+
+    /** Dossier physique des pièces : celui du contrôleur frontal, comme l'ancien helper upload(). */
+    public static function dossierPieces(): string
+    {
+        return rtrim(config('student_documents.upload_root') ?: getcwd(), '/\\').'/admin/assets/images/etudiant-document';
     }
 
     public function update(string $id, array $data): DocumentEtudiant
