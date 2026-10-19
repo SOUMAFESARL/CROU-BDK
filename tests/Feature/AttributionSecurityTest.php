@@ -27,6 +27,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
             $dossier=$this->dossier($student);
             $this->workflow->admin($dossier->getKey(),'en_etude');
             $this->workflow->admin($dossier->getKey(),'eligible');
+            $this->confirm($student);
         }
     }
     protected function allocate(string $student = 'student', ?string $room = 'room'): ?AssignationChambre
@@ -91,7 +92,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
             $this->assertStringContainsString('PMR', $e->getMessage());
         }
         DB::table('etudiants')->where('id_etudiant', 'student')->update(['pmr_confirme' => true]);
-        $this->assertSame('en_attente', $this->allocate()->statut);
+        $this->assertSame('confirmee', $this->allocate()->statut);
     }
 
     public function test_sex_restrictions_apply_at_each_level(): void
@@ -132,7 +133,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
 
     public function test_confirmation_does_not_count_its_own_reservation_twice(): void
     {
-        $assignment = $this->allocate();
+        $assignment = $this->reserver();
         Model::withoutEvents(fn () => $this->confirmAccepted($assignment->getKey()));
         $this->assertSame('confirmee', $assignment->fresh()->statut);
         $this->assertSame('occupee', Chambre::findOrFail('room')->etat);
@@ -142,7 +143,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
 
     public function test_confirmation_rechecks_rules(): void
     {
-        $assignment = $this->allocate();
+        $assignment = $this->reserver();
         DB::table('chambre')->update(['statut' => 'desactive']);
         $this->expectException(ValidationException::class);
         $this->confirmAccepted($assignment->getKey());
@@ -150,7 +151,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
 
     public function test_failed_reassignment_keeps_the_original_reservation(): void
     {
-        $assignment = $this->allocate();
+        $assignment = $this->reserver();
         $this->room('blocked', ['etat' => 'maintenance']);
         try {
             $this->service->reaffecterChambre(Etudiant::findOrFail('student'), Chambre::findOrFail('blocked'), Campagne::findOrFail('campaign'));
@@ -164,7 +165,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
 
     public function test_cancellation_releases_a_place_without_clearing_maintenance(): void
     {
-        $assignment = $this->allocate();
+        $assignment = $this->reserver();
         DB::table('chambre')->update(['etat' => 'maintenance']);
         $this->service->annulerAssignation($assignment->getKey());
         $room = Chambre::findOrFail('room');
@@ -174,7 +175,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
 
     public function test_expired_reservations_do_not_block_a_new_assignment(): void
     {
-        $assignment = $this->allocate();
+        $assignment = $this->reserver();
         DB::table('assignation_chambres')->update(['date_fin' => now()->subMinute()]);
         $this->assertNotNull($this->allocate('other'));
         $this->expectException(\Exception::class);
@@ -214,8 +215,8 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
     public function test_multiple_room_accepts_only_its_remaining_capacity(): void
     {
         DB::table('chambre')->update(['capacite_max' => 2]);
-        $first = $this->allocate();
-        $second = $this->allocate('other');
+        $first = $this->reserver();
+        $second = $this->reserver('other');
         Model::withoutEvents(fn () => $this->confirmAccepted($first->getKey()));
         $this->assertSame(0, Chambre::findOrFail('room')->getNombrePlacesDisponibles());
         Model::withoutEvents(fn () => $this->confirmAccepted($second->getKey()));
@@ -309,7 +310,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
     {
         foreach (['reservee', 'maintenance', 'hors_service', 'fermee'] as $etat) {
             DB::table('chambre')->update(['etat' => 'disponible']);
-            $assignment = $this->allocate();
+            $assignment = $this->reserver();
             DB::table('chambre')->update(['etat' => $etat]);
             $this->service->annulerAssignation($assignment->getKey());
             $this->assertSame($etat, Chambre::findOrFail('room')->etat);
@@ -319,7 +320,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
 
     public function test_technical_blocks_prevent_confirmation_without_losing_reservation(): void
     {
-        $assignment = $this->allocate();
+        $assignment = $this->reserver();
         foreach (['maintenance', 'hors_service', 'fermee'] as $etat) {
             DB::table('chambre')->update(['etat' => $etat]);
             try {
@@ -333,7 +334,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
 
     public function test_existing_reservation_can_be_confirmed_without_clearing_manual_room_reservation(): void
     {
-        $assignment = $this->allocate();
+        $assignment = $this->reserver();
         DB::table('chambre')->update(['etat' => 'reservee']);
         Model::withoutEvents(fn () => $this->confirmAccepted($assignment->getKey()));
         $this->assertSame('confirmee', $assignment->fresh()->statut);
@@ -354,7 +355,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
         } catch (ValidationException $e) {
             $this->assertSame('disponible', Chambre::findOrFail('room')->etat);
         }
-        $assignment = $this->allocate();
+        $assignment = $this->reserver();
         $service->modifier('room', ['etat' => 'hors_service']);
         try {
             $service->modifier('room', ['etat' => 'disponible']);
@@ -389,8 +390,8 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
     public function test_automatic_bed_choice_and_cancellation_reuse(): void
     {
         DB::table('chambre')->update(['capacite_max' => 2]);
-        $first = $this->allocate();
-        $second = $this->allocate('other');
+        $first = $this->reserver();
+        $second = $this->reserver('other');
         $this->assertSame(1, $first->lit->numero);
         $this->assertSame(2, $second->lit->numero);
         $this->service->annulerAssignation($first->getKey());
@@ -431,8 +432,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
     public function test_confirmation_keeps_the_chosen_bed(): void
     {
         DB::table('chambre')->update(['capacite_max' => 2]);
-        $assignment = $this->service->allocateChambre(Etudiant::findOrFail('student'),
-            Campagne::findOrFail('campaign'), Chambre::findOrFail('room'), 2);
+        $assignment = $this->reserver('student', 'room', 2);
         Model::withoutEvents(fn () => $this->confirmAccepted($assignment->getKey()));
         $this->assertSame(2, $assignment->fresh()->lit->numero);
         $this->assertSame('confirmee', $assignment->fresh()->statut);
@@ -472,7 +472,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
 
     public function test_disciplinary_expulsion_cancels_a_reservation_and_releases_its_bed(): void
     {
-        $reservation = $this->allocate();
+        $reservation = $this->reserver();
         $sanction = new \App\Models\Sanction(['id_sanction'=>'expulsion', 'numero_sanction'=>'SAN-TEST',
             'scope_type'=>'etudiant', 'etudiant_id'=>'student', 'type'=>'expulsion', 'statut'=>'active']);
         DB::transaction(fn () => app(\App\Http\Services\DisciplinaryImpactService::class)->synchroniser($sanction, 'agent'));

@@ -254,14 +254,21 @@ protected $etudiantService;
     {
         $student = request()->attributes->get('student') ?? auth('etudiant')->user();
         abort_unless($student && (string)$student->getKey()===(string)$id,403);
-        $target=match($data['action']??null){'accepter'=>'accepte','refuser'=>'refuse',default=>null};
+        // Dossier éligible : l'étudiant confirme (ou refuse) son intérêt ; pré-attribué : il répond à la proposition.
+        $consentement = \App\Models\DemandeEtudiant::whereKey($demande_id)->value('etat_dossier') === 'eligible';
+        $target=match($data['action']??null){'accepter'=>$consentement ? 'confirme' : 'accepte','refuser'=>'refuse',default=>null};
         if (!$target) return ['success'=>false,'message'=>'Action invalide.'];
         try {
             app(DossierWorkflow::class)->transition($demande_id,$target,'etudiant',$id,
-                $target==='refuse' ? ($data['motif_refus']??null) : 'Proposition de chambre acceptée par l’étudiant.', ['assignation_id'=>$data['assignation_id']??null]);
-            return ['success'=>true,'message'=>$target==='accepte'
-                ? 'Proposition acceptée. La validation définitive relève du service Logement.'
-                : 'Proposition refusée.'];
+                $target==='refuse' ? ($data['motif_refus']??null)
+                    : ($consentement ? 'Demande d’hébergement confirmée par l’étudiant.' : 'Proposition de chambre acceptée par l’étudiant.'),
+                ['assignation_id'=>$data['assignation_id']??null]);
+            return ['success'=>true,'message'=>match(true) {
+                $target==='confirme' => 'Demande confirmée. Une chambre vous sera attribuée par le service Logement.',
+                $target==='accepte' => 'Proposition acceptée. La validation définitive relève du service Logement.',
+                $consentement => 'Demande refusée. Vous ne serez pas logé(e) pour cette campagne.',
+                default => 'Proposition refusée.',
+            }];
         } catch (\Illuminate\Validation\ValidationException $e) {
             return ['success'=>false,'message'=>implode(' ',\Illuminate\Support\Arr::flatten($e->errors()))];
         }
@@ -289,7 +296,7 @@ protected $etudiantService;
                     'etat_dossier' => $etudiant->derniereDemande?->etat_dossier,
                     'date_inscription' => $etudiant->date_inscription,
                     'date_validation_etudiant' => $etudiant->date_validation_etudiant ?? null,
-                    'est_validable' => $etudiant->derniereDemande?->etat_dossier === 'pre_attribue',
+                    'est_validable' => in_array($etudiant->derniereDemande?->etat_dossier, ['eligible', 'pre_attribue'], true),
                     'motif_refus' => $etudiant->motif_refus ?? null,
                 ]
             ];
@@ -349,7 +356,7 @@ protected $etudiantService;
                         ->where('statut', 'valide')
                         ->count(),
                     'total_documents' => count($etudiant->documents),
-                    'peut_valider' => $derniereDemande?->etat_dossier === 'pre_attribue',
+                    'peut_valider' => in_array($derniereDemande?->etat_dossier, ['eligible', 'pre_attribue'], true),
                     'etat_dossier' => $derniereDemande?->etat_dossier,
                 ]
             ];

@@ -47,10 +47,12 @@ type StatCardProps = {
     /** Contenu complémentaire sous la valeur (barre de progression…). */
     children?: ReactNode;
     className?: string;
+    /** Valeur en texte réduit (dates longues, ex. tableau de bord étudiant). */
+    compact?: boolean;
 };
 
 /** Carte KPI compacte et teintée, utilisée en tête des pages d’administration. */
-export function StatCard({ label, value, tone, extra, highlight = false, children, className }: StatCardProps) {
+export function StatCard({ label, value, tone, extra, highlight = false, children, className, compact = false }: StatCardProps) {
     const colors = KPI_TONES[tone];
 
     return (
@@ -58,7 +60,7 @@ export function StatCard({ label, value, tone, extra, highlight = false, childre
             <div className="flex w-full min-w-0 flex-col gap-2">
                 <small className="block truncate text-xs leading-4 font-medium">{label}</small>
                 <div className="flex items-center gap-2">
-                    <strong className="text-lg leading-5 font-bold tabular-nums">{value}</strong>
+                    <strong className={cn('tabular-nums', compact ? 'text-sm leading-5 font-medium' : 'text-lg leading-5 font-bold')}>{value}</strong>
                     {extra && (
                         <span
                             className={cn(

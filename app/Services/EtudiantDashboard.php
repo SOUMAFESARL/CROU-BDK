@@ -15,6 +15,18 @@ use Illuminate\Support\Collection;
  */
 class EtudiantDashboard
 {
+    /**
+     * Étapes de la frise « Progression du traitement » : Soumission, Étude du dossier, Vérification,
+     * Attribution, Validation. Nombre d'étapes franchies selon l'état du dossier (DossierWorkflow) :
+     * l'étude n'est terminée qu'à « Éligible », la vérification commence avec la confirmation de l'étudiant.
+     */
+    public const ETAPES_FRANCHIES = [
+        'soumis' => 1, 'incomplet' => 1, 'en_etude' => 1,
+        'eligible' => 2, 'confirme' => 3,
+        'pre_attribue' => 4, 'accepte' => 4,
+        'attribue_definitif' => 5, 'cloture' => 5,
+    ];
+
     /** Statuts legacy de la demande (synchronisés par DossierWorkflow) : libellé et teinte du KPI. */
     private const STATUTS = [
         'Acceptée' => ['Acceptée', 'green'],
@@ -144,6 +156,7 @@ class EtudiantDashboard
         $total = $documents->count();
         $valides = $documents->where('statut', 'valide')->count();
         $echeance = $campagne?->date_echeance_demande ? Carbon::parse($campagne->date_echeance_demande) : null;
+        $etapes = self::ETAPES_FRANCHIES[$demande?->etat_dossier] ?? 0;
 
         return [
             'existe' => (bool) $demande,
@@ -155,7 +168,9 @@ class EtudiantDashboard
             'echeanceIso' => $echeance?->copy()->endOfDay()->toIso8601String(),
             'moyenne' => $demande?->moyenne,
             'residenceSouhaitee' => $demande?->preference_residence,
-            'progression' => $total > 0 ? (int) round($valides / $total * 100) : 0,
+            'progression' => (int) round($etapes / 5 * 100),
+            'etapesFranchies' => $etapes,
+            'documentsPourcentage' => $total > 0 ? (int) round($valides / $total * 100) : 0,
             'documentsValides' => $valides,
             'documents' => $documents->map(fn ($document) => [
                 'id' => (string) $document->getKey(),
@@ -168,11 +183,22 @@ class EtudiantDashboard
     }
 
     /**
-     * Réponse à la proposition de chambre : seulement à l'état `pre_attribue`, avec la pré-attribution
-     * exigée par DossierWorkflow (`assignation_id`), comme le vérifie AcceptOrRefuseDemande.
+     * Réponse attendue de l'étudiant, vérifiée par AcceptOrRefuseDemande :
+     * - `consentement` : dossier `eligible`, l'étudiant confirme (ou refuse) qu'il souhaite toujours être logé ;
+     * - `proposition` : dossier `pre_attribue` (ancien parcours), avec la pré-attribution exigée par DossierWorkflow.
      */
     public function decision($demande, ?Campagne $campagne): ?array
     {
+        if ($demande && $demande->etat_dossier === 'eligible') {
+            return [
+                'type' => 'consentement',
+                'url' => route('etudiants.validation-demande', ['idDemande' => $demande->getKey()]),
+                'assignationId' => null,
+                'chambre' => null,
+                'annee' => $campagne?->annee_campagne,
+                'limite' => null,
+            ];
+        }
         if (! $demande || $demande->etat_dossier !== 'pre_attribue' || ! $demande->assignation_id) {
             return null;
         }
@@ -180,6 +206,7 @@ class EtudiantDashboard
         $chambre = $proposition?->chambre;
 
         return [
+            'type' => 'proposition',
             'url' => route('etudiants.validation-demande', ['idDemande' => $demande->getKey()]),
             'assignationId' => (string) $demande->assignation_id,
             'chambre' => $chambre

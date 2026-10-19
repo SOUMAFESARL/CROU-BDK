@@ -182,7 +182,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
                             href: urls.filtres.nouvelles_demandes,
                             extra: campagneActive ? `Campagne ${campagneActive.annee}` : 'Demandes reçues',
                         },
-                        { key: 'en_attente', label: 'En attente', value: nombre(stats.en_attente), tone: 'amber', href: urls.filtres.en_attente, extra: 'Campagnes précédentes' },
+                        { key: 'en_attente', label: 'En attente', value: nombre(stats.en_attente), tone: 'amber', href: urls.filtres.en_attente, extra: 'Confirmation de l’étudiant' },
                         { key: 'annuler', label: 'Demandes rejetées', value: nombre(stats.annulees), tone: 'plum', href: urls.filtres.annuler, extra: 'Refusées' },
                     ]}
                 />

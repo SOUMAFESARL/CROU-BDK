@@ -22,7 +22,7 @@ class CandidateRankingService
             $request = $student->demandes->where('campagne_id', $campaign->getKey())
                 ->sort(fn ($a, $b) => strcmp((string)$b->created_at, (string)$a->created_at)
                     ?: strcmp((string)$b->getKey(), (string)$a->getKey()))->first();
-            if (!$request || $request->etat_dossier !== 'eligible') continue;
+            if (!$request || $request->etat_dossier !== 'confirme') continue;
             $student->setRelation('derniereDemande', $request);
             if ($configured) {
                 $scoring = app(CampaignScoringService::class)->calculate($student, $request, $config);

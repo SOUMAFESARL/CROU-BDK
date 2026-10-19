@@ -56,21 +56,47 @@ class StudentRequestsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNull($dossier['decision']);
     }
 
-    public function test_pre_allocated_dossier_exposes_proposal_answer_and_history(): void
+    public function test_eligible_dossier_asks_the_student_to_confirm_and_keeps_history(): void
     {
         $dossier = $this->eligibleRequest();
-        $assignment = $this->allocate();
-        $this->assertSame('pre_attribue', $dossier->fresh()->etat_dossier);
+
+        $props = $this->props()['dossier'];
+
+        $this->assertSame('eligible', $props['etat']['code']);
+        $this->assertSame([], $props['actions']);
+        $this->assertSame('consentement', $props['decision']['type']);
+        $this->assertNull($props['decision']['assignationId']);
+        $this->assertSame(route('etudiants.validation-demande', ['idDemande' => $dossier->getKey()]), $props['decision']['url']);
+        $this->assertNull($props['proposition']);
+        $this->assertSame(['fait', 'fait', 'en_cours', 'a_venir', 'a_venir'], array_column($props['etapes'], 'statut'));
+        $this->assertSame('Critères vérifiés.', collect($props['historique'])->firstWhere('etat', 'Éligible')['motif']);
+    }
+
+    public function test_pre_allocated_dossier_of_the_former_journey_exposes_proposal_answer(): void
+    {
+        $dossier = $this->eligibleRequest();
+        $assignment = $this->reserver();
 
         $props = $this->props()['dossier'];
 
         $this->assertSame('pre_attribue', $props['etat']['code']);
-        $this->assertSame([], $props['actions']);
+        $this->assertSame('proposition', $props['decision']['type']);
         $this->assertSame((string) $assignment->getKey(), $props['decision']['assignationId']);
         $this->assertSame(route('etudiants.validation-demande', ['idDemande' => $dossier->getKey()]), $props['decision']['url']);
         $this->assertStringContainsString('Chambre room', $props['proposition']['chambre']);
-        $this->assertSame(['fait', 'fait', 'fait', 'en_cours', 'a_venir', 'a_venir'], array_column($props['etapes'], 'statut'));
-        $this->assertSame('Critères vérifiés.', collect($props['historique'])->firstWhere('etat', 'Éligible')['motif']);
+    }
+
+    public function test_confirmed_then_allocated_dossier_is_definitive(): void
+    {
+        $this->eligibleRequest();
+        $this->allocate();
+
+        $props = $this->props()['dossier'];
+
+        $this->assertSame('attribue_definitif', $props['etat']['code']);
+        $this->assertNull($props['decision']);
+        $this->assertStringContainsString('Chambre room', $props['proposition']['chambre']);
+        $this->assertSame(['fait', 'fait', 'fait', 'fait', 'fait'], array_column($props['etapes'], 'statut'));
     }
 
     public function test_departure_form_needs_an_active_room_and_no_pending_request(): void

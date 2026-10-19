@@ -24,7 +24,7 @@ type Resident = {
     personnel: { telephone: string | null; adresse: string | null; region: string | null; ville: string | null; date_naissance: string | null } | null;
     demandes: number | null;
     chambre: { numero: string | null; lieu: string | null } | null;
-    urls: { dossier: string | null; traiter: string | null; contrat: string | null; modifier: string | null };
+    urls: { dossier: string | null; traiter: string | null; attribuer: string | null; contrat: string | null; modifier: string | null };
     /** Valeurs du formulaire de modification (envoyées seulement avec le droit de modifier). */
     edition: ValeursEtudiant | null;
 };
@@ -149,6 +149,7 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
             className: 'text-right',
             cell: (r) => (
                 <RowActions>
+                    {r.urls.attribuer && <RowAction label="Attribuer une chambre" icon={BedDouble} href={r.urls.attribuer} tone="success" />}
                     {r.urls.traiter && <RowAction label="Traiter la demande" icon={ClipboardCheck} href={r.urls.traiter} tone="success" />}
                     {r.urls.modifier && r.edition && <RowAction label="Modifier les informations" icon={Pencil} onClick={() => setEnEdition(r)} tone="edit" />}
                     {r.urls.contrat && <RowAction label="Consulter le contrat (PDF)" icon={FileText} href={r.urls.contrat} newTab />}

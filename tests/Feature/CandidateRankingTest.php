@@ -32,7 +32,7 @@ class CandidateRankingTest extends TestCase
         $s=\Mockery::mock(Etudiant::class)->makePartial();
         $s->fill(['id_etudiant'=>$id,'name'=>$id]);
         $s->shouldReceive('getAnneeEtude')->andReturn('L1');
-        $request=new DemandeEtudiant(['id_demande'=>'request-'.$id,'campagne_id'=>'campaign','statut_demande'=>'En_verification','etat_dossier'=>'eligible','date_demande'=>$date,'created_at'=>$date]);
+        $request=new DemandeEtudiant(['id_demande'=>'request-'.$id,'campagne_id'=>'campaign','statut_demande'=>'En_verification','etat_dossier'=>'confirme','date_demande'=>$date,'created_at'=>$date]);
         $s->setRelation('demandes',collect([$request]));
         return $s;
     }
@@ -52,7 +52,7 @@ class CandidateRankingTest extends TestCase
     }
     public function test_other_campaign_requests_do_not_change_the_score_context(): void {
         $s=$this->student('a',100);
-        $s->demandes->push(new DemandeEtudiant(['id_demande'=>'other','campagne_id'=>'other','statut_demande'=>'En_verification','etat_dossier'=>'eligible','created_at'=>'2027-01-01']));
+        $s->demandes->push(new DemandeEtudiant(['id_demande'=>'other','campagne_id'=>'other','statut_demande'=>'En_verification','etat_dossier'=>'confirme','created_at'=>'2027-01-01']));
         $ranked=app(CandidateRankingService::class)->rank(collect([$s]),$this->campaign);
         $this->assertSame('request-a',$ranked->first()['demande_id']);
     }

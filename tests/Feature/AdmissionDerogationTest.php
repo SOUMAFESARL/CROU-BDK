@@ -64,7 +64,8 @@ class AdmissionDerogationTest extends TestCase
         $exception = $this->service->request($this->actor('requester', 1), 'student', 'request', 'Situation exceptionnelle');
         $this->assertSame('demande', Etudiant::findOrFail('student')->statut_inscription);
         Model::withoutEvents(fn () => $this->service->decide($this->actor('approver', 3), $exception->id, true, 'Décision motivée'));
-        $this->assertSame('en_verification', Etudiant::findOrFail('student')->statut_inscription);
+        // Éligible : en attente de la confirmation de l'étudiant.
+        $this->assertSame('en_attente', Etudiant::findOrFail('student')->statut_inscription);
         $this->assertSame('approved', $exception->fresh()->status);
         $this->assertSame('approver', $exception->fresh()->decided_by);
         $this->assertSame('Distance', $exception->fresh()->eligibility['regles'][0]['label']);

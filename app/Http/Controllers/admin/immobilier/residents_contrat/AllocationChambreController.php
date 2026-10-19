@@ -43,8 +43,8 @@ class AllocationChambreController extends Controller
     {
         $campagnes = Campagne::where('statut', '!=', 'annulee')
             ->withCount([
-                // Dossiers éligibles qui attendent une proposition de chambre.
-                'demandes as dossiers_eligibles_count' => fn ($q) => $q->where('etat_dossier', 'eligible'),
+                // Dossiers confirmés par l'étudiant qui attendent une chambre.
+                'demandes as dossiers_eligibles_count' => fn ($q) => $q->where('etat_dossier', 'confirme'),
                 'assignations as propositions_count' => fn ($q) => $q->where('statut', 'en_attente'),
                 'assignations as confirmees_count' => fn ($q) => $q->where('statut', 'confirmee'),
             ])

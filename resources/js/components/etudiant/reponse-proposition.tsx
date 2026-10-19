@@ -12,9 +12,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
 import { cn } from '@/lib/utils';
 
+/**
+ * `consentement` : dossier éligible, l'étudiant confirme (ou refuse) qu'il souhaite toujours être logé ;
+ * `proposition` : chambre pré-attribuée (ancien parcours) à accepter ou refuser.
+ */
 export type Proposition = {
+    type: 'consentement' | 'proposition';
     url: string;
-    assignationId: string;
+    assignationId: string | null;
     chambre: string | null;
     annee: string | null;
     limite: string | null;
@@ -29,16 +34,17 @@ const refusSchema = z.object({
 
 type Refus = z.infer<typeof refusSchema>;
 
-/** Boutons « Accepter l'offre » / « Refuser » et leurs fenêtres de confirmation. */
+/** Boutons « Accepter l'offre » (ou « Confirmer ma demande ») / « Refuser » et leurs fenêtres de confirmation. */
 export function ReponseProposition({ proposition }: { proposition: Proposition }) {
     const [ouverte, setOuverte] = useState<'accepter' | 'refuser' | null>(null);
+    const consentement = proposition.type === 'consentement';
 
     return (
         <>
             <div className="flex flex-col gap-2 sm:flex-row">
                 <Button onClick={() => setOuverte('accepter')} className="font-medium">
                     <CircleCheck {...ICON} />
-                    Accepter l’offre
+                    {consentement ? 'Confirmer ma demande' : 'Accepter l’offre'}
                 </Button>
                 <Button variant="outline" onClick={() => setOuverte('refuser')} className="font-medium text-red-700 hover:bg-red-50">
                     <CircleX {...ICON} />
@@ -76,6 +82,7 @@ type DialogProps = { proposition: Proposition; ouverte: boolean; fermer: () => v
 
 function Acceptation({ proposition, ouverte, fermer }: DialogProps) {
     const [envoi, setEnvoi] = useState(false);
+    const consentement = proposition.type === 'consentement';
 
     const accepter = async () => {
         setEnvoi(true);
@@ -88,9 +95,11 @@ function Acceptation({ proposition, ouverte, fermer }: DialogProps) {
         <Dialog open={ouverte} onOpenChange={(valeur) => !valeur && !envoi && fermer()}>
             <DialogContent className="max-w-lg">
                 <DialogHeader>
-                    <DialogTitle>Accepter la proposition</DialogTitle>
+                    <DialogTitle>{consentement ? 'Confirmer ma demande' : 'Accepter la proposition'}</DialogTitle>
                     <DialogDescription>
-                        Vous confirmez votre résidence pour l’année académique {proposition.annee ?? 'en cours'}. La validation définitive relève du service Logement.
+                        {consentement
+                            ? `Vous confirmez souhaiter être logé(e) pour l’année académique ${proposition.annee ?? 'en cours'}. Le service Logement vous attribuera ensuite une chambre.`
+                            : `Vous confirmez votre résidence pour l’année académique ${proposition.annee ?? 'en cours'}. La validation définitive relève du service Logement.`}
                     </DialogDescription>
                 </DialogHeader>
                 <DialogBody>
@@ -102,7 +111,7 @@ function Acceptation({ proposition, ouverte, fermer }: DialogProps) {
                     </Button>
                     <Button onClick={accepter} disabled={envoi} className="font-medium">
                         {envoi ? <Loader2 {...ICON} className="animate-spin" /> : <CircleCheck {...ICON} />}
-                        Confirmer l’acceptation
+                        {consentement ? 'Confirmer' : 'Confirmer l’acceptation'}
                     </Button>
                 </DialogFooter>
             </DialogContent>
@@ -120,6 +129,7 @@ function RefusDialog({ proposition, ouverte, fermer }: DialogProps) {
         formState: { errors, isSubmitting },
     } = useForm<Refus>({ resolver: zodResolver(refusSchema), defaultValues: { motif_refus: '' }, mode: 'onTouched' });
     const longueur = watch('motif_refus').length;
+    const consentement = proposition.type === 'consentement';
 
     const fermerEtVider = () => {
         reset();
@@ -140,12 +150,14 @@ function RefusDialog({ proposition, ouverte, fermer }: DialogProps) {
             <DialogContent className="max-w-lg">
                 <form onSubmit={refuser} noValidate className="flex min-h-0 flex-col">
                     <DialogHeader>
-                        <DialogTitle>Refuser la proposition</DialogTitle>
-                        <DialogDescription>Indiquez pourquoi vous refusez la chambre proposée.</DialogDescription>
+                        <DialogTitle>{consentement ? 'Refuser l’hébergement' : 'Refuser la proposition'}</DialogTitle>
+                        <DialogDescription>
+                            {consentement ? 'Indiquez pourquoi vous ne souhaitez plus être logé(e).' : 'Indiquez pourquoi vous refusez la chambre proposée.'}
+                        </DialogDescription>
                     </DialogHeader>
                     <DialogBody className="flex flex-col gap-4">
                         <Notice icone={TriangleAlert} className="bg-amber-50 text-amber-800">
-                            En refusant cette offre, vous ne recevrez pas d’hébergement pour cette année académique.
+                            En refusant, vous ne recevrez pas d’hébergement pour cette année académique.
                         </Notice>
                         <Details proposition={proposition} />
                         <Field
@@ -163,7 +175,7 @@ function RefusDialog({ proposition, ouverte, fermer }: DialogProps) {
                                 id="motif_refus"
                                 rows={4}
                                 maxLength={MAX_MOTIF}
-                                placeholder="Expliquez pourquoi vous refusez cette offre…"
+                                placeholder="Expliquez pourquoi vous refusez…"
                                 invalid={!!errors.motif_refus}
                                 aria-describedby={errors.motif_refus ? 'motif_refus-error' : 'motif_refus-hint'}
                                 {...register('motif_refus')}

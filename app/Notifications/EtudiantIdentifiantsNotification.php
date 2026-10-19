@@ -12,7 +12,7 @@ class EtudiantIdentifiantsNotification extends Notification
         private readonly string $email,
         private readonly string $motDePasse,
         private readonly string $urlConnexion,
-        private readonly string $introduction = 'Votre demande d’hébergement a été jugée éligible. Voici vos identifiants pour suivre votre dossier depuis l’espace étudiant :',
+        private readonly string $introduction = 'Votre demande d’hébergement a été jugée éligible. Connectez-vous à l’espace étudiant pour confirmer que vous souhaitez toujours être logé(e) (ou refuser) ; une chambre ne vous sera attribuée qu’après cette confirmation. Vos identifiants :',
     ) {
     }
 

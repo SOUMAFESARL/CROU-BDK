@@ -6,7 +6,8 @@
         ? ['en_etude','incomplet','eligible','refuse','annule']
         : (in_array($dossier->etat_dossier,['brouillon','incomplet'],true) ? ['soumis','annule']
             : ($dossier->etat_dossier === 'soumis' ? ['annule']
-            : ($dossier->etat_dossier === 'pre_attribue' ? ['accepte','refuse'] : [])));
+            : ($dossier->etat_dossier === 'eligible' ? ['confirme','refuse']
+            : ($dossier->etat_dossier === 'pre_attribue' ? ['accepte','refuse'] : []))));
     $actions = array_intersect($next, $allowed);
     if (($mode ?? 'student') === 'admin' && !app(\App\Services\AdminAccess::class)->allows(auth('admin')->user(), 'admin.dossiers.transition')) {
         $actions = [];
@@ -17,7 +18,7 @@
     <div class="card-body">
         <h3>Suivi du dossier</h3>
         <p>État actuel : <strong>{{ $labels[$dossier->etat_dossier] ?? $dossier->etat_dossier }}</strong></p>
-        <p class="text-muted">Brouillon → Soumis → En étude → Éligible → Pré-attribué → Accepté par l’étudiant → Attribué définitif.</p>
+        <p class="text-muted">Brouillon → Soumis → En étude → Éligible → Confirmé par l’étudiant → Attribué définitif.</p>
         @if($proposal && in_array($dossier->etat_dossier,['pre_attribue','accepte','attribue_definitif'],true))
             <p>Proposition : chambre <strong>{{ $proposal->chambre?->numero_chambre ?? $proposal->chambre_id }}</strong>
                 @if($proposal->date_fin) — valable jusqu’au {{ $proposal->date_fin->format('d/m/Y H:i') }} @endif

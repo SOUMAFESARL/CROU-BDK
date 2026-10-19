@@ -20,7 +20,7 @@ use Tests\TestCase;
 
 class DossierWorkflowTest extends \Tests\Support\DossierTestCase
 {
-    public function test_full_cycle_requires_student_acceptance_before_final_confirmation(): void
+    public function test_full_cycle_requires_student_confirmation_before_definitive_allocation(): void
     {
         $dossier=$this->dossier('student',true);
         $this->assertSame('brouillon',$dossier->etat_dossier);
@@ -29,19 +29,83 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->workflow->transition($dossier->getKey(),'soumis','etudiant','student','Certificat ajouté.');
         $this->workflow->admin($dossier->getKey(),'en_etude','Pièces reçues.');
         $this->workflow->admin($dossier->getKey(),'eligible');
+        // Éligible : liste « En attente » tant que l'étudiant n'a pas confirmé.
+        $this->assertSame('en_attente',Etudiant::findOrFail('student')->statut_inscription);
+        try {
+            $this->service->allocateChambre(Etudiant::findOrFail('student'),Campagne::findOrFail('campaign'),Chambre::findOrFail('room'));
+            $this->fail('Attribution sans confirmation de l’étudiant');
+        } catch (ValidationException $e) { $this->assertArrayHasKey('etat_dossier',$e->errors()); }
+        $this->assertDatabaseCount('assignation_chambres',0);
+        $this->confirm();
+        // Confirmé : liste « En vérification », prêt pour l'attribution.
+        $this->assertSame('confirme',$dossier->fresh()->etat_dossier);
+        $this->assertSame('en_verification',Etudiant::findOrFail('student')->statut_inscription);
         $assignment=$this->allocate();
-        $this->assertSame('pre_attribue',$dossier->fresh()->etat_dossier);
-        try { $this->service->confirmerAssignation($assignment->getKey()); $this->fail('Acceptation ignorée'); }
-        catch (ValidationException $e) { $this->assertArrayHasKey('etat_dossier',$e->errors()); }
-        $this->assertSame('en_attente',$assignment->fresh()->statut);
-        $this->accept($dossier,$assignment);
-        $this->service->confirmerAssignation($assignment->getKey());
         $this->assertSame('attribue_definitif',$dossier->fresh()->etat_dossier);
+        $this->assertSame($assignment->getKey(),$dossier->fresh()->assignation_id);
         $this->assertSame('confirmee',$assignment->fresh()->statut);
+        $this->assertNull($assignment->fresh()->date_fin);
         $this->assertSame('residents',Etudiant::findOrFail('student')->statut_inscription);
-        $this->assertSame(['brouillon','soumis','incomplet','soumis','en_etude','eligible','pre_attribue','accepte','attribue_definitif'],
+        $this->assertSame(['brouillon','soumis','incomplet','soumis','en_etude','eligible','confirme','attribue_definitif'],
             $dossier->transitions()->pluck('nouvel_etat')->all());
-        $this->assertDatabaseHas('dossier_transitions',['demande_id'=>$dossier->getKey(),'nouvel_etat'=>'accepte','acteur_type'=>'etudiant','acteur_id'=>'student']);
+        $this->assertDatabaseHas('dossier_transitions',['demande_id'=>$dossier->getKey(),'nouvel_etat'=>'confirme','acteur_type'=>'etudiant','acteur_id'=>'student']);
+    }
+    public function test_only_the_student_can_confirm_their_eligible_dossier(): void
+    {
+        $dossier=$this->eligibleRequest();
+        try {$this->workflow->transition($dossier->getKey(),'confirme','etudiant','other');$this->fail('Autre étudiant autorisé');}
+        catch(\Symfony\Component\HttpKernel\Exception\HttpException $e) {$this->assertSame(403,$e->getStatusCode());}
+        try {$this->workflow->admin($dossier->getKey(),'confirme');$this->fail('Agent autorisé');}
+        catch(\Symfony\Component\HttpKernel\Exception\HttpException $e) {$this->assertSame(403,$e->getStatusCode());}
+        $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
+    }
+    public function test_student_refusal_of_an_eligible_dossier_requires_a_reason_and_rejects_it(): void
+    {
+        $dossier=$this->eligibleRequest();
+        try {$this->workflow->transition($dossier->getKey(),'refuse','etudiant','student');$this->fail('Motif omis');}
+        catch(ValidationException $e) {$this->assertSame('eligible',$dossier->fresh()->etat_dossier);}
+        $this->workflow->transition($dossier->getKey(),'refuse','etudiant','student','Je ne souhaite plus être logé.');
+        $this->assertSame('refuse',$dossier->fresh()->etat_dossier);
+        // Liste « Demandes rejetées ».
+        $this->assertSame('annuler',Etudiant::findOrFail('student')->statut_inscription);
+        $this->assertDatabaseCount('assignation_chambres',0);
+    }
+    public function test_student_space_answer_confirms_or_refuses_an_eligible_dossier(): void
+    {
+        $dossier=$this->eligibleRequest();
+        $this->actingAs(Etudiant::findOrFail('student'),'etudiant');
+        $service=app(\App\Http\Services\EtudiantService::class);
+        $refus=$service->validerDemandeEtudiant('student',['action'=>'refuser'],$dossier->getKey());
+        $this->assertFalse($refus['success']);
+        $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
+        $this->assertTrue($service->validerDemandeEtudiant('student',['action'=>'accepter'],$dossier->getKey())['success']);
+        $this->assertSame('confirme',$dossier->fresh()->etat_dossier);
+        $this->assertDatabaseHas('dossier_transitions',['nouvel_etat'=>'confirme','acteur_type'=>'etudiant','motif'=>'Demande d’hébergement confirmée par l’étudiant.']);
+    }
+    public function test_student_space_is_limited_to_the_dashboard_until_confirmation(): void
+    {
+        $dossier=$this->eligibleRequest();
+        $this->actingAs(Etudiant::findOrFail('student'),'etudiant');
+        $this->assertTrue(\App\Services\EtudiantMenu::confirmationAttendue(Etudiant::findOrFail('student')));
+        $requete=\Illuminate\Http\Request::create('/etudiant/dashboard');
+        $requete->setUserResolver(fn($guard=null)=>auth($guard)->user());
+        $menu=app(\App\Services\EtudiantMenu::class)->groupes($requete);
+        $this->assertSame(['Tableau de bord'],collect($menu)->flatMap(fn($groupe)=>array_column($groupe['items'],'label'))->all());
+        $this->get(route('etudiants.dashboard',['section'=>'paiements']))->assertRedirect(route('etudiants.dashboard'));
+        $this->get(route('etudiants.documents.personal'))->assertRedirect(route('etudiants.dashboard'));
+        $this->workflow->transition($dossier->getKey(),'confirme','etudiant','student');
+        $this->assertFalse(\App\Services\EtudiantMenu::confirmationAttendue(Etudiant::findOrFail('student')));
+    }
+    public function test_allocation_rechecks_eligibility_atomically(): void
+    {
+        $dossier=$this->eligibleRequest();$this->confirm();
+        $this->evaluation['eligible']=false;$this->evaluation['regles'][1]['ok']=false;
+        try {$this->allocate();$this->fail('Critères ignorés');}
+        catch(ValidationException $e) {
+            $this->assertSame('confirme',$dossier->fresh()->etat_dossier);
+            $this->assertDatabaseCount('assignation_chambres',0);
+            $this->assertSame('en_verification',Etudiant::findOrFail('student')->statut_inscription);
+        }
     }
     public function test_incomplete_and_refused_decisions_require_reasons(): void
     {
@@ -62,14 +126,14 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     }
     public function test_student_cannot_accept_someone_elses_proposal(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();
         try {$this->workflow->transition($dossier->getKey(),'accepte','etudiant','other',null,['assignation_id'=>$assignment->getKey()]);$this->fail('Autre étudiant autorisé');}
         catch(\Symfony\Component\HttpKernel\Exception\HttpException $e) {$this->assertSame(403,$e->getStatusCode());}
         $this->assertSame('pre_attribue',$dossier->fresh()->etat_dossier);
     }
     public function test_admin_cannot_accept_in_place_of_student(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();
         try {$this->workflow->admin($dossier->getKey(),'accepte');$this->fail('Agent accepté');}
         catch(\Symfony\Component\HttpKernel\Exception\HttpException $e) {$this->assertSame(403,$e->getStatusCode());}
         $this->assertSame('pre_attribue',$dossier->fresh()->etat_dossier);
@@ -77,34 +141,33 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     public function test_failed_eligibility_keeps_the_request_under_review(): void
     {
         $dossier=$this->dossier();$this->workflow->admin($dossier->getKey(),'en_etude');
-        $this->evaluation['eligible']=false;
+        $this->evaluation['eligible']=false;$this->evaluation['regles'][1]['ok']=false;
         try {$this->workflow->admin($dossier->getKey(),'eligible');$this->fail('Inéligible admis');}
         catch(ValidationException $e) {$this->assertSame('en_etude',$dossier->fresh()->etat_dossier);}
         $this->assertDatabaseCount('assignation_chambres',0);
     }
     public function test_refusal_releases_the_proposal_and_is_audited(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();
         $this->workflow->transition($dossier->getKey(),'refuse','etudiant','student','Je refuse cette chambre.',
             ['assignation_id'=>$assignment->getKey()]);
         $this->assertSame('annulee',$assignment->fresh()->statut);
         $this->assertSame('refuse',$dossier->fresh()->etat_dossier);
         $this->assertSame(1,Chambre::findOrFail('room')->getNombrePlacesDisponibles());
     }
-    public function test_reassignment_requires_a_new_acceptance(): void
+    public function test_reassigning_a_former_proposal_releases_it_and_allocates_definitively(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();$this->accept($dossier,$assignment);
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();$this->accept($dossier,$assignment);
         $this->room('second');
         $next=$this->service->reaffecterChambre(Etudiant::findOrFail('student'),Chambre::findOrFail('second'),Campagne::findOrFail('campaign'),'Changement demandé.');
-        $this->assertSame('pre_attribue',$dossier->fresh()->etat_dossier);
-        try {$this->accept($dossier,$assignment);$this->fail('Ancienne proposition acceptée');}
-        catch(ValidationException $e) {$this->assertSame('pre_attribue',$dossier->fresh()->etat_dossier);}
-        $this->accept($dossier,$next);
-        $this->assertSame('accepte',$dossier->fresh()->etat_dossier);
+        $this->assertSame('annulee',$assignment->fresh()->statut);
+        $this->assertSame('confirmee',$next->fresh()->statut);
+        $this->assertSame('attribue_definitif',$dossier->fresh()->etat_dossier);
+        $this->assertSame($next->getKey(),$dossier->fresh()->assignation_id);
     }
     public function test_expired_proposal_cannot_be_accepted(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();
         $assignment->update(['date_fin'=>now()->subMinute()]);
         $this->expectException(ValidationException::class);
         $this->accept($dossier,$assignment);
@@ -117,8 +180,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     }
     public function test_expiry_never_changes_a_final_assignment(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();$this->accept($dossier,$assignment);
-        $this->service->confirmerAssignation($assignment->getKey());
+        $dossier=$this->eligibleRequest();$this->allocate();
         $this->expectException(ValidationException::class);
         $this->workflow->transition($dossier->getKey(),'expire','systeme',null,'Campagne terminée.');
     }
@@ -162,7 +224,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     }
     public function test_replaying_a_transition_does_not_duplicate_the_audit(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();$this->accept($dossier,$assignment);
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();$this->accept($dossier,$assignment);
         $count=$dossier->transitions()->count();
         try {$this->accept($dossier,$assignment);$this->fail('Double acceptation');}
         catch(ValidationException $e) {$this->assertSame($count,$dossier->transitions()->count());}
@@ -170,7 +232,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
 
     public function test_returning_to_eligibility_releases_the_previous_proposal(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();
         $this->workflow->admin($dossier->getKey(),'eligible','Reprendre la recherche de chambre.');
         $this->assertNull($dossier->fresh()->assignation_id);
         $this->assertSame('annulee',$assignment->fresh()->statut);
@@ -178,19 +240,18 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     }
     public function test_final_confirmation_rechecks_eligibility_atomically(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();$this->accept($dossier,$assignment);
-        $this->evaluation['eligible']=false;
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();$this->accept($dossier,$assignment);
+        $this->evaluation['eligible']=false;$this->evaluation['regles'][1]['ok']=false;
         try {$this->service->confirmerAssignation($assignment->getKey());$this->fail('Critères ignorés');}
         catch(ValidationException $e) {
             $this->assertSame('accepte',$dossier->fresh()->etat_dossier);
             $this->assertSame('en_attente',$assignment->fresh()->statut);
-            $this->assertSame('en_attente',Etudiant::findOrFail('student')->statut_inscription);
+            $this->assertSame('en_verification',Etudiant::findOrFail('student')->statut_inscription);
         }
     }
     public function test_confirmed_stay_cannot_be_cancelled_outside_departure_process(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();$this->accept($dossier,$assignment);
-        $this->service->confirmerAssignation($assignment->getKey());
+        $dossier=$this->eligibleRequest();$assignment=$this->allocate();
         try {$this->service->annulerAssignation($assignment->getKey());$this->fail('Séjour annulé');}
         catch(ValidationException $e) {
             $this->assertSame('attribue_definitif',$dossier->fresh()->etat_dossier);
@@ -218,7 +279,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         (require database_path('migrations/2026_08_27_100000_create_student_api_tokens_table.php'))->up();
         DB::table('etudiants')->update(['statut'=>1]);
         $token=\App\Models\StudentApiToken::create(['etudiant_id'=>'student','token_hash'=>hash('sha256','owner-token'),'expires_at'=>now()->addHour()]);
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();
         $url='/api/V1/dossiers/'.$dossier->getKey();
         $this->getJson($url)->assertUnauthorized();
         $this->withToken('owner-token')->getJson($url)->assertOk()->assertJsonPath('data.etat_dossier','pre_attribue');
@@ -231,7 +292,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     }
     public function test_tracking_panel_displays_proposal_and_history(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();
         $this->view('dossier-cycle',['dossier'=>$dossier->fresh(),'mode'=>'student'])
             ->assertSee('Pré-attribué')->assertSee('room')->assertSee('Historique du dossier')
             ->assertSee($assignment->getKey());

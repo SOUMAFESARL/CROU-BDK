@@ -76,6 +76,7 @@ return Application::configure(basePath: dirname(__DIR__))
           //  \App\Http\Middleware\LanguageMiddleware::class,
             \App\Http\Middleware\EnsureTokenIsValid::class,
             \App\Http\Middleware\RedirectIfNotEtudiant::class,
+            \App\Http\Middleware\ConfirmationDemandeEtudiant::class,
             \App\Http\Middleware\LogUserActivity::class,
           //  \App\Http\Middleware\CheckSubscription::class
         ]);

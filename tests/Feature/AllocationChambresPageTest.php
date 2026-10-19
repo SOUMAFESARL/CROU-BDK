@@ -37,6 +37,7 @@ class AllocationChambresPageTest extends \Tests\Support\DossierTestCase
             $dossier = $this->dossier($student);
             $this->workflow->admin($dossier->getKey(), 'en_etude');
             $this->workflow->admin($dossier->getKey(), 'eligible');
+            $this->confirm($student);
         }
     }
 
@@ -66,8 +67,8 @@ class AllocationChambresPageTest extends \Tests\Support\DossierTestCase
         $this->allocate();
         $campagne = $this->page('index')['props']['campagnes']['data'][0];
         $this->assertSame(1, $campagne['a_loger']);
-        $this->assertSame(1, $campagne['propositions']);
-        $this->assertSame(0, $campagne['confirmees']);
+        $this->assertSame(0, $campagne['propositions']);
+        $this->assertSame(1, $campagne['confirmees']);
     }
 
     public function test_precontrole_du_sexe_de_la_chambre(): void
@@ -96,7 +97,7 @@ class AllocationChambresPageTest extends \Tests\Support\DossierTestCase
         $page = $this->page('statistics', ['campagneId' => 'campaign']);
 
         $this->assertSame('Admin/Hebergement/Allocations/Statistics', $page['component']);
-        // L'attribution en attente est rattachée au type de sa chambre.
+        // L'attribution est rattachée au type de sa chambre.
         $parType = collect($page['props']['stats']['par_type'])->firstWhere('nom', 'Double');
         $this->assertSame(1, $parType['total']);
         $this->assertSame(1, $parType['occupees']);
@@ -124,7 +125,8 @@ class AllocationChambresPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('Admin/Hebergement/Allocations/Show', $page['component']);
         $props = $page['props'];
         $this->assertCount(1, $props['assignations']);
-        $this->assertTrue($props['assignations'][0]['annulable']);
+        // Attribution définitive : elle ne s'annule plus qu'au travers de la procédure de sortie.
+        $this->assertFalse($props['assignations'][0]['annulable']);
         $this->assertFalse($props['assignations'][0]['confirmable']);
         $this->assertCount(1, $props['etudiants']);
         $this->assertSame(1, $props['classement']['reservations']);

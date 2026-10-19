@@ -368,7 +368,7 @@ class CampagneService
             }
 
             $demandes = $campagneTerminee->demandes()->whereIn('etat_dossier',
-                ['soumis','incomplet','en_etude','eligible','pre_attribue','accepte'])->get();
+                ['soumis','incomplet','en_etude','eligible','confirme','pre_attribue','accepte'])->get();
             $count = 0;
             foreach ($demandes as $demande) {
                 app(DossierWorkflow::class)->transition($demande->getKey(),'expire','systeme',null,

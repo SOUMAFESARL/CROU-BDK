@@ -87,13 +87,24 @@ class StudentDashboardTest extends TestCase
 
         $this->assertNull($props['resident']);
         $this->assertSame('amber', $props['statut']['ton']);
-        $this->assertSame(50, $props['demande']['progression']);
+        // Pré-attribué : soumission, étude, vérification et attribution franchies ; documents à 50 %.
+        $this->assertSame(80, $props['demande']['progression']);
+        $this->assertSame(4, $props['demande']['etapesFranchies']);
+        $this->assertSame(50, $props['demande']['documentsPourcentage']);
         $this->assertSame(['valide', 'en_attente'], array_column($props['demande']['documents'], 'statut'));
         $this->assertSame('offer', $props['demande']['decision']['assignationId']);
         $this->assertSame(route('etudiants.validation-demande', ['idDemande' => 'request']), $props['demande']['decision']['url']);
         $this->assertStringStartsWith('2026-11-30T23:59:59', $props['demande']['echeanceIso']);
 
+        $this->assertSame('proposition', $props['demande']['decision']['type']);
+
+        // Dossier éligible : l'étudiant confirme (ou refuse) son intérêt, sans chambre proposée.
         $demande->etat_dossier = 'eligible';
+        $props = app(EtudiantDashboard::class)->props($this->etudiant($demande), $campagne, [], collect());
+        $this->assertSame('consentement', $props['demande']['decision']['type']);
+        $this->assertNull($props['demande']['decision']['assignationId']);
+
+        $demande->etat_dossier = 'confirme';
         $props = app(EtudiantDashboard::class)->props($this->etudiant($demande), $campagne, [], collect());
         $this->assertNull($props['demande']['decision']);
     }

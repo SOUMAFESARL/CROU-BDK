@@ -32,17 +32,16 @@ class HousingEntryJourneyTest extends \Tests\Support\DossierTestCase
     {
         $dossier=$this->dossier($student);
         $this->workflow->admin($dossier->getKey(),'en_etude');$this->workflow->admin($dossier->getKey(),'eligible');
+        // L'étudiant confirme sa demande ; l'attribution est alors définitive.
         $assignment=$this->allocate($student);
-        $this->workflow->transition($dossier->getKey(),'accepte','etudiant',$student,null,['assignation_id'=>$assignment->getKey()]);
-        $this->service->confirmerAssignation($assignment->getKey());
         StudentContractApproval::create(['id'=>(string)\Illuminate\Support\Str::uuid(),'assignment_id'=>$assignment->getKey(),
             'student_id'=>$student,'student_name'=>$student,'document_html'=>'Contract','document_hash'=>hash('sha256','Contract'),'approved_at'=>now()]);
         return $assignment->fresh();
     }
-    public function test_configured_deadline_applies_and_acceptance_keeps_the_place(): void
+    public function test_acceptance_of_a_former_proposal_keeps_the_place(): void
     {
-        $dossier=$this->eligibleRequest();$assignment=$this->allocate();
-        $this->assertTrue($assignment->date_fin->equalTo(now()->addHours(4)));
+        $dossier=$this->eligibleRequest();$assignment=$this->reserver();
+        $assignment->update(['date_fin'=>now()->addHours(4)]);
         $this->accept($dossier,$assignment);
         $this->assertNull($assignment->fresh()->date_fin);
         $this->travel(5)->hours();
@@ -69,7 +68,7 @@ class HousingEntryJourneyTest extends \Tests\Support\DossierTestCase
     }
     public function test_campaign_and_detailed_proposal_are_prepared_once(): void
     {
-        $this->eligibleRequest();$assignment=$this->allocate();
+        $this->eligibleRequest();$assignment=$this->reserver();
         $journey=app(HousingEntryJourney::class);$journey->prepare();$journey->prepare();
         $this->assertSame(1,DB::table('housing_campaign_announcements')->count());
         $this->assertSame(1,DB::table('annonces')->count());
@@ -83,7 +82,7 @@ class HousingEntryJourneyTest extends \Tests\Support\DossierTestCase
     {
         Mail::fake();
         $this->eligibleRequest();
-        $assignment = $this->allocate();
+        $assignment = $this->reserver();
         $journey = app(HousingEntryJourney::class);
         $journey->prepare();
         $message = HousingEntryMessage::where('kind', 'proposal')->firstOrFail();

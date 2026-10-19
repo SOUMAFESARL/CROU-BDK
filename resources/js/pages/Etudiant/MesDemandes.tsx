@@ -226,6 +226,13 @@ function SuiviDossier({ dossier }: { dossier: Dossier }) {
 
             {dossier.message && <Notice icone={InfoIcone}>{dossier.message}</Notice>}
 
+            {dossier.decision?.type === 'consentement' && (
+                <div className="rounded-brand border border-accent/50 bg-accent/10 p-4">
+                    <p className="mb-3 text-sm text-gray-900">Votre dossier est éligible. Souhaitez-vous toujours être logé(e) cette année ?</p>
+                    <ReponseProposition proposition={dossier.decision} />
+                </div>
+            )}
+
             {dossier.proposition && (
                 <div className={cn('rounded-brand border p-4', dossier.decision ? 'border-accent/50 bg-accent/10' : 'bg-white')}>
                     <div className="flex items-start gap-3">

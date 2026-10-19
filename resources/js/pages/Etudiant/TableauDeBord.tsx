@@ -50,7 +50,10 @@ type Demande = {
     echeanceIso: string | null;
     moyenne: string | number | null;
     residenceSouhaitee: string | null;
+    /** Avancement du dossier (étapes franchies / 5), calculé par EtudiantDashboard::ETAPES_FRANCHIES. */
     progression: number;
+    etapesFranchies: number;
+    documentsPourcentage: number;
     documentsValides: number;
     documents: { id: string; nom: string; statut: 'valide' | 'rejete' | 'en_attente' }[];
     decision: Proposition | null;
@@ -133,16 +136,16 @@ function VueResident({ resident, statut, anneeAcademique, aujourdHui }: TableauD
             <EnTete titre="Mon tableau de bord" pastille={{ libelle: 'Résident actif', icone: CircleCheck, ton: 'vert' }} annee={anneeAcademique} date={aujourdHui} />
 
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <StatCard label="Chambre attribuée" value={resident.chambre ?? '—'} tone="blue" extra={resident.batiment ?? undefined} />
-                <StatCard label="Loyer mensuel" value={resident.loyer} tone="green" />
-                <StatCard
+                <StatCard compact label="Chambre attribuée" value={resident.chambre ?? '—'} tone="blue" extra={resident.batiment ?? undefined} />
+                <StatCard compact label="Loyer mensuel" value={resident.loyer} tone="green" />
+                <StatCard compact
                     label="Reste à payer"
                     value={resident.resteAPayer}
                     tone="amber"
                     extra={resident.nbImpayes > 0 ? `${resident.nbImpayes} ${resident.nbImpayes > 1 ? 'impayés' : 'impayé'}` : 'À jour'}
                     highlight={resident.nbImpayes > 0}
                 />
-                <StatCard label="État de la demande" value={statut.libelle} tone={statut.ton} />
+                <StatCard compact label="État de la demande" value={statut.libelle} tone={statut.ton} />
             </div>
 
             <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -205,13 +208,8 @@ function VueResident({ resident, statut, anneeAcademique, aujourdHui }: TableauD
     );
 }
 
-const ETAPES = [
-    { libelle: 'Soumission', seuil: 0 },
-    { libelle: 'Vérification', seuil: 25 },
-    { libelle: 'Étude du dossier', seuil: 50 },
-    { libelle: 'Attribution', seuil: 75 },
-    { libelle: 'Validation', seuil: 100 },
-];
+/** Ordre du traitement : la vérification ne commence qu'après la confirmation de l'étudiant. */
+const ETAPES = ['Soumission', 'Étude du dossier', 'Vérification', 'Attribution', 'Validation'];
 
 /** Jours restants avant l'échéance (fin de journée), recalculés chaque minute. */
 function useJoursRestants(echeanceIso: string | null): number | null {
@@ -250,16 +248,16 @@ function VueDemande({ demande, statut, anneeAcademique, aujourdHui }: TableauDeB
             />
 
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <StatCard label="Numéro de demande" value={demande.numero ?? '—'} tone="blue" />
-                <StatCard label="Soumise le" value={demande.soumiseLe ?? '—'} tone="green" />
-                <StatCard
+                <StatCard compact label="Numéro de demande" value={demande.numero ?? '—'} tone="blue" />
+                <StatCard compact label="Soumise le" value={demande.soumiseLe ?? '—'} tone="green" />
+                <StatCard compact
                     label="Délai de validation"
                     value={demande.echeance ?? '—'}
                     tone="amber"
                     extra={jours === null ? undefined : jours === 0 ? 'Délai expiré' : `${jours} ${jours > 1 ? 'jours restants' : 'jour restant'}`}
                     highlight={jours !== null && jours <= 7}
                 />
-                <StatCard label="Documents validés" value={`${demande.progression} %`} tone="plum" extra={`${demande.documentsValides}/${nbDocuments}`} />
+                <StatCard compact label="Documents validés" value={`${demande.documentsPourcentage} %`} tone="plum" extra={`${demande.documentsValides}/${nbDocuments}`} />
             </div>
 
             <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -279,10 +277,10 @@ function VueDemande({ demande, statut, anneeAcademique, aujourdHui }: TableauDeB
                         <Progress value={demande.progression} tone="primary" label="Progression du traitement" className="h-2" />
                         <ol className="grid grid-cols-5 gap-1 text-center text-[11px] leading-tight text-muted sm:text-xs">
                             {ETAPES.map((etape, index) => {
-                                const faite = demande.progression >= etape.seuil;
+                                const faite = index < demande.etapesFranchies;
 
                                 return (
-                                    <li key={etape.libelle} className={cn('flex flex-col items-center gap-1', faite && 'text-primary')}>
+                                    <li key={etape} className={cn('flex flex-col items-center gap-1', faite && 'text-primary')}>
                                         <span
                                             className={cn(
                                                 'grid size-6 place-items-center rounded-full border text-xs font-medium',
@@ -291,7 +289,7 @@ function VueDemande({ demande, statut, anneeAcademique, aujourdHui }: TableauDeB
                                         >
                                             {index + 1}
                                         </span>
-                                        {etape.libelle}
+                                        {etape}
                                     </li>
                                 );
                             })}
@@ -301,7 +299,9 @@ function VueDemande({ demande, statut, anneeAcademique, aujourdHui }: TableauDeB
                     {demande.decision && (
                         <div className="mt-4 flex flex-col gap-3 border-t pt-4">
                             <p className="text-sm text-gray-900">
-                                Une chambre vous est proposée{demande.decision.chambre ? ` : ${demande.decision.chambre}` : ''}.
+                                {demande.decision.type === 'consentement'
+                                    ? 'Votre dossier est éligible. Souhaitez-vous toujours être logé(e) cette année ?'
+                                    : `Une chambre vous est proposée${demande.decision.chambre ? ` : ${demande.decision.chambre}` : ''}.`}
                             </p>
                             <ReponseProposition proposition={demande.decision} />
                         </div>

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\DemandeEtudiant;
+use App\Models\Etudiant;
 use Illuminate\Http\Request;
 
 /**
@@ -23,6 +25,14 @@ class EtudiantMenu
      */
     public function groupes(Request $request): array
     {
+        // Dossier éligible non encore confirmé : seul le tableau de bord (réponse attendue) est accessible.
+        if (self::confirmationAttendue($request->user('etudiant'))) {
+            return [['label' => 'Principal', 'items' => [[
+                'label' => 'Tableau de bord', 'icon' => 'layout-dashboard', 'href' => route('etudiants.dashboard'),
+                'page' => 'dashboard', 'react' => true, 'active' => $request->routeIs('etudiants.dashboard'),
+            ]]]];
+        }
+
         $surTableauDeBord = $request->routeIs('etudiants.dashboard');
         $section = $surTableauDeBord ? ($request->query('section') ?: 'dashboard') : null;
         $sectionUrl = fn (string $page) => route('etudiants.dashboard', ['section' => $page]);
@@ -65,6 +75,15 @@ class EtudiantMenu
         }
 
         return $resultat;
+    }
+
+    /** La dernière demande de l'étudiant est « Éligible » : il doit confirmer ou refuser avant d'accéder au reste de l'espace. */
+    public static function confirmationAttendue(?Etudiant $etudiant): bool
+    {
+        // `statut_inscription` vaut « en_attente » pour un dossier éligible (DossierWorkflow) : évite une requête dans les autres cas.
+        return $etudiant?->exists === true && strtolower((string) $etudiant->statut_inscription) === 'en_attente'
+            && DemandeEtudiant::where('etudiant_id', $etudiant->getKey())
+            ->latest('created_at')->orderByDesc('id_demande')->value('etat_dossier') === 'eligible';
     }
 
     /** Initiales affichées dans l'avatar (deux premiers mots, accents compris). */

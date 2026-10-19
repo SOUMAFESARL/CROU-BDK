@@ -103,6 +103,13 @@ class ResidentContratControler extends Controller
                         'traiter' => $etat === 'en_verification'
                             ? $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant])
                             : null,
+                        // Dossier confirmé par l'étudiant : attribution de la chambre (formulaire présélectionné sur l'étudiant).
+                        'attribuer' => $etat === 'en_verification' && $etudiant->derniereDemande?->etat_dossier === 'confirme'
+                            ? $url('admin.allocation.allocate-form', [
+                                'campagneId' => $etudiant->derniereDemande->campagne_id,
+                                'etudiant_id' => $etudiant->id_etudiant,
+                            ])
+                            : null,
                         'contrat' => $url('admin.etudiant.contrat', ['etudiant' => $etudiant->id_etudiant]),
                         'modifier' => $modifiable
                             ? route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => $etudiant->id_etudiant])

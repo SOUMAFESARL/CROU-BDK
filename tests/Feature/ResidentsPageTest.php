@@ -145,6 +145,25 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
 
         $this->assertSame(1, $props['residents']['total']);
         $this->assertNotNull($props['residents']['data'][0]['urls']['traiter']);
+        // Pas encore confirmé par l'étudiant : pas d'attribution.
+        $this->assertNull($props['residents']['data'][0]['urls']['attribuer']);
+    }
+
+    public function test_dossier_confirme_par_l_etudiant_propose_l_attribution_de_chambre(): void
+    {
+        $dossier = $this->dossier('other');
+        $this->workflow->admin($dossier->getKey(), 'en_etude');
+        $this->workflow->admin($dossier->getKey(), 'eligible');
+        $this->confirm('other');
+        $this->assertSame('en_verification', DB::table('etudiants')->where('id_etudiant', 'other')->value('statut_inscription'));
+
+        $this->agent(['hebergement.residents.view', 'hebergement.attributions.assign']);
+        $urls = $this->page('en_verification')['props']['residents']['data'][0]['urls'];
+        $this->assertSame(route('admin.allocation.allocate-form', ['campagneId' => 'campaign', 'etudiant_id' => 'other']), $urls['attribuer']);
+
+        // Sans le droit d'attribuer : pas d'icône.
+        $this->agent(['hebergement.residents.view']);
+        $this->assertNull($this->page('en_verification')['props']['residents']['data'][0]['urls']['attribuer']);
     }
 
     public function test_recherche_par_nom_ou_numero_de_chambre(): void

@@ -41,8 +41,8 @@ class AllocationChambreService
                 throw new Exception("Cet etudiant a deja une chambre occupee ou reservee.");
             }
             $dossier = app(DossierWorkflow::class)->current($etudiant->getKey(), $campagne->getKey());
-            if ($dossier->etat_dossier !== 'eligible') {
-                throw \Illuminate\Validation\ValidationException::withMessages(['etat_dossier'=>'Seul un dossier éligible peut recevoir une proposition de chambre.']);
+            if ($dossier->etat_dossier !== 'confirme') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['etat_dossier'=>'Seul un dossier confirmé par l’étudiant peut recevoir une chambre.']);
             }
             app(DossierWorkflow::class)->eligible($dossier);
             return $chambreSpecifique
@@ -62,6 +62,7 @@ class AllocationChambreService
         return $this->creerReservation($etudiant, $chambre, $campagne, 'manuelle', $numeroLit);
     }
 
+    /** L'étudiant a déjà confirmé son intérêt : l'attribution est définitive, sans nouvelle acceptation. */
     private function creerReservation(Etudiant $etudiant, Chambre $chambre, Campagne $campagne, string $type, ?int $numeroLit = null): AssignationChambre
     {
         $assignation = $this->assignationRepository->create([
@@ -70,13 +71,13 @@ class AllocationChambreService
             'lit_id' => app(LitService::class)->choisir($chambre, $numeroLit)->getKey(),
             'campagne_id' => $campagne->getKey(),
             'date_assignation' => now(),
-            'date_fin' => now()->addHours((int)(\App\Models\HousingEntrySetting::options()['proposal_hours'] ?? 72)),
-            'statut' => 'en_attente',
+            'date_fin' => null,
+            'statut' => 'confirmee',
             'type_assignation' => $type,
         ]);
         app(DossierWorkflow::class)->admin(
             app(DossierWorkflow::class)->current($etudiant->getKey(), $campagne->getKey())->getKey(),
-            'pre_attribue', 'Proposition de chambre.', ['assignation_id'=>$assignation->getKey()]);
+            'attribue_definitif', 'Attribution de chambre.', ['assignation_id'=>$assignation->getKey()]);
         $chambre->actualiserOccupation();
         return $assignation;
     }
@@ -210,7 +211,7 @@ class AllocationChambreService
             if ($actuelle) {
                 $this->annulerAssignation($actuelle->getKey(), $motif, false);
                 $dossier = app(DossierWorkflow::class)->current($etudiant->getKey(), $campagne->getKey());
-                app(DossierWorkflow::class)->admin($dossier->getKey(), 'eligible', 'Nouvelle proposition nécessaire : '.$motif);
+                app(DossierWorkflow::class)->admin($dossier->getKey(), 'confirme', 'Nouvelle proposition nécessaire : '.$motif);
             }
             return $this->allocateChambre($etudiant, $campagne, $nouvelleChambre, $numeroLit);
         }, 3);

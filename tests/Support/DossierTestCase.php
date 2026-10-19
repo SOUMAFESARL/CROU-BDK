@@ -93,14 +93,48 @@ abstract class DossierTestCase extends TestCase
         ], $data));
     }
 
+    /** Attribution définitive ; un dossier encore « Éligible » est d'abord confirmé par l'étudiant. */
     protected function allocate(string $student = 'student', ?string $room = 'room'): ?AssignationChambre
     {
+        if (\App\Models\DemandeEtudiant::where('etudiant_id', $student)->where('campagne_id', 'campaign')
+            ->latest('created_at')->orderByDesc('id_demande')->value('etat_dossier') === 'eligible') {
+            $this->confirm($student);
+        }
         return $this->service->allocateChambre(Etudiant::findOrFail($student), Campagne::findOrFail('campaign'),
             $room ? Chambre::findOrFail($room) : null);
     }
 
+    /** L'étudiant éligible confirme qu'il souhaite toujours être logé. */
+    protected function confirm(string $student = 'student'): \App\Models\DemandeEtudiant
+    {
+        return $this->workflow->transition($this->workflow->current($student, 'campaign')->getKey(),
+            'confirme', 'etudiant', $student, 'Demande confirmée.');
+    }
 
-    protected array $evaluation = ['eligible'=>true,'score_global'=>100,'total_regles'=>1,'regles'=>[['label'=>'Critères','ok'=>true]]];
+    /**
+     * Proposition en attente de l'ancien parcours (pré-attribution à accepter par l'étudiant),
+     * telle qu'elle subsiste pour les dossiers antérieurs.
+     */
+    protected function reserver(string $student = 'student', string $room = 'room', ?int $lit = null): AssignationChambre
+    {
+        return DB::transaction(function () use ($student, $room, $lit) {
+            $chambre = Chambre::findOrFail($room);
+            $assignment = AssignationChambre::create([
+                'etudiant_id' => $student, 'chambre_id' => $room, 'campagne_id' => 'campaign',
+                'lit_id' => app(\App\Http\Services\LitService::class)->choisir($chambre, $lit)->getKey(),
+                'statut' => 'en_attente', 'type_assignation' => 'manuelle',
+                'date_assignation' => now(), 'date_fin' => now()->addHours(72),
+            ]);
+            $dossier = $this->workflow->current($student, 'campaign');
+            DB::table($dossier->getTable())->where('id_demande', $dossier->getKey())
+                ->update(['etat_dossier' => 'pre_attribue', 'assignation_id' => $assignment->getKey(), 'statut_demande' => 'En_verification']);
+            $chambre->actualiserOccupation();
+            return $assignment;
+        });
+    }
+
+
+    protected array $evaluation = ['eligible'=>true,'score_global'=>100,'total_regles'=>1,'regles'=>[['label'=>'Critères','ok'=>true],['label'=>'Documents validés','ok'=>true]]];
     protected \App\Http\Services\DossierWorkflow $workflow;
 
     protected function initializeWorkflow(): void

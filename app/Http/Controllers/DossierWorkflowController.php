@@ -18,7 +18,7 @@ class DossierWorkflowController extends Controller
         $student=$request->attributes->get('student') ?? auth('etudiant')->user();
         abort_unless($student,401);
         abort_unless((string)$demande->etudiant_id === (string)$student->getKey(),403);
-        $data=$request->validate(['etat'=>'required|in:soumis,accepte,refuse,annule','motif'=>'nullable|string|max:5000','assignation_id'=>'nullable|required_if:etat,accepte,refuse|string']);
+        $data=$request->validate(['etat'=>'required|in:soumis,confirme,accepte,refuse,annule','motif'=>'nullable|string|max:5000','assignation_id'=>'nullable|required_if:etat,accepte|string']);
         $updated=app(DossierWorkflow::class)->transition($demande->getKey(),$data['etat'],'etudiant',$student->getKey(),$data['motif']??null,['assignation_id'=>$data['assignation_id']??null]);
         return $request->expectsJson() ? response()->json(['data'=>$updated->load('transitions','proposition.chambre')])
             : back()->with('success','Dossier : '.DossierWorkflow::LABELS[$updated->etat_dossier].'.');

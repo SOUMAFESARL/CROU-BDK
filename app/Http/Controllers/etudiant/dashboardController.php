@@ -407,7 +407,7 @@ class dashboardController extends Controller
             // ÉTAPE 1: Valider les entrées
             $validated = $request->validate([
                 'action' => 'required|in:accepter,refuser',
-                'assignation_id' => 'required|string',
+                'assignation_id' => 'nullable|string',
                 'motif_refus' => 'required_if:action,refuser|nullable|string|max:500',
             ], [
                 'motif_refus.required_if' => 'Indiquez le motif du refus.',
@@ -429,7 +429,7 @@ class dashboardController extends Controller
             }
 
             if (!$detailsResult['data']['peut_valider']) {
-                return back()->with('error', 'Cette proposition ne peut plus recevoir de réponse.');
+                return back()->with('error', 'Cette demande ne peut plus recevoir de réponse.');
             }
 
             // ÉTAPE 3: Préparer les données

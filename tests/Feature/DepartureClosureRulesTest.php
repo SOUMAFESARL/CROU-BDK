@@ -69,7 +69,6 @@ class DepartureClosureRulesTest extends \Tests\Support\DossierTestCase
     {
         $this->exitSchema();
         $dossier=$this->eligibleRequest();$assignment=$this->allocate();
-        $this->accept($dossier,$assignment);$this->service->confirmerAssignation($assignment->getKey());
         try {
             $this->workflow->transition($dossier->getKey(),'cloture','systeme',null,'Clôture directe');
             $this->fail('Clôture sans décompte');
@@ -82,7 +81,6 @@ class DepartureClosureRulesTest extends \Tests\Support\DossierTestCase
     {
         $this->exitSchema();
         $dossier=$this->eligibleRequest();$assignment=$this->allocate();
-        $this->accept($dossier,$assignment);$this->service->confirmerAssignation($assignment->getKey());
         DB::table('departure_requests')->insert(['id_demande_sortie'=>'exit','assignation_id'=>$assignment->getKey(),
             'etudiant_id'=>'student','statut'=>'cloturee','decision'=>'approuvee']);
         DB::table('departure_settlements')->insert(['id_decompte'=>'balance','demande_sortie_id'=>'exit','etat_des_lieux_id'=>'inventory']);

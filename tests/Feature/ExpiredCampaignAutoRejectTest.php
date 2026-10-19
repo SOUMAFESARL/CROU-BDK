@@ -13,8 +13,9 @@ class ExpiredCampaignAutoRejectTest extends \Tests\Support\DossierTestCase
     }
     public function test_expiration_is_traced_and_releases_the_proposed_bed(): void
     {
+        // Proposition en attente de l'ancien parcours.
         $dossier=$this->eligibleRequest();
-        $assignment=$this->allocate();
+        $assignment=$this->reserver();
         DB::table('campagne')->update(['statut'=>'terminer']);
         $count=app(CampagneService::class)->rejeterDemandesCampagneExpiree(collect([Campagne::findOrFail('campaign')]));
         $this->assertSame(1,$count);
@@ -26,10 +27,8 @@ class ExpiredCampaignAutoRejectTest extends \Tests\Support\DossierTestCase
     public function test_active_campaign_and_definitive_attribution_are_preserved(): void
     {
         $dossier=$this->eligibleRequest();
-        $assignment=$this->allocate();
         $this->assertSame(0,app(CampagneService::class)->rejeterDemandesCampagneExpiree(collect([Campagne::findOrFail('campaign')])));
-        $this->accept($dossier,$assignment);
-        $this->service->confirmerAssignation($assignment->getKey());
+        $this->allocate();
         DB::table('campagne')->update(['statut'=>'terminer']);
         $this->assertSame(0,app(CampagneService::class)->rejeterDemandesCampagneExpiree(collect([Campagne::findOrFail('campaign')])));
         $this->assertSame('attribue_definitif',$dossier->fresh()->etat_dossier);

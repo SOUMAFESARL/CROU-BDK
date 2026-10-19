@@ -34,16 +34,36 @@ class ManualEligibilityTest extends \Tests\Support\DossierTestCase
     {
         return app(EtudiantService::class)->ValidateDemandeEtudiant($data,'student');
     }
-    public function test_manual_approval_cannot_override_failed_rules_even_with_a_forged_score(): void
+    public function test_manual_approval_cannot_override_unvalidated_documents_even_with_a_forged_score(): void
     {
         Mail::fake();
         $dossier=$this->dossier();
         $this->workflow->admin($dossier->getKey(),'en_etude');
-        $this->evaluation=['eligible'=>false,'regles'=>[['label'=>'Distance','ok'=>false]]];
+        $this->evaluation=['eligible'=>false,'regles'=>[['label'=>'Distance','ok'=>true],['label'=>'Documents validés','ok'=>false]]];
         $result=$this->manual(['decision'=>'eligible','score_calcule'=>100]);
         $this->assertSame('error',$result['bool']);
         $this->assertSame('en_etude',$dossier->fresh()->etat_dossier);
         Mail::assertNothingSent();
+    }
+    public function test_campaign_criteria_do_not_block_eligibility_once_documents_are_validated(): void
+    {
+        Mail::fake();
+        $dossier=$this->dossier();
+        $this->workflow->admin($dossier->getKey(),'en_etude');
+        $this->evaluation=['eligible'=>false,'regles'=>[
+            ['label'=>'Âge maximum (niveau L1)','ok'=>false],['label'=>'Distance domicile – campus','ok'=>false],
+            ['label'=>'Documents validés','ok'=>true],
+        ]];
+        $this->assertSame('success',$this->manual(['decision'=>'eligible'])['bool']);
+        $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
+    }
+    public function test_blocking_disciplinary_sanction_still_prevents_eligibility(): void
+    {
+        $dossier=$this->dossier();
+        $this->workflow->admin($dossier->getKey(),'en_etude');
+        $this->evaluation=['eligible'=>false,'regles'=>[['label'=>'Absence de sanction disciplinaire bloquante','ok'=>false]]];
+        $this->assertSame('error',$this->manual(['decision'=>'eligible'])['bool']);
+        $this->assertSame('en_etude',$dossier->fresh()->etat_dossier);
     }
     public function test_pending_decision_opens_review_without_validating_eligibility(): void
     {
@@ -69,7 +89,7 @@ class ManualEligibilityTest extends \Tests\Support\DossierTestCase
         $this->workflow->admin($dossier->getKey(),'en_etude');
         $this->assertSame('success',$this->manual(['decision'=>'eligible'])['bool']);
         $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
-        $this->assertSame('en_verification',Etudiant::findOrFail('student')->statut_inscription);
+        $this->assertSame('en_attente',Etudiant::findOrFail('student')->statut_inscription);
         Mail::assertNothingSent();
     }
     public function test_explicit_rejection_requires_a_nonempty_reason(): void

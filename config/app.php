@@ -83,8 +83,8 @@ return [
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
 
     'faker_locale' => env('APP_FAKER_LOCALE', 'en_US'),
-    'app_url_image' => 'https://croudedaloa.soumafe.ci/admin',
-    'storage_public' => 'https://croudedaloa.soumafe.ci/storage/app/public/',
+    'app_url_image' => 'https://crou.soumafe.com/admin',
+    'storage_public' => 'https://crou.soumafe.com/storage/app/public/',
 
     /*
     |--------------------------------------------------------------------------
@@ -124,5 +124,5 @@ return [
         'driver' => env('APP_MAINTENANCE_DRIVER', 'file'),
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
-        'author' => "Yapo Richard Rodrigue 0707902962",
+    'author' => "Yapo Richard Rodrigue 0707902962",
 ];

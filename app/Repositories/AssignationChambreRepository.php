@@ -112,7 +112,7 @@ class AssignationChambreRepository implements AssignationChambreRepositoryInterf
             //->where('is_validation', true)
             ->whereHas('demandes', function ($q) use ($campagneId) {
                 $q->where('campagne_id', $campagneId)
-                    ->where('etat_dossier', 'eligible');
+                    ->where('etat_dossier', 'confirme');
             })
             ->get();
     }

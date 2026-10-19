@@ -10,16 +10,19 @@ class DossierWorkflow
 {
     public const LABELS = [
         'brouillon'=>'Brouillon','soumis'=>'Soumis','incomplet'=>'Incomplet','en_etude'=>'En étude',
-        'eligible'=>'Éligible','pre_attribue'=>'Pré-attribué','accepte'=>'Accepté par l’étudiant',
+        'eligible'=>'Éligible','confirme'=>'Confirmé par l’étudiant','pre_attribue'=>'Pré-attribué','accepte'=>'Accepté par l’étudiant',
         'attribue_definitif'=>'Attribué définitif','refuse'=>'Refusé','annule'=>'Annulé',
         'expire'=>'Expiré','cloture'=>'Clôturé',
     ];
     public const NEXT = [
         'brouillon'=>['soumis','annule'], 'soumis'=>['incomplet','en_etude','refuse','annule','expire'],
         'incomplet'=>['soumis','annule','expire'], 'en_etude'=>['incomplet','eligible','refuse','annule','expire'],
-        'eligible'=>['pre_attribue','en_etude','refuse','annule','expire'],
-        'pre_attribue'=>['accepte','refuse','eligible','annule','expire'],
-        'accepte'=>['attribue_definitif','eligible','annule','expire'],
+        // L'étudiant éligible confirme (ou refuse) son intérêt avant toute attribution de chambre ;
+        // l'attribution depuis « Confirmé » est définitive (pre_attribue/accepte : dossiers de l'ancien parcours).
+        'eligible'=>['confirme','en_etude','refuse','annule','expire'],
+        'confirme'=>['attribue_definitif','en_etude','refuse','annule','expire'],
+        'pre_attribue'=>['accepte','refuse','eligible','confirme','annule','expire'],
+        'accepte'=>['attribue_definitif','eligible','confirme','annule','expire'],
         'attribue_definitif'=>['cloture'], 'refuse'=>['en_etude'], 'annule'=>[], 'expire'=>[], 'cloture'=>[],
     ];
     public function current(string $studentId, string $campaignId): DemandeEtudiant
@@ -37,10 +40,16 @@ class DossierWorkflow
         $evaluation = app(EtudiantRepositoryInterface::class)->verifierEligibilite($student,[
             'success'=>true,'data'=>['campagnes'=>collect([$campaign])],
         ]);
-        if (($evaluation['eligible'] ?? false) !== true) {
+        // Seuls la validation des documents et l'absence de sanction bloquante conditionnent l'éligibilité ;
+        // les autres critères de campagne (âge, distance, moyenne…) restent indicatifs pour la décision de l'admin.
+        $bloquantes = collect($evaluation['regles'] ?? [])
+            ->whereIn('label', ['Documents validés', 'Absence de sanction disciplinaire bloquante']);
+        $documentsValides = $bloquantes->contains('label', 'Documents validés')
+            && $bloquantes->every(fn ($regle) => ($regle['ok'] ?? false) === true);
+        if (!$documentsValides) {
             $exception = AdmissionDerogation::where('demande_id',$request->getKey())->where('status','approved')->latest('decided_at')->first();
             if (!$exception || $exception->eligibility != $evaluation) {
-                throw ValidationException::withMessages(['etat_dossier'=>'Le dossier n’est pas éligible. Corrigez les critères ou faites valider une dérogation motivée.']);
+                throw ValidationException::withMessages(['etat_dossier'=>'Le dossier n’est pas éligible : les documents de l’étudiant doivent être validés. Validez-les ou faites valider une dérogation motivée.']);
             }
             $evaluation['derogation_id']=$exception->getKey();
         }
@@ -58,8 +67,9 @@ class DossierWorkflow
             }
             if ($kind==='etudiant') {
                 abort_unless((string)$actorId===(string)$student->getKey(),403);
-                if (!in_array($to,['soumis','accepte','refuse','annule'],true)
-                    || ($to==='refuse' && $from!=='pre_attribue')
+                if (!in_array($to,['soumis','confirme','accepte','refuse','annule'],true)
+                    || ($to==='confirme' && $from!=='eligible')
+                    || ($to==='refuse' && !in_array($from,['eligible','pre_attribue'],true))
                     || ($to==='annule' && !in_array($from,['brouillon','soumis','incomplet'],true))) abort(403);
             } elseif ($kind==='admin') {
                 $actor=Auth::guard('admin')->user();
@@ -68,14 +78,14 @@ class DossierWorkflow
                         || $actor->hasPermission('hebergement.residents.update')
                         || ($to==='eligible' && app(AdmissionDerogationService::class)->canApprove($actor)
                             && AdmissionDerogation::where('demande_id',$id)->where('status','approved')->where('decided_by',$actorId)->exists())),403);
-                if (in_array($to,['accepte','soumis'],true)) abort(403);
+                if (in_array($to,['accepte','soumis'],true) || ($to==='confirme' && $from==='eligible')) abort(403);
             } elseif ($kind==='systeme') {
                 if (!in_array($to,['soumis','expire','refuse','annule','cloture'],true)) abort(403);
             } else abort(403);
             if (in_array($to,['incomplet','refuse','annule','expire'],true) || ($from==='refuse')) {
                 if (trim((string)$reason)==='') $this->invalid('Le motif de cette transition est obligatoire.');
             }
-            if (in_array($to,['soumis','en_etude','eligible','pre_attribue','accepte','attribue_definitif'],true)) {
+            if (in_array($to,['soumis','en_etude','eligible','confirme','pre_attribue','accepte','attribue_definitif'],true)) {
                 $campaign=Campagne::findOrFail($request->campagne_id);
                 if ($campaign->statut!=='active') $this->invalid('La campagne n’est plus active.');
                 if ($to==='soumis' && $campaign->date_echeance_demande
@@ -87,7 +97,7 @@ class DossierWorkflow
             if (in_array($to,['eligible','pre_attribue','attribue_definitif'],true) && ($to !== 'eligible' || !in_array($from,['pre_attribue','accepte'],true))) {
                 $details['eligibilite']=$this->eligible($request);
             }
-            if ($kind === 'etudiant' && in_array($to,['accepte','refuse'],true)
+            if ($kind === 'etudiant' && ($to==='accepte' || ($to==='refuse' && $from==='pre_attribue'))
                 && (string)($details['assignation_id'] ?? '') !== (string)$request->assignation_id) {
                 $this->invalid('La proposition a changé. Consultez la chambre proposée avant de répondre.');
             }
@@ -100,7 +110,7 @@ class DossierWorkflow
                 if ($to==='attribue_definitif' && $assignment->statut!=='confirmee') $this->invalid('La chambre doit être confirmée par le service Logement.');
                 if (in_array($to,['pre_attribue','accepte'],true) && $assignment->statut!=='en_attente') $this->invalid('Cette proposition n’est plus en attente.');
             }
-            if ((in_array($to,['refuse','annule','expire'],true) || ($to==='eligible' && in_array($from,['pre_attribue','accepte'],true))) && $request->assignation_id) {
+            if ((in_array($to,['refuse','annule','expire'],true) || (in_array($to,['eligible','confirme'],true) && in_array($from,['pre_attribue','accepte'],true))) && $request->assignation_id) {
                 $assignment=AssignationChambre::whereKey($request->assignation_id)->first();
                 if ($assignment && $assignment->statut==='confirmee') $this->invalid('Un séjour confirmé doit suivre la procédure de sortie.');
                 if ($assignment && $assignment->statut==='en_attente') {
@@ -130,13 +140,13 @@ class DossierWorkflow
                 $assignment->update(['date_fin'=>null]);
             }
             $legacy=match($to) {
-                'eligible','pre_attribue','accepte'=>'En_verification',
+                'eligible','confirme','pre_attribue','accepte'=>'En_verification',
                 'attribue_definitif','cloture'=>'Acceptée',
                 'refuse','annule','expire'=>'Refusée', default=>'En_attente',
             };
             $changes=['etat_dossier'=>$to,'statut_demande'=>$legacy,'updated_at'=>now()];
-            if ($to==='pre_attribue') $changes['assignation_id']=$assignmentId;
-            if ($to==='eligible') $changes['assignation_id']=null;
+            if (in_array($to,['pre_attribue','attribue_definitif'],true)) $changes['assignation_id']=$assignmentId;
+            if (in_array($to,['eligible','confirme'],true)) $changes['assignation_id']=null;
             DB::table($request->getTable())->where('id_demande',$id)->update($changes);
             $details['auteur_nom'] = $kind === 'admin' ? Auth::guard('admin')->user()?->name
                 : ($kind === 'etudiant' ? $student->name : 'Traitement automatique');
@@ -147,7 +157,8 @@ class DossierWorkflow
             $latest=DemandeEtudiant::where('etudiant_id',$student->getKey())->latest('created_at')->orderByDesc('id_demande')->value('id_demande');
             if ($latest===$id) {
                 $student->update(['statut_inscription'=>match($to) {
-                    'eligible'=>'en_verification','pre_attribue','accepte'=>'en_attente',
+                    // Éligible : en attente de la confirmation de l'étudiant ; confirmé : en vérification (attribution).
+                    'eligible'=>'en_attente','confirme','pre_attribue','accepte'=>'en_verification',
                     'attribue_definitif'=>'residents','refuse','annule','expire'=>'annuler',
                     'cloture'=>'archivee',default=>'demande',
                 }]);

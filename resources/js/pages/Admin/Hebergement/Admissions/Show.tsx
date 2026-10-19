@@ -68,7 +68,7 @@ type Props = {
     urls: { admissions: string | null; contrat: string | null };
 };
 
-const PARCOURS = ['brouillon', 'soumis', 'en_etude', 'eligible', 'pre_attribue', 'accepte', 'attribue_definitif'];
+const PARCOURS = ['brouillon', 'soumis', 'en_etude', 'eligible', 'confirme', 'attribue_definitif'];
 
 const ETATS_REGLE = {
     ok: { label: 'Conforme', variant: 'success', icone: CircleCheck },
@@ -226,7 +226,7 @@ function Eligibilite({ campagne, regles, conformes, score }: NonNullable<Props['
                               : 'Plusieurs critères non conformes — étudiant probablement non éligible.'}
                     </p>
                     <p className="text-sm text-muted">
-                        {conformes} critère(s) conforme(s) sur {regles.length}.
+                        {conformes} critère(s) conforme(s) sur {regles.length}. Seule la validation des documents est bloquante pour rendre le dossier éligible ; les autres critères sont indicatifs.
                     </p>
                 </div>
             </div>
