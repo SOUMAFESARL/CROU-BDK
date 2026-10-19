@@ -38,18 +38,16 @@ class ManualEligibilityTest extends \Tests\Support\DossierTestCase
     {
         Mail::fake();
         $dossier=$this->dossier();
-        $this->workflow->admin($dossier->getKey(),'en_etude');
         $this->evaluation=['eligible'=>false,'regles'=>[['label'=>'Distance','ok'=>true],['label'=>'Documents validés','ok'=>false]]];
         $result=$this->manual(['decision'=>'eligible','score_calcule'=>100]);
         $this->assertSame('error',$result['bool']);
-        $this->assertSame('en_etude',$dossier->fresh()->etat_dossier);
+        $this->assertSame('soumis',$dossier->fresh()->etat_dossier);
         Mail::assertNothingSent();
     }
     public function test_campaign_criteria_do_not_block_eligibility_once_documents_are_validated(): void
     {
         Mail::fake();
         $dossier=$this->dossier();
-        $this->workflow->admin($dossier->getKey(),'en_etude');
         $this->evaluation=['eligible'=>false,'regles'=>[
             ['label'=>'Âge maximum (niveau L1)','ok'=>false],['label'=>'Distance domicile – campus','ok'=>false],
             ['label'=>'Documents validés','ok'=>true],
@@ -60,33 +58,28 @@ class ManualEligibilityTest extends \Tests\Support\DossierTestCase
     public function test_blocking_disciplinary_sanction_still_prevents_eligibility(): void
     {
         $dossier=$this->dossier();
-        $this->workflow->admin($dossier->getKey(),'en_etude');
         $this->evaluation=['eligible'=>false,'regles'=>[['label'=>'Absence de sanction disciplinaire bloquante','ok'=>false]]];
         $this->assertSame('error',$this->manual(['decision'=>'eligible'])['bool']);
-        $this->assertSame('en_etude',$dossier->fresh()->etat_dossier);
+        $this->assertSame('soumis',$dossier->fresh()->etat_dossier);
     }
-    public function test_pending_decision_opens_review_without_validating_eligibility(): void
+    public function test_pending_decision_no_longer_exists(): void
     {
         $dossier=$this->dossier();
-        $this->evaluation=['eligible'=>false];
         $result=$this->manual(['decision'=>'en_attente']);
-        $this->assertSame('success',$result['bool']);
-        $this->assertSame('en_etude',$dossier->fresh()->etat_dossier);
-        $this->assertSame(0,\App\Models\AssignationChambre::count());
+        $this->assertSame('error',$result['bool']);
+        $this->assertSame('soumis',$dossier->fresh()->etat_dossier);
     }
     public function test_missing_eligibility_result_blocks_approval(): void
     {
         $dossier=$this->dossier();
-        $this->workflow->admin($dossier->getKey(),'en_etude');
         $this->evaluation=[];
         $this->assertSame('error',$this->manual(['decision'=>'eligible'])['bool']);
-        $this->assertSame('en_etude',$dossier->fresh()->etat_dossier);
+        $this->assertSame('soumis',$dossier->fresh()->etat_dossier);
     }
     public function test_eligible_student_can_proceed_without_becoming_a_resident(): void
     {
         Mail::fake();
         $dossier=$this->dossier();
-        $this->workflow->admin($dossier->getKey(),'en_etude');
         $this->assertSame('success',$this->manual(['decision'=>'eligible'])['bool']);
         $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
         $this->assertSame('en_attente',Etudiant::findOrFail('student')->statut_inscription);

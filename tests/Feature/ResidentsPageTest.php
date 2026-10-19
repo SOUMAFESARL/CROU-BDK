@@ -63,7 +63,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('Admin/Hebergement/Residents/Index', $page['component']);
         $props = $page['props'];
         $this->assertSame('residents', $props['etat']);
-        $this->assertSame(['residents' => 2, 'en_verification' => 0, 'sans_chambre' => 1], $props['stats']);
+        $this->assertSame(['residents' => 2, 'en_verification' => 0], $props['stats']);
         $this->assertSame(['personnel' => false, 'historique' => false], $props['colonnes']);
         $this->assertSame(10, $props['residents']['per_page']);
 
@@ -152,7 +152,6 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
     public function test_dossier_confirme_par_l_etudiant_propose_l_attribution_de_chambre(): void
     {
         $dossier = $this->dossier('other');
-        $this->workflow->admin($dossier->getKey(), 'en_etude');
         $this->workflow->admin($dossier->getKey(), 'eligible');
         $this->confirm('other');
         $this->assertSame('en_verification', DB::table('etudiants')->where('id_etudiant', 'other')->value('statut_inscription'));

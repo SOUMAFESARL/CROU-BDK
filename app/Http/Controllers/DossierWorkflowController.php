@@ -8,7 +8,7 @@ class DossierWorkflowController extends Controller
 {
     public function admin(Request $request, DemandeEtudiant $demande)
     {
-        $data=$request->validate(['etat'=>'required|in:en_etude,incomplet,eligible,refuse,annule','motif'=>'nullable|string|max:5000']);
+        $data=$request->validate(['etat'=>'required|in:soumis,incomplet,eligible,refuse,annule','motif'=>'nullable|string|max:5000']);
         $updated=app(DossierWorkflow::class)->admin($demande->getKey(),$data['etat'],$data['motif']??null);
         return $request->expectsJson() ? response()->json(['data'=>$updated->load('transitions')])
             : back()->with('success','Dossier : '.DossierWorkflow::LABELS[$updated->etat_dossier].'.');

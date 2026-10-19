@@ -35,7 +35,6 @@ class AllocationChambresPageTest extends \Tests\Support\DossierTestCase
 
         foreach (['student', 'other'] as $student) {
             $dossier = $this->dossier($student);
-            $this->workflow->admin($dossier->getKey(), 'en_etude');
             $this->workflow->admin($dossier->getKey(), 'eligible');
             $this->confirm($student);
         }

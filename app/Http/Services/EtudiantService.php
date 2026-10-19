@@ -240,7 +240,7 @@ protected $etudiantService;
         try {
             $demande = \App\Models\DemandeEtudiant::where('etudiant_id',$id)->latest('created_at')->orderByDesc('id_demande')->firstOrFail();
             $target = match($data['decision'] ?? null) {
-                'eligible'=>'eligible','non_eligible'=>'refuse','en_attente'=>'en_etude',default=>null,
+                'eligible'=>'eligible','non_eligible'=>'refuse',default=>null,
             };
             if (!$target) return ['bool'=>'error','message'=>'Décision invalide.'];
             app(DossierWorkflow::class)->admin($demande->getKey(),$target,$data['commentaire']??null);

@@ -165,7 +165,7 @@ class ParcImmobilierController extends Controller
     /** Chambres réellement configurées (numéro et type renseignés), comme `ChambreRepository::getAll()`. */
     private function chambresValides()
     {
-        return Chambre::query()->whereNotNull('numero_chambre')->whereNotNull('type_chambre_id');
+        return Chambre::query()->configurees();
     }
 
     /**

@@ -68,7 +68,7 @@ type Props = {
     urls: { admissions: string | null; contrat: string | null };
 };
 
-const PARCOURS = ['brouillon', 'soumis', 'en_etude', 'eligible', 'confirme', 'attribue_definitif'];
+const PARCOURS = ['brouillon', 'soumis', 'eligible', 'confirme', 'attribue_definitif'];
 
 const ETATS_REGLE = {
     ok: { label: 'Conforme', variant: 'success', icone: CircleCheck },
@@ -479,7 +479,8 @@ function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: stri
     const [motif, setMotif] = useState('');
     const [erreurs, setErreurs] = useState<{ etat?: string; motif?: string }>({});
     const [enCours, setEnCours] = useState(false);
-    const position = etat ? PARCOURS.indexOf(etat) : -1;
+    // « En étude » ne subsiste que sur les dossiers de l'ancien parcours : affiché au niveau « Soumis ».
+    const position = etat ? PARCOURS.indexOf(etat === 'en_etude' ? 'soumis' : etat) : -1;
 
     const enregistrer = async () => {
         const nouvelles: typeof erreurs = {};

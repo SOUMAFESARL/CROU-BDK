@@ -14,9 +14,9 @@ import {
     Area,
     AreaChart,
     Bar,
+    BarChart,
     CartesianGrid,
     Cell,
-    ComposedChart,
     Pie,
     PieChart,
     XAxis,
@@ -34,15 +34,13 @@ import {
 } from "@/components/ui/select";
 import {
     ChartContainer,
-    ChartLegend,
-    ChartLegendContent,
     ChartTooltip,
     ChartTooltipContent,
     type ChartConfig,
 } from "@/components/ui/chart";
 import { StatCard, type KpiTone } from "@/components/ui/stat-card";
 import { cn } from "@/lib/utils";
-import { Separator } from '@/components/ui/separator';
+import { Separator } from "@/components/ui/separator";
 
 type Period = "week" | "month" | "quarter" | "year";
 
@@ -102,7 +100,9 @@ const COLORS = {
     danger: "#DC2626",
 };
 
+/** Nouvelles demandes, en attente, en cours, résidents, rejetées. */
 const STATUS_COLORS = [
+    "#54595F",
     COLORS.accent,
     COLORS.secondary,
     COLORS.primary,
@@ -208,21 +208,11 @@ export default function DashboardIndex({
                 )}
 
                 {(showTrend || access.housing) && (
-                    <div
-                        className={cn(
-                            "grid gap-4",
-                            showTrend &&
-                                access.housing &&
-                                "xl:grid-cols-[minmax(0,1.8fr)_minmax(320px,0.8fr)]",
+                    <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                        {access.admissions && (
+                            <RequestsTrendChart trend={trend} />
                         )}
-                    >
-                        {showTrend && (
-                            <ActivityChart
-                                trend={trend}
-                                admissions={access.admissions}
-                                finance={access.finance}
-                            />
-                        )}
+                        {access.finance && <PaymentsTrendChart trend={trend} />}
                         {access.housing && <OccupancyChart stats={stats} />}
                     </div>
                 )}
@@ -479,38 +469,19 @@ function Panel({
     );
 }
 
-function ActivityChart({
-    trend,
-    admissions,
-    finance,
-}: {
-    trend: DashboardProps["trend"];
-    admissions: boolean;
-    finance: boolean;
-}) {
+function RequestsTrendChart({ trend }: { trend: DashboardProps["trend"] }) {
     const data = trend.labels.map((label, index) => ({
         label,
         demandes: trend.requests[index] ?? 0,
-        encaissements: trend.payments[index] ?? 0,
     }));
     const config = {
-        demandes: { label: "Demandes", color: COLORS.secondary },
-        encaissements: { label: "Encaissements", color: COLORS.primary },
+        demandes: { label: "Nouvelles demandes", color: COLORS.secondary },
     } satisfies ChartConfig;
-    const title =
-        admissions && finance
-            ? "Évolution des demandes et encaissements"
-            : finance
-              ? "Évolution des encaissements"
-              : "Évolution des demandes";
 
     return (
-        <Panel kicker="Activité" title={title}>
-            <ChartContainer config={config} className="aspect-auto h-80 w-full">
-                <ComposedChart
-                    data={data}
-                    margin={{ left: 0, right: 0, top: 8 }}
-                >
+        <Panel kicker="Admissions" title="Évolution des nouvelles demandes">
+            <ChartContainer config={config} className="aspect-auto h-64 w-full">
+                <AreaChart data={data} margin={{ left: 0, right: 8, top: 8 }}>
                     <CartesianGrid vertical={false} strokeDasharray="4 4" />
                     <XAxis
                         dataKey="label"
@@ -519,52 +490,68 @@ function ActivityChart({
                         tickMargin={8}
                         minTickGap={16}
                     />
-                    {admissions && (
-                        <YAxis
-                            yAxisId="demandes"
-                            allowDecimals={false}
-                            tickLine={false}
-                            axisLine={false}
-                            width={32}
-                        />
-                    )}
-                    {finance && (
-                        <YAxis
-                            yAxisId="encaissements"
-                            orientation={admissions ? "right" : "left"}
-                            tickLine={false}
-                            axisLine={false}
-                            width={48}
-                            tickFormatter={(value: number) =>
-                                `${compact.format(value)} F`
-                            }
-                        />
-                    )}
+                    <YAxis
+                        allowDecimals={false}
+                        tickLine={false}
+                        axisLine={false}
+                        width={32}
+                    />
                     <ChartTooltip
                         content={<ChartTooltipContent indicator="dot" />}
                     />
-                    <ChartLegend content={<ChartLegendContent />} />
-                    {finance && (
-                        <Bar
-                            yAxisId="encaissements"
-                            dataKey="encaissements"
-                            fill="var(--color-encaissements)"
-                            radius={[4, 4, 0, 0]}
-                            maxBarSize={28}
-                        />
-                    )}
-                    {admissions && (
-                        <Area
-                            yAxisId="demandes"
-                            type="monotone"
-                            dataKey="demandes"
-                            stroke="var(--color-demandes)"
-                            strokeWidth={2}
-                            fill="var(--color-demandes)"
-                            fillOpacity={0.15}
-                        />
-                    )}
-                </ComposedChart>
+                    <Area
+                        type="monotone"
+                        dataKey="demandes"
+                        stroke="var(--color-demandes)"
+                        strokeWidth={2}
+                        fill="var(--color-demandes)"
+                        fillOpacity={0.15}
+                    />
+                </AreaChart>
+            </ChartContainer>
+        </Panel>
+    );
+}
+
+function PaymentsTrendChart({ trend }: { trend: DashboardProps["trend"] }) {
+    const data = trend.labels.map((label, index) => ({
+        label,
+        encaissements: trend.payments[index] ?? 0,
+    }));
+    const config = {
+        encaissements: { label: "Encaissements", color: COLORS.primary },
+    } satisfies ChartConfig;
+
+    return (
+        <Panel kicker="Finances" title="Évolution des encaissements">
+            <ChartContainer config={config} className="aspect-auto h-64 w-full">
+                <BarChart data={data} margin={{ left: 0, right: 8, top: 8 }}>
+                    <CartesianGrid vertical={false} strokeDasharray="4 4" />
+                    <XAxis
+                        dataKey="label"
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={8}
+                        minTickGap={16}
+                    />
+                    <YAxis
+                        tickLine={false}
+                        axisLine={false}
+                        width={48}
+                        tickFormatter={(value: number) =>
+                            `${compact.format(value)} F`
+                        }
+                    />
+                    <ChartTooltip
+                        content={<ChartTooltipContent indicator="dot" />}
+                    />
+                    <Bar
+                        dataKey="encaissements"
+                        fill="var(--color-encaissements)"
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={28}
+                    />
+                </BarChart>
             </ChartContainer>
         </Panel>
     );

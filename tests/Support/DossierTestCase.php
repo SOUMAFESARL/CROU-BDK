@@ -171,7 +171,6 @@ abstract class DossierTestCase extends TestCase
     protected function eligibleRequest(): \App\Models\DemandeEtudiant
     {
         $dossier=$this->dossier();
-        $this->workflow->admin($dossier->getKey(),'en_etude','Vérification du dossier.');
         return $this->workflow->admin($dossier->getKey(),'eligible','Critères vérifiés.');
     }
     protected function accept(\App\Models\DemandeEtudiant $dossier, AssignationChambre $assignment): void

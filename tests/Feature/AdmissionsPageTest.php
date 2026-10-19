@@ -132,8 +132,8 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $page = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student');
 
         $suivi = $page['props']['suivi'];
-        // Depuis « soumis », l'agent peut passer à : incomplet, en étude, refusé, annulé (pas « expiré », réservé au système).
-        $this->assertSame(['incomplet', 'en_etude', 'refuse', 'annule'], array_column($suivi['actions'], 'etat'));
+        // Depuis « soumis », l'agent peut passer à : incomplet, éligible, refusé, annulé (pas « expiré », réservé au système).
+        $this->assertSame(['incomplet', 'eligible', 'refuse', 'annule'], array_column($suivi['actions'], 'etat'));
         $this->assertNotNull($suivi['transition']);
         $this->assertNotEmpty($suivi['historique']);
     }

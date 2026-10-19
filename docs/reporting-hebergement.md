@@ -5,12 +5,14 @@ Accès administrateur : **Hébergement > Reporting**, ou **Statistiques** sous c
 - Synthèse : `/admin/gestion-hebergement/reporting`.
 - Module : `/admin/gestion-hebergement/reporting/{module}`.
 - Filtres GET : `periode` (`week`, `month`, `quarter`, `year`, `custom`), `cite` (identifiant facultatif), `debut` et `fin` au format `YYYY-MM-DD` pour une période personnalisée.
-- Le changement de module conserve les filtres. Le bouton **Imprimer / PDF** utilise l’impression du navigateur.
+- Le changement de module conserve les filtres. Le bouton **Imprimer / PDF** utilise l’impression du navigateur (les valeurs exactes sont imprimées sous chaque graphique).
+- Page Inertia + React : `resources/js/pages/Admin/Hebergement/Reporting/Index.tsx`, graphiques dans `resources/js/components/reporting/report-charts.tsx` (shadcn/Recharts). Chaque tableau du service porte un `kind` qui choisit le graphique : `monthly` → aire (≥ 3 mois) ou barres, `distribution` → anneau (≤ 6 parts) ou barres horizontales avec regroupement « Autres », `comparison` → barres groupées capacité / places libres. Chaque graphique a une vue **Tableau**.
+- Les métriques dont le libellé se termine par `(F CFA)` ou `(%)` sont affichées avec leur unité ; les pourcentages ont une jauge.
 - Les routes restent sous le middleware administrateur du projet. Les réponses sont privées et non mises en cache.
 
 | Module | Indicateurs |
 |---|---|
-| `parc-immobilier` | Bâtiments, chambres, capacité, occupation, réservations, places libres utilisables, état des chambres et comparaison des cités |
+| `parc-immobilier` | Cités, bâtiments, chambres, capacité, occupation, réservations, places libres utilisables, état des chambres et comparaison des cités |
 | `equipements` | Références, stock actuel, alertes de seuil, entrées et sorties de stock |
 | `campagnes` | Dossiers déposés, parcours, campagnes, niveaux, boursiers et demandes avec attribution confirmée |
 | `residents` | Résidents distincts, affectations actives, nouvelles affectations et approbations des contrats |
@@ -25,6 +27,8 @@ Accès administrateur : **Hébergement > Reporting**, ou **Statistiques** sous c
 Les périodes prédéfinies vont du début de la semaine, du mois, du trimestre ou de l’année jusqu’à la fin de la journée courante. Les dates personnalisées sont inclusives.
 
 Le parc et les résidents actifs représentent la situation actuelle. Les distributions de statuts et les soldes représentent aussi l’état actuel des dossiers retenus dans la période, et ne constituent pas une photographie comptable historique.
+
+Le module `parc-immobilier` porte sur le même périmètre que la page Parc immobilier : seules les chambres configurées (numéro et type renseignés, scope `Chambre::configurees()`) sont comptées, ainsi que leurs affectations. Les deux pages affichent donc les mêmes chambres, capacité et occupants.
 
 Les places libres sont calculées chambre par chambre après déduction des affectations confirmées et des propositions encore valables. Les chambres en maintenance, hors service ou fermées ne fournissent aucune place libre. Les affectations confirmées futures comptent comme réservations, pas comme occupation actuelle.
 

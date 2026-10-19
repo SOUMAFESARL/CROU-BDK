@@ -214,6 +214,15 @@ class Chambre extends Model
     }
 
     /**
+     * Scope: chambres réellement configurées (numéro et type renseignés), comme `ChambreRepository::getAll()`.
+     * Base commune des statistiques du parc immobilier et de son reporting.
+     */
+    public function scopeConfigurees($query)
+    {
+        return $query->whereNotNull('numero_chambre')->whereNotNull('type_chambre_id');
+    }
+
+    /**
      * Scope: Chambres disponibles
      * @param $query
      * @param $campagne - Objet Campagne

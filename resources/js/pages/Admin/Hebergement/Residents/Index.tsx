@@ -31,7 +31,7 @@ type Resident = {
 
 type Props = {
     residents: Paginated<Resident>;
-    stats: { residents: number; en_verification: number; sans_chambre: number };
+    stats: { residents: number; en_verification: number };
     etat: Filtre;
     filters: { q: string };
     colonnes: { personnel: boolean; historique: boolean };
@@ -189,7 +189,7 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                 label="Filtrer les étudiants"
                 active={etat}
                 ringActive={!vueResidents}
-                className="xl:grid-cols-3"
+                className="xl:grid-cols-2"
                 items={[
                     {
                         key: 'en_verification',
@@ -200,14 +200,6 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                         extra: campagneActive ? `Campagne ${campagneActive.annee}` : undefined,
                     },
                     { key: 'residents', label: 'Résidents', value: nombre(stats.residents), tone: 'green', href: urls.filtres?.residents, extra: 'Déjà logés' },
-                    {
-                        key: 'sans_chambre',
-                        label: 'Résidents sans chambre',
-                        value: nombre(stats.sans_chambre),
-                        tone: 'amber',
-                        extra: stats.sans_chambre > 0 ? 'À attribuer' : 'Aucun',
-                        highlight: stats.sans_chambre > 0,
-                    },
                 ]}
             />
 

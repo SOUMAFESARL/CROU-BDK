@@ -27,7 +27,6 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->workflow->transition($dossier->getKey(),'soumis','etudiant','student');
         $this->workflow->admin($dossier->getKey(),'incomplet','Certificat à fournir.');
         $this->workflow->transition($dossier->getKey(),'soumis','etudiant','student','Certificat ajouté.');
-        $this->workflow->admin($dossier->getKey(),'en_etude','Pièces reçues.');
         $this->workflow->admin($dossier->getKey(),'eligible');
         // Éligible : liste « En attente » tant que l'étudiant n'a pas confirmé.
         $this->assertSame('en_attente',Etudiant::findOrFail('student')->statut_inscription);
@@ -46,7 +45,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->assertSame('confirmee',$assignment->fresh()->statut);
         $this->assertNull($assignment->fresh()->date_fin);
         $this->assertSame('residents',Etudiant::findOrFail('student')->statut_inscription);
-        $this->assertSame(['brouillon','soumis','incomplet','soumis','en_etude','eligible','confirme','attribue_definitif'],
+        $this->assertSame(['brouillon','soumis','incomplet','soumis','eligible','confirme','attribue_definitif'],
             $dossier->transitions()->pluck('nouvel_etat')->all());
         $this->assertDatabaseHas('dossier_transitions',['demande_id'=>$dossier->getKey(),'nouvel_etat'=>'confirme','acteur_type'=>'etudiant','acteur_id'=>'student']);
     }
@@ -119,7 +118,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     public function test_stages_cannot_be_skipped_or_written_directly(): void
     {
         $dossier=$this->dossier();
-        try {$this->workflow->admin($dossier->getKey(),'eligible');$this->fail('Étude ignorée');}
+        try {$this->workflow->admin($dossier->getKey(),'confirme');$this->fail('Confirmation ignorée');}
         catch(ValidationException $e) {$this->assertSame('soumis',$dossier->fresh()->etat_dossier);}
         $this->expectException(ValidationException::class);
         $dossier->update(['statut_demande'=>'Acceptée','etat_dossier'=>'attribue_definitif']);
@@ -140,11 +139,29 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     }
     public function test_failed_eligibility_keeps_the_request_under_review(): void
     {
-        $dossier=$this->dossier();$this->workflow->admin($dossier->getKey(),'en_etude');
+        $dossier=$this->dossier();
         $this->evaluation['eligible']=false;$this->evaluation['regles'][1]['ok']=false;
         try {$this->workflow->admin($dossier->getKey(),'eligible');$this->fail('Inéligible admis');}
-        catch(ValidationException $e) {$this->assertSame('en_etude',$dossier->fresh()->etat_dossier);}
+        catch(ValidationException $e) {$this->assertSame('soumis',$dossier->fresh()->etat_dossier);}
         $this->assertDatabaseCount('assignation_chambres',0);
+    }
+    public function test_reexamination_returns_to_submitted_without_letting_the_student_resubmit(): void
+    {
+        $dossier=$this->dossier();
+        // L'admin ne resoumet pas un dossier incomplet à la place de l'étudiant.
+        $this->workflow->admin($dossier->getKey(),'incomplet','Certificat à fournir.');
+        try {$this->workflow->admin($dossier->getKey(),'soumis');$this->fail('Soumission par l’admin');}
+        catch(\Symfony\Component\HttpKernel\Exception\HttpException $e) {$this->assertSame(403,$e->getStatusCode());}
+        $this->workflow->transition($dossier->getKey(),'soumis','etudiant','student','Certificat ajouté.');
+        $this->workflow->admin($dossier->getKey(),'refuse','Pièces falsifiées.');
+        try {$this->workflow->transition($dossier->getKey(),'soumis','etudiant','student');$this->fail('Resoumission d’un refus');}
+        catch(\Symfony\Component\HttpKernel\Exception\HttpException $e) {$this->assertSame(403,$e->getStatusCode());}
+        try {$this->workflow->admin($dossier->getKey(),'soumis');$this->fail('Réouverture sans motif');}
+        catch(ValidationException $e) {$this->assertSame('refuse',$dossier->fresh()->etat_dossier);}
+        $this->workflow->admin($dossier->getKey(),'soumis','Erreur de saisie.');
+        $this->assertSame('soumis',$dossier->fresh()->etat_dossier);
+        $this->workflow->admin($dossier->getKey(),'eligible');
+        $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
     }
     public function test_refusal_releases_the_proposal_and_is_audited(): void
     {
@@ -218,7 +235,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     public function test_http_transition_checks_actor_permission_and_owner(): void
     {
         $dossier=$this->dossier();
-        $this->postJson(route('admin.dossiers.transition',$dossier),['etat'=>'en_etude'])->assertOk()->assertJsonPath('data.etat_dossier','en_etude');
+        $this->postJson(route('admin.dossiers.transition',$dossier),['etat'=>'incomplet','motif'=>'Pièce manquante.'])->assertOk()->assertJsonPath('data.etat_dossier','incomplet');
         $student=Etudiant::findOrFail('other');$this->actingAs($student,'etudiant');
         $this->postJson(route('etudiants.dossiers.transition',$dossier),['etat'=>'annule','motif'=>'Test'])->assertForbidden();
     }
@@ -304,7 +321,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $actor->fill(['id_user'=>'observer']);
         $actor->shouldReceive('hasPermission')->andReturn(false);
         $this->actingAs($actor,'admin');
-        $this->postJson(route('admin.dossiers.transition',$dossier),['etat'=>'en_etude'])->assertForbidden();
+        $this->postJson(route('admin.dossiers.transition',$dossier),['etat'=>'incomplet','motif'=>'Pièce manquante.'])->assertForbidden();
         $this->assertSame('soumis',$dossier->fresh()->etat_dossier);
     }
     public function test_credentials_are_sent_once_when_the_request_becomes_eligible(): void
@@ -313,13 +330,12 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         DB::table('etudiants')->where('id_etudiant','student')->update(['email1'=>'etudiant@example.com']);
         \Illuminate\Support\Facades\Notification::fake();
         $dossier=$this->dossier();
-        $this->workflow->admin($dossier->getKey(),'en_etude');
         \Illuminate\Support\Facades\Notification::assertNothingSent();
         $this->workflow->admin($dossier->getKey(),'eligible');
         \Illuminate\Support\Facades\Notification::assertSentOnDemandTimes(\App\Notifications\EtudiantIdentifiantsNotification::class,1);
         $this->assertNotNull(DB::table('etudiants')->where('id_etudiant','student')->value('password'));
         // Un nouveau passage en « Éligible » ne remplace pas le mot de passe déjà transmis.
-        $this->workflow->admin($dossier->getKey(),'en_etude','Réexamen.');
+        $this->workflow->admin($dossier->getKey(),'soumis','Réexamen.');
         $this->workflow->admin($dossier->getKey(),'eligible');
         \Illuminate\Support\Facades\Notification::assertSentOnDemandTimes(\App\Notifications\EtudiantIdentifiantsNotification::class,1);
     }

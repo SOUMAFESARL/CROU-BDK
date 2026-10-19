@@ -214,7 +214,7 @@ class CampagnesAdmissionController extends Controller
                     'decider' => !$derogation->decided_at && $peutApprouver && (string) $derogation->requested_by !== (string) $admin->getKey()
                         ? $url('admin.hebergement.campagnes_admission.derogations.decide', ['derogation' => $derogation->id]) : null,
                 ])->values(),
-                'demander' => $derniere?->etat_dossier === 'en_etude'
+                'demander' => in_array($derniere?->etat_dossier, ['soumis', 'en_etude'], true)
                     && !$derogations->where('demande_id', $derniere->getKey())->contains('status', 'pending')
                     ? $url('admin.hebergement.campagnes_admission.derogations.store', ['student' => $etudiant->getKey()]) : null,
             ] : null,
@@ -353,7 +353,7 @@ class CampagnesAdmissionController extends Controller
     /** Suivi du dossier (équivalent admin du partiel `dossier-cycle`) : parcours, actions permises et historique. */
     private function suiviDossier($dossier, $admin): array
     {
-        $actions = array_values(array_intersect(DossierWorkflow::NEXT[$dossier->etat_dossier] ?? [], ['en_etude', 'incomplet', 'eligible', 'refuse', 'annule']));
+        $actions = array_values(array_intersect(DossierWorkflow::NEXT[$dossier->etat_dossier] ?? [], ['soumis', 'incomplet', 'eligible', 'refuse', 'annule']));
         $peutChanger = app(AdminAccess::class)->allows($admin, 'admin.dossiers.transition');
         $proposition = in_array($dossier->etat_dossier, ['pre_attribue', 'accepte', 'attribue_definitif'], true) ? $dossier->proposition : null;
 
@@ -363,7 +363,7 @@ class CampagnesAdmissionController extends Controller
                 'chambre' => $proposition->chambre?->numero_chambre ?? $proposition->chambre_id,
                 'jusqu_au' => $proposition->date_fin ? Carbon::parse($proposition->date_fin)->format('Y-m-d H:i') : null,
             ] : null,
-            'actions' => $peutChanger ? array_map(fn ($etat) => ['etat' => $etat, 'label' => DossierWorkflow::LABELS[$etat] ?? $etat], $actions) : [],
+            'actions' => $peutChanger ? array_map(fn ($etat) => ['etat' => $etat, 'label' => $etat === 'soumis' ? 'Réexaminer (retour à « Soumis »)' : (DossierWorkflow::LABELS[$etat] ?? $etat)], $actions) : [],
             'transition' => $peutChanger && $actions ? route('admin.dossiers.transition', $dossier) : null,
             'assignation_id' => $dossier->assignation_id,
             'historique' => $admin->hasPermission('hebergement.admissions.history')
@@ -657,7 +657,7 @@ class CampagnesAdmissionController extends Controller
     {
         // Valider les données
         $validated = $request->validate([
-            'decision' => 'required|in:eligible,non_eligible,en_attente',
+            'decision' => 'required|in:eligible,non_eligible',
             'commentaire' => 'nullable|required_if:decision,non_eligible|string|max:500',
             'score_calcule' => 'nullable|integer|min:0|max:100',
             'motif' => 'nullable|string|max:100',

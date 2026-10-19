@@ -14,16 +14,18 @@ class DossierWorkflow
         'attribue_definitif'=>'Attribué définitif','refuse'=>'Refusé','annule'=>'Annulé',
         'expire'=>'Expiré','cloture'=>'Clôturé',
     ];
+    // Pas d'étape « En étude » : l'admin statue directement sur un dossier soumis ; un réexamen ou la
+    // réouverture d'un refus ramène le dossier en « Soumis » (en_etude : dossiers de l'ancien parcours).
     public const NEXT = [
-        'brouillon'=>['soumis','annule'], 'soumis'=>['incomplet','en_etude','refuse','annule','expire'],
+        'brouillon'=>['soumis','annule'], 'soumis'=>['incomplet','eligible','refuse','annule','expire'],
         'incomplet'=>['soumis','annule','expire'], 'en_etude'=>['incomplet','eligible','refuse','annule','expire'],
         // L'étudiant éligible confirme (ou refuse) son intérêt avant toute attribution de chambre ;
         // l'attribution depuis « Confirmé » est définitive (pre_attribue/accepte : dossiers de l'ancien parcours).
-        'eligible'=>['confirme','en_etude','refuse','annule','expire'],
-        'confirme'=>['attribue_definitif','en_etude','refuse','annule','expire'],
+        'eligible'=>['confirme','soumis','refuse','annule','expire'],
+        'confirme'=>['attribue_definitif','soumis','refuse','annule','expire'],
         'pre_attribue'=>['accepte','refuse','eligible','confirme','annule','expire'],
         'accepte'=>['attribue_definitif','eligible','confirme','annule','expire'],
-        'attribue_definitif'=>['cloture'], 'refuse'=>['en_etude'], 'annule'=>[], 'expire'=>[], 'cloture'=>[],
+        'attribue_definitif'=>['cloture'], 'refuse'=>['soumis'], 'annule'=>[], 'expire'=>[], 'cloture'=>[],
     ];
     public function current(string $studentId, string $campaignId): DemandeEtudiant
     {
@@ -68,6 +70,7 @@ class DossierWorkflow
             if ($kind==='etudiant') {
                 abort_unless((string)$actorId===(string)$student->getKey(),403);
                 if (!in_array($to,['soumis','confirme','accepte','refuse','annule'],true)
+                    || ($to==='soumis' && !in_array($from,['brouillon','incomplet'],true))
                     || ($to==='confirme' && $from!=='eligible')
                     || ($to==='refuse' && !in_array($from,['eligible','pre_attribue'],true))
                     || ($to==='annule' && !in_array($from,['brouillon','soumis','incomplet'],true))) abort(403);
@@ -78,9 +81,12 @@ class DossierWorkflow
                         || $actor->hasPermission('hebergement.residents.update')
                         || ($to==='eligible' && app(AdmissionDerogationService::class)->canApprove($actor)
                             && AdmissionDerogation::where('demande_id',$id)->where('status','approved')->where('decided_by',$actorId)->exists())),403);
-                if (in_array($to,['accepte','soumis'],true) || ($to==='confirme' && $from==='eligible')) abort(403);
+                // L'admin ne soumet pas à la place de l'étudiant : « Soumis » n'est qu'un retour en réexamen.
+                if ($to==='accepte' || ($to==='soumis' && !in_array($from,['eligible','confirme','refuse'],true))
+                    || ($to==='confirme' && $from==='eligible')) abort(403);
             } elseif ($kind==='systeme') {
-                if (!in_array($to,['soumis','expire','refuse','annule','cloture'],true)) abort(403);
+                if (!in_array($to,['soumis','expire','refuse','annule','cloture'],true)
+                    || ($to==='soumis' && !in_array($from,['brouillon','incomplet'],true))) abort(403);
             } else abort(403);
             if (in_array($to,['incomplet','refuse','annule','expire'],true) || ($from==='refuse')) {
                 if (trim((string)$reason)==='') $this->invalid('Le motif de cette transition est obligatoire.');
@@ -88,7 +94,7 @@ class DossierWorkflow
             if (in_array($to,['soumis','en_etude','eligible','confirme','pre_attribue','accepte','attribue_definitif'],true)) {
                 $campaign=Campagne::findOrFail($request->campagne_id);
                 if ($campaign->statut!=='active') $this->invalid('La campagne n’est plus active.');
-                if ($to==='soumis' && $campaign->date_echeance_demande
+                if ($to==='soumis' && $kind!=='admin' && $campaign->date_echeance_demande
                     && \Carbon\Carbon::parse($campaign->date_echeance_demande)->endOfDay()->isPast()) {
                     $this->invalid('Le délai de dépôt est dépassé.');
                 }
@@ -180,7 +186,7 @@ class DossierWorkflow
         $target=match(mb_strtolower($status)) {
             'refusée','refusee','rejetee'=>'refuse', 'annulee','annuler'=>'annule',
             'acceptée','acceptee','validee'=>'attribue_definitif',
-            'en_verification'=>'eligible', 'en_cours'=>'en_etude',
+            'en_verification'=>'eligible', 'en_cours'=>'soumis',
             'en_attente'=>'soumis', default=>null,
         };
         if (!$target) $this->invalid('Statut inconnu.');

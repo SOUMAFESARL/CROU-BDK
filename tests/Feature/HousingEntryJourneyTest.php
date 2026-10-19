@@ -31,7 +31,7 @@ class HousingEntryJourneyTest extends \Tests\Support\DossierTestCase
     private function approvedAssignment(string $student='student'): AssignationChambre
     {
         $dossier=$this->dossier($student);
-        $this->workflow->admin($dossier->getKey(),'en_etude');$this->workflow->admin($dossier->getKey(),'eligible');
+        $this->workflow->admin($dossier->getKey(),'eligible');
         // L'étudiant confirme sa demande ; l'attribution est alors définitive.
         $assignment=$this->allocate($student);
         StudentContractApproval::create(['id'=>(string)\Illuminate\Support\Str::uuid(),'assignment_id'=>$assignment->getKey(),

@@ -8,6 +8,7 @@ use App\Services\HousingReportingService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Inertia\Inertia;
 
 class ReportingHebergementController extends Controller
 {
@@ -35,7 +36,22 @@ class ReportingHebergementController extends Controller
         $cites = Cite::query()->orderBy('name')->get(['id_cite', 'name']);
         // The entry page lets users choose a module without loading every report.
         $reports = $module === 'synthese' ? [] : $service->reports($module, $debut, $fin, $citeId, $request->user('admin'));
-        return response()->view('admin.hebergement.reporting.modules', compact('module', 'modules', 'reports', 'periode', 'debut', 'fin', 'citeId', 'cites'))
-            ->header('Cache-Control', 'private, no-store');
+        $query = array_filter(['periode' => $filters['periode'] ?? null, 'debut' => $filters['debut'] ?? null, 'fin' => $filters['fin'] ?? null, 'cite' => $citeId]);
+        $user = $request->user('admin');
+
+        return Inertia::render('Admin/Hebergement/Reporting/Index', [
+            'module' => $module,
+            'modules' => collect($modules)->map(fn ($label, $key) => [
+                'key' => $key,
+                'label' => $label,
+                'href' => route('admin.hebergement.reporting.module', ['module' => $key] + $query),
+            ])->values(),
+            'reports' => array_values($reports),
+            'filters' => ['periode' => $periode, 'debut' => $debut->toDateString(), 'fin' => $fin->toDateString(), 'cite' => $citeId],
+            'cites' => $cites->map(fn ($cite) => ['id' => $cite->id_cite, 'name' => $cite->name])->values(),
+            'synthese' => route('admin.hebergement.reporting.index', $query),
+            'canExport' => (bool) $user?->hasPermission('hebergement.reporting.export'),
+            'generatedAt' => now()->format('d/m/Y à H:i'),
+        ])->toResponse($request)->header('Cache-Control', 'private, no-store');
     }
 }

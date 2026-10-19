@@ -37,7 +37,7 @@ class AdmissionDerogationTest extends TestCase
         Schema::create('assignation_chambres', function (Blueprint $t) {
             $t->string('id_assignation'); $t->string('etudiant_id'); $t->string('statut'); $t->timestamp('date_fin')->nullable();
         });
-        Schema::table('demande',function(Blueprint $t){$t->string('assignation_id')->nullable();$t->string('etat_dossier')->default('en_etude');});
+        Schema::table('demande',function(Blueprint $t){$t->string('assignation_id')->nullable();$t->string('etat_dossier')->default('soumis');});
         Schema::create('dossier_transitions',function(Blueprint $t){
             $t->id();$t->string('demande_id');$t->string('ancien_etat')->nullable();$t->string('nouvel_etat');
             $t->string('acteur_type');$t->string('acteur_id')->nullable();$t->text('motif')->nullable();$t->json('details')->nullable();$t->timestamp('created_at');

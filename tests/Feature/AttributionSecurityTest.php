@@ -25,7 +25,6 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
         parent::setUp();
         foreach (['student','other'] as $student) {
             $dossier=$this->dossier($student);
-            $this->workflow->admin($dossier->getKey(),'en_etude');
             $this->workflow->admin($dossier->getKey(),'eligible');
             $this->confirm($student);
         }
@@ -35,7 +34,6 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
         if (in_array($this->workflow->current($student,'campaign')->etat_dossier,['annule','expire','refuse'],true)) {
             $this->travel(1)->seconds();
             $dossier=$this->dossier($student);
-            $this->workflow->admin($dossier->getKey(),'en_etude');
             $this->workflow->admin($dossier->getKey(),'eligible');
         }
         return parent::allocate($student,$room);

@@ -61,6 +61,7 @@ return [
         'admin.hebergement.campagnes_admission.validate_document' => 'hebergement.admissions.validate',
         'admin.hebergement.depart_etat_des_lieux.depart' => 'hebergement.departs.view',
         'admin.hebergement.depart_etat_des_lieux.departure_request.decision' => 'hebergement.departs.close',
+        'admin.hebergement.depart_etat_des_lieux.edl.pdf' => 'hebergement.departs.view',
         'admin.hebergement.depart_etat_des_lieux.etatDesLieux' => 'hebergement.departs.view',
         'admin.hebergement.depart_etat_des_lieux.settings.edit' => 'hebergement.parametrage.configure',
         'admin.hebergement.depart_etat_des_lieux.settings.update' => 'hebergement.parametrage.configure',

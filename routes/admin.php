@@ -267,6 +267,7 @@ Route::middleware(['admin'])->group(function () {
             Route::get('/etat-des-lieux', 'etatDesLieux')->name('etatDesLieux');
             Route::post('/etat-des-lieux', 'storeEdl')->name('store_edl');
             Route::put('/etat-des-lieux/entree/{id}', 'updateEdl')->name('update_eld');
+            Route::get('/etat-des-lieux/{id}/pdf', 'edlPdf')->name('edl.pdf');
 
 
         });

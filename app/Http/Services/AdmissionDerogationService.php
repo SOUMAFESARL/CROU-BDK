@@ -36,7 +36,7 @@ class AdmissionDerogationService
         $campaign = Campagne::whereKey($request->campagne_id)->lockForUpdate()->firstOrFail();
         $latest = DemandeEtudiant::where('etudiant_id', $studentId)->latest('created_at')->first();
         if (!$latest || $latest->getKey() !== $requestId || $campaign->statut !== 'active'
-            || $request->etat_dossier !== 'en_etude') {
+            || !in_array($request->etat_dossier, ['soumis', 'en_etude'], true)) {
             throw ValidationException::withMessages(['reason' => 'La dérogation doit concerner le dossier courant, non attribué, d’une campagne active.']);
         }
         return [$student, $request, $campaign];

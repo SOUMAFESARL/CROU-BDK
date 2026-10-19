@@ -3,57 +3,184 @@
 namespace App\Http\Controllers\admin\immobilier\depart_etat_des_lieux;
 
 use App\Http\Controllers\Controller;
+use App\Http\Services\EdlPhotoService;
+use App\Services\AdminAccess;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Cite;
 use App\Models\AssignationChambre;
-use App\Models\Chambre;
 use App\Models\DepartureSetting;
+use App\Models\EtatDesLieux;
 use App\Models\Loyer;
 use App\Models\Caution;
 use App\Models\DepartureRequest;
 use App\Models\DepartureSettlement;
 use App\Models\Etudiant;
 use App\Models\Paiement;
-use Carbon\Carbon;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
-use Illuminate\Support\Facades\Log;
 use App\Repositories\Interfaces\EtatDesLieuxRepositoryInterface;
+use Inertia\Inertia;
 
 class DepartEtatDesLieuxController extends Controller
 {
+    /** Motifs d'une demande de sortie (validation de `storeDepartureRequest`). */
+    private const MOTIFS = [
+        'fin_etudes' => 'Fin d’études',
+        'demenagement' => 'Déménagement',
+        'stage' => 'Stage professionnel',
+        'raison_personnelle' => 'Raison personnelle',
+        'autre' => 'Autre',
+    ];
+
+    /** Modes de restitution de la caution (validation de `restituerCaution`). */
+    private const MODES_RESTITUTION = [
+        'especes' => 'Espèces',
+        'virement' => 'Virement',
+        'orange_money' => 'Orange Money',
+        'mtn_money' => 'MTN Money',
+        'moov_money' => 'Moov Money',
+        'carte_bancaire' => 'Carte bancaire',
+        'autre' => 'Autre',
+    ];
+
     protected $etatDesLieux;
     public function __construct(EtatDesLieuxRepositoryInterface $etatDesLieux)
     {
         $this->etatDesLieux = $etatDesLieux;
     }
 
-    public function depart()
+    /** URL d'une route admin, ou null si l'administrateur connecté n'y a pas accès (remplace `@adminroute`). */
+    private function urlSiAutorise(Request $request): \Closure
     {
-        $cites = Cite::orderBy('name')->get(['id_cite', 'name']);
-        $activeStays = AssignationChambre::actives()->with(['etudiant:id_etudiant,name,matricule','chambre:id_chambre,numero_chambre'])
-            ->get(['id_assignation','etudiant_id','chambre_id'])->filter(fn($stay)=>$stay->etudiant && $stay->chambre);
+        $access = app(AdminAccess::class);
+        $admin = $request->user('admin');
+
+        return fn (string $route, mixed $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
+    }
+
+    private static function options(array $liste): array
+    {
+        return collect($liste)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values()->all();
+    }
+
+    /** Statut affiché d'une demande : en attente, approuvée, clôturée ou refusée / annulée. */
+    private static function statutDemande(DepartureRequest $departure): string
+    {
+        return match (true) {
+            $departure->statut === 'cloturee' => 'cloturee',
+            $departure->statut === 'annulee' => 'refusee',
+            $departure->decision === 'approuvee' => 'approuvee',
+            default => 'en_attente',
+        };
+    }
+
+    /** Départs : liste des états des lieux (premier onglet), demandes à traiter, calendrier des sorties et historiques (page React). */
+    public function depart(Request $request)
+    {
+        $url = $this->urlSiAutorise($request);
         $requests = DepartureRequest::with(['etudiant', 'chambre.cite', 'chambre.batiment', 'settlement'])
             ->latest('date_demande')->get();
-        $departureRequests = $requests->where('statut', 'en_attente')->keyBy('etudiant_id');
+        // Une sortie issue d'une expulsion active ne peut pas être refusée ici (règle de `decide`).
+        $sanctionsActives = \App\Models\Sanction::whereIn('id_sanction', $requests->pluck('sanction_id')->filter()->unique()->values())
+            ->where('statut', 'active')->pluck('id_sanction')->all();
+        $pending = $requests->where('statut', 'en_attente')->pluck('etudiant_id')->all();
 
-        $inspectionHistory = \App\Models\EtatDesLieux::with(['etudiant', 'chambre', 'cite', 'batiment'])
-            ->orderByDesc('date_etat')->orderByDesc('created_at')->get();
-        $calendarEvents = $requests->filter(fn ($departure) => $departure->date_sortie_prevue)
-            ->map(fn ($departure) => [
-                'date' => $departure->date_sortie_prevue->format('Y-m-d'),
-                'name' => $departure->etudiant?->name ?? 'Étudiant indisponible',
-                'matricule' => $departure->etudiant?->matricule ?? '',
-                'room' => $departure->chambre?->numero_chambre ?? '',
-                'cite' => $departure->chambre?->cite_id ?? '',
-                'status' => $departure->statut === 'cloturee' ? 'cloturee'
-                    : ($departure->statut === 'annulee' ? 'refusee' : ($departure->decision === 'approuvee' ? 'approuvee' : 'en_attente')),
+        $demandes = $requests->map(function (DepartureRequest $departure) use ($url, $sanctionsActives) {
+            $settlement = $departure->settlement;
+            $statut = self::statutDemande($departure);
+
+            return [
+                'id' => $departure->id_demande_sortie,
+                'etudiant_id' => $departure->etudiant_id,
+                'etudiant' => $departure->etudiant?->name ?? 'Étudiant indisponible',
+                'matricule' => $departure->etudiant?->matricule,
+                'chambre' => $departure->chambre?->numero_chambre,
+                'cite' => $departure->chambre?->cite?->name,
+                'cite_id' => $departure->chambre?->cite_id,
+                'batiment' => $departure->chambre?->batiment?->name,
+                'date_demande' => $departure->date_demande?->format('Y-m-d'),
+                'date_sortie' => $departure->date_sortie_prevue?->format('Y-m-d'),
+                'motif' => self::MOTIFS[$departure->motif] ?? ($departure->motif ? ucfirst(str_replace('_', ' ', $departure->motif)) : null),
+                'observations' => $departure->observations,
+                'statut' => $statut,
+                'decision' => $departure->decision,
+                'motif_decision' => $departure->motif_decision,
+                'expulsion' => (bool) $departure->sanction_id,
+                'expulsion_active' => in_array($departure->sanction_id, $sanctionsActives, true),
+                'decompte' => $settlement ? [
+                    'preavis_requis' => (int) $settlement->preavis_requis_jours,
+                    'preavis_effectif' => (int) $settlement->preavis_effectif_jours,
+                    'penalite_preavis' => (float) $settlement->penalite_preavis,
+                    'degradations' => collect($settlement->retenues_degradations ?? [])->map(fn ($r) => [
+                        'piece' => $r['piece'] ?? '', 'element' => $r['element'] ?? '', 'regle' => $r['rule'] ?? '', 'montant' => (float) ($r['amount'] ?? 0),
+                    ])->values()->all(),
+                    'total_degradations' => (float) $settlement->total_degradations,
+                    'total_retenues' => (float) $settlement->total_retenues,
+                    'impute_caution' => (float) $settlement->impute_caution,
+                    'solde_debiteur' => (float) $settlement->solde_debiteur,
+                    'caution_a_restituer' => (float) $settlement->caution_a_restituer,
+                    'caution_restituee' => (float) $settlement->caution_restituee,
+                    'date_restitution' => $settlement->date_restitution?->format('Y-m-d'),
+                    'mode_restitution' => self::MODES_RESTITUTION[$settlement->mode_restitution] ?? $settlement->mode_restitution,
+                ] : null,
+                'urls' => [
+                    'decision' => $statut === 'en_attente' ? $url('admin.hebergement.depart_etat_des_lieux.departure_request.decision', $departure->id_demande_sortie) : null,
+                    'etat_des_lieux' => $statut === 'approuvee'
+                        ? $url('admin.hebergement.depart_etat_des_lieux.etatDesLieux', ['etudiant' => $departure->etudiant_id])
+                        : null,
+                    'pdf' => $settlement ? $url('admin.hebergement.depart_etat_des_lieux.settlement.pdf', $departure->id_demande_sortie) : null,
+                    'restitution' => $settlement && (float) $settlement->caution_a_restituer > 0 && ! $settlement->date_restitution
+                        ? $url('admin.hebergement.depart_etat_des_lieux.settlement.refund', $settlement->id_decompte)
+                        : null,
+                ],
+            ];
+        })->values();
+
+        $inspections = EtatDesLieux::with(['etudiant', 'chambre', 'cite', 'batiment'])
+            ->orderByDesc('date_etat')->orderByDesc('created_at')->get()
+            ->map(fn (EtatDesLieux $edl) => [
+                'id' => $edl->etat_des_lieux_id,
+                'date' => $edl->date_etat?->format('Y-m-d'),
+                'etudiant' => $edl->etudiant?->name ?? 'Étudiant indisponible',
+                'matricule' => $edl->etudiant?->matricule,
+                'cite' => $edl->cite?->name,
+                'cite_id' => $edl->id_cite,
+                'batiment' => $edl->batiment?->name,
+                'chambre' => $edl->chambre?->numero_chambre,
+                'type' => $edl->type_etat === 'entree' ? 'entree' : 'sortie',
+                'observation' => $edl->observation_generale,
+                'pdf' => $url('admin.hebergement.depart_etat_des_lieux.edl.pdf', $edl->etat_des_lieux_id),
             ])->values();
-        return view('admin.hebergement.depart-etat-des-lieux.index', compact('requests', 'cites', 'activeStays', 'departureRequests', 'inspectionHistory', 'calendarEvents'));
+
+        $residents = AssignationChambre::actives()
+            ->with(['etudiant:id_etudiant,name,matricule', 'chambre:id_chambre,numero_chambre'])
+            ->get(['id_assignation', 'etudiant_id', 'chambre_id'])
+            ->filter(fn ($stay) => $stay->etudiant && $stay->chambre)
+            ->map(fn ($stay) => [
+                'id' => $stay->etudiant_id,
+                'name' => $stay->etudiant->name,
+                'matricule' => $stay->etudiant->matricule,
+                'chambre' => $stay->chambre->numero_chambre,
+                'preavis' => in_array($stay->etudiant_id, $pending, true),
+            ])->unique('id')->sortBy('name')->values();
+
+        return Inertia::render('Admin/Hebergement/Departs/Index', [
+            'demandes' => $demandes,
+            'inspections' => $inspections,
+            'residents' => $residents,
+            'cites' => Cite::orderBy('name')->get(['id_cite', 'name'])->map(fn ($c) => ['id' => $c->id_cite, 'name' => $c->name])->values(),
+            'motifs' => self::options(self::MOTIFS),
+            'modesRestitution' => self::options(self::MODES_RESTITUTION),
+            'etatsDesLieux' => $this->donneesEtatsDesLieux($url),
+            'urls' => [
+                'store' => $url('admin.hebergement.depart_etat_des_lieux.store_departure_request'),
+                'parametres' => $url('admin.hebergement.depart_etat_des_lieux.settings.edit'),
+            ],
+        ]);
     }
 
     public function decide(Request $request, string $id): RedirectResponse
@@ -61,7 +188,7 @@ class DepartEtatDesLieuxController extends Controller
         $data = $request->validate([
             'decision' => 'required|in:approuvee,refusee,annulee',
             'motif_decision' => 'nullable|required_if:decision,refusee|string|max:2000',
-        ]);
+        ], ['motif_decision.required_if' => 'Indiquez le motif du refus.']);
         $departure = DepartureRequest::where('statut', 'en_attente')->findOrFail($id);
         if ($departure->sanction_id && $data['decision'] !== 'approuvee'
             && \App\Models\Sanction::whereKey($departure->sanction_id)->where('statut', 'active')->exists()) {
@@ -83,95 +210,96 @@ class DepartEtatDesLieuxController extends Controller
     public function storeDepartureRequest(Request $request)
     {
         $data=$request->validate(['etudiant_id'=>'required|exists:etudiants,id_etudiant','date_sortie_prevue'=>'required|date|after_or_equal:today','motif'=>'required|in:fin_etudes,demenagement,stage,raison_personnelle,autre','observations'=>'nullable|string|max:2000']);
-        $assignment=AssignationChambre::actives()->where('etudiant_id',$data['etudiant_id'])->firstOrFail();
+        $assignment=AssignationChambre::actives()->where('etudiant_id',$data['etudiant_id'])->first();
+        if (!$assignment) {
+            throw ValidationException::withMessages(['etudiant_id' => "Ce résident n'a pas de séjour en cours."]);
+        }
         DepartureRequest::updateOrCreate(['etudiant_id'=>$data['etudiant_id'],'statut'=>'en_attente'],['assignation_id'=>$assignment->id_assignation,'chambre_id'=>$assignment->chambre_id,'date_demande'=>today(),'date_sortie_prevue'=>$data['date_sortie_prevue'],'motif'=>$data['motif'],'observations'=>$data['observations']??null,'created_by'=>getInfoAdmin()->users->id_user??null]);
-        return response()->json(['success'=>true,'message'=>'Demande de sortie et préavis enregistrés.']);
+        $message = 'Demande de sortie et préavis enregistrés.';
+
+        return $request->wantsJson() ? response()->json(['success'=>true,'message'=>$message]) : back()->with('success', $message);
     }
 
-    public function etatDesLieux()
+    /** Constat d'entrée ou de sortie envoyé à la page React (seuls les champs affichés). */
+    private function constat(EtatDesLieux $edl, \Closure $url): array
     {
-      
-        $etatdeslieux = $this->etatDesLieux->all();
+        $photo = fn (?string $chemin, ?string $lien = null) => $chemin ? ['chemin' => $chemin, 'url' => $lien ?? EdlPhotoService::url($chemin)] : null;
 
+        return [
+            'id' => $edl->etat_des_lieux_id,
+            'chambre_id' => $edl->id_chambre,
+            'date' => $edl->date_etat?->format('Y-m-d'),
+            'cles' => $edl->nbre_cle_recus !== null ? (int) $edl->nbre_cle_recus : null,
+            'observation' => $edl->observation_generale,
+            'signature_crou' => EdlPhotoService::url($edl->signature_crou),
+            'signature_etudiant' => EdlPhotoService::url($edl->signature_etudiant),
+            'pieces' => $edl->pieces->map(fn ($piece) => [
+                'nom' => (string) $piece->name_piece,
+                'photos' => $piece->images->map(fn ($img) => $photo($img->chemin_fichier, $img->url))->filter()->values()->all(),
+                'elements' => $piece->elements->map(fn ($el) => [
+                    'nom' => (string) $el->name_element,
+                    'etat' => in_array($el->etat, ['bon', 'moyen', 'mauvais'], true) ? $el->etat : null,
+                    'observation' => $el->observation,
+                    'photo' => $photo($el->photo, $el->photo_url),
+                ])->values()->all(),
+            ])->values()->all(),
+            'urls' => [
+                // L'entrée appartient à l'étudiant : le CROU la signe une seule fois.
+                'signer' => $edl->type_etat === 'entree' && ! $edl->signature_crou
+                    ? $url('admin.hebergement.depart_etat_des_lieux.update_eld', $edl->etat_des_lieux_id)
+                    : null,
+                'pdf' => $url('admin.hebergement.depart_etat_des_lieux.edl.pdf', $edl->etat_des_lieux_id),
+            ],
+        ];
+    }
+
+    /** États des lieux par résident : signature des entrées et réalisation des sorties approuvées (page React). */
+    public function etatDesLieux(Request $request)
+    {
+        $url = $this->urlSiAutorise($request);
+
+        return Inertia::render('Admin/Hebergement/Departs/EtatsDesLieux', [
+            ...$this->donneesEtatsDesLieux($url),
+            'cites' => Cite::orderBy('name')->get(['id_cite', 'name'])->map(fn ($c) => ['id' => $c->id_cite, 'name' => $c->name])->values(),
+            'urls' => [
+                'store' => $url('admin.hebergement.depart_etat_des_lieux.store_edl'),
+                'departs' => $url('admin.hebergement.depart_etat_des_lieux.depart'),
+            ],
+        ]);
+    }
+
+    /** Résidents avec leurs derniers constats d'entrée / de sortie, grille de retenues et préavis (liste des états des lieux). */
+    private function donneesEtatsDesLieux(\Closure $url): array
+    {
         $etudiants = [];
 
-        foreach ($etatdeslieux as $edl) { 
+        // all() est trié du plus récent au plus ancien : on garde la version la plus récente de chaque type.
+        foreach ($this->etatDesLieux->all() as $edl) {
             $etudiant = $edl->etudiant;
-            $chambre  = $edl->chambre;
-            $batiment = $edl->batiment;
-            $cite     = $edl->cite;
-
             if (!$etudiant) {
                 continue; // sécurité si la relation manque
             }
 
             $key = $etudiant->id_etudiant;
-
-            if (!isset($etudiants[$key])) {
-                $etudiants[$key] = [
-                    'id'         => $etudiant->id_etudiant,
-                    'name'       => $etudiant->name,
-                    'email'      => $etudiant->email1,
-                    'matricule'  => $etudiant->matricule,
-                    'cite'       => $cite->name ?? 'N/A',
-                    'cite_id'    => $cite->id_cite ?? $edl->id_cite,
-                    'batiment'   => $batiment->name ?? 'N/A',
-                    'batiment_id'=> $batiment->id_batiment ?? $edl->id_batiment,
-                    'chambre'    => $chambre->numero_chambre ?? 'N/A',
-                    'chambre_id' => $chambre->id_chambre ?? $edl->id_chambre,
-                    'edl_entree' => null,
-                    'edl_sortie' => null,
-                ];
-            }
-
-            $edlData = [
-                'id'                   => $edl->etat_des_lieux_id,
-                'chambre_id'           => $edl->id_chambre,
-                'date'                 => optional($edl->date_etat)->format('Y-m-d'),
-                'nbre_cle_recus'       => $edl->nbre_cle_recus,
-                'observation_generale' => $edl->observation_generale,
-                'signature_crou'       => $edl->signature_crou
-                    ? config('app.storage_public') . $edl->signature_crou
-                    : null,
-                'signature_etudiant'   => $edl->signature_etudiant
-                    ? config('app.storage_public'). $edl->signature_etudiant
-                    : null,
-                'pieces' => $edl->pieces->map(function ($piece) {
-                    return [
-                        'name'       => $piece->name_piece,
-                        'name_piece' => $piece->name_piece,
-                        'ordre'    => $piece->ordre,
-                        'elements' => $piece->elements->map(function ($el) {
-                            return [
-                                'name'         => $el->name_element,
-                                'name_element' => $el->name_element,
-                                'etat'        => $el->etat,
-                                'observation' => $el->observation,
-                                'photo'       => $el->photo,
-                                'photo_url'   => $el->photo_url,
-                                'ordre'       => $el->ordre,
-                            ];
-                        })->values(),
-                        // Adapte "chemin_image" / "path" / "photo" au vrai nom de colonne
-                        // de ton modèle EdlImage — vérifie via `php artisan tinker` :
-                        // App\Models\EdlImage::first()
-                        'images' => $piece->images->map(function ($img) {
-                            return [
-                                'id'  => $img->edl_image_id ?? $img->id ?? null,
-                                'path' => $img->chemin_fichier,
-                                'url' => $img->url,
-                            ];
-                        })->values(),
-                    ];
-                })->values(),
+            $etudiants[$key] ??= [
+                'id' => $etudiant->id_etudiant,
+                'name' => $etudiant->name,
+                'email' => $etudiant->email1,
+                'matricule' => $etudiant->matricule,
+                'cite' => $edl->cite->name ?? null,
+                'cite_id' => $edl->cite->id_cite ?? $edl->id_cite,
+                'batiment' => $edl->batiment->name ?? null,
+                'batiment_id' => $edl->batiment->id_batiment ?? $edl->id_batiment,
+                'chambre' => $edl->chambre->numero_chambre ?? null,
+                'chambre_id' => $edl->chambre->id_chambre ?? $edl->id_chambre,
+                'entree' => null,
+                'sortie' => null,
+                'demande' => null,
             ];
 
-            // all() est trié du plus récent au plus ancien : ne pas remplacer
-            // la version courante par un ancien état éventuellement incomplet.
-            if ($edl->type_etat === 'entree' && $etudiants[$key]['edl_entree'] === null) {
-                $etudiants[$key]['edl_entree'] = $edlData;
-            } elseif ($edl->type_etat === 'sortie' && $etudiants[$key]['edl_sortie'] === null) {
-                $etudiants[$key]['edl_sortie'] = $edlData;
+            $type = $edl->type_etat === 'entree' ? 'entree' : ($edl->type_etat === 'sortie' ? 'sortie' : null);
+            if ($type && $etudiants[$key][$type] === null) {
+                $etudiants[$key][$type] = $this->constat($edl, $url);
             }
         }
 
@@ -180,30 +308,39 @@ class DepartEtatDesLieuxController extends Controller
             ->where('statut', 'en_attente')->where('decision', 'approuvee')->get();
         foreach ($approvedRequests as $departure) {
             if (!$departure->etudiant || !$departure->chambre) continue;
-            $existingData = $etudiants[$departure->etudiant_id] ?? [];
-            $etudiants[$departure->etudiant_id] = array_merge($existingData, [
+            $existing = $etudiants[$departure->etudiant_id] ?? [];
+            $memeChambre = fn (?array $constat) => ($constat['chambre_id'] ?? null) === $departure->chambre_id ? $constat : null;
+            $etudiants[$departure->etudiant_id] = array_merge($existing, [
                 'id' => $departure->etudiant->id_etudiant,
                 'name' => $departure->etudiant->name,
                 'email' => $departure->etudiant->email1,
                 'matricule' => $departure->etudiant->matricule,
-                'cite' => $departure->chambre->cite->name ?? 'N/A',
+                'cite' => $departure->chambre->cite->name ?? null,
                 'cite_id' => $departure->chambre->cite_id,
-                'batiment' => $departure->chambre->batiment->name ?? 'N/A',
+                'batiment' => $departure->chambre->batiment->name ?? null,
                 'batiment_id' => $departure->chambre->batiment_id,
-                'chambre' => $departure->chambre->numero_chambre ?? 'N/A',
+                'chambre' => $departure->chambre->numero_chambre,
                 'chambre_id' => $departure->chambre_id,
-                'edl_entree' => (($existingData['edl_entree']['chambre_id'] ?? null) === $departure->chambre_id) ? $existingData['edl_entree'] : null,
-                'edl_sortie' => (($existingData['edl_sortie']['chambre_id'] ?? null) === $departure->chambre_id) ? $existingData['edl_sortie'] : null,
+                'entree' => $memeChambre($existing['entree'] ?? null),
+                'sortie' => $memeChambre($existing['sortie'] ?? null),
+                'demande' => [
+                    'id' => $departure->id_demande_sortie,
+                    'date_demande' => $departure->date_demande?->format('Y-m-d'),
+                    'date_sortie' => $departure->date_sortie_prevue?->format('Y-m-d'),
+                ],
             ]);
         }
 
-        $etudiantsData = array_values($etudiants);
-        $cites = Cite::orderBy('name')->get(['id_cite', 'name']);
+        $settings = DepartureSetting::current();
 
-        return view(
-            'admin.hebergement.depart-etat-des-lieux.etat-des-lieux.index',
-            compact('etudiantsData', 'cites')
-        );
+        return [
+            'residents' => array_values($etudiants),
+            'grille' => collect($settings->damage_retention_grid ?? [])
+                ->filter(fn ($r) => is_array($r) && trim((string) ($r['label'] ?? '')) !== '')
+                ->map(fn ($r) => ['label' => (string) $r['label'], 'amount' => (float) ($r['amount'] ?? 0)])->values(),
+            'preavisJours' => (int) $settings->notice_days,
+            'urls' => ['store' => $url('admin.hebergement.depart_etat_des_lieux.store_edl')],
+        ];
     }
 
     public function storeEdl(Request $request)
@@ -211,25 +348,16 @@ class DepartEtatDesLieuxController extends Controller
         $validated = $this->validateEdl($request);
 
         if ($validated['type_etat'] !== 'sortie') {
-            return response()->json([
-                'success' => false,
-                'message' => "L'état des lieux d'entrée est créé par l'étudiant.",
-            ], 422);
+            throw ValidationException::withMessages(['type_etat' => "L'état des lieux d'entrée est créé par l'étudiant."]);
         }
 
         if (empty($validated['signature_crou']) || !Str::startsWith($validated['signature_crou'], 'data:image')) {
-            return response()->json([
-                'success' => false,
-                'message' => "La signature du CROU est obligatoire avant d'assigner l'état des lieux de sortie.",
-            ], 422);
+            throw ValidationException::withMessages(['signature_crou' => "La signature du CROU est obligatoire avant d'assigner l'état des lieux de sortie."]);
         }
 
         $existing = $this->etatDesLieux->findSortie($validated['id_chambre'], $validated['id_etudiant']);
         if ($existing) {
-            return response()->json([
-                'success' => false,
-                'message' => "Un état des lieux de sortie existe déjà pour cet étudiant.",
-            ], 422);
+            throw ValidationException::withMessages(['id_etudiant' => 'Un état des lieux de sortie existe déjà pour cet étudiant.']);
         }
 
         $result = DB::transaction(function () use ($validated, $request) {
@@ -285,11 +413,11 @@ class DepartEtatDesLieuxController extends Controller
             return ['edl'=>$edl,'settlement'=>$settlement,'room_status'=>$room->etat];
         });
 
-        return response()->json([
-            'success' => true,
-            'message' => "Séjour clôturé. La chambre est maintenant « ".str_replace('_', ' ', ucfirst($result['room_status']))." ». Retenues calculées : ".number_format((float)$result['settlement']->total_retenues,0,',',' ')." FCFA.",
-            'data' => $result,
-        ], 201);
+        $message = "Séjour clôturé. La chambre est maintenant « ".str_replace('_', ' ', ucfirst($result['room_status']))." ». Retenues calculées : ".number_format((float)$result['settlement']->total_retenues,0,',',' ')." FCFA.";
+
+        return $request->wantsJson()
+            ? response()->json(['success' => true, 'message' => $message, 'data' => $result], 201)
+            : back()->with('success', $message);
     }
 
     public function restituerCaution(Request $request, string $id): RedirectResponse
@@ -321,23 +449,28 @@ class DepartEtatDesLieuxController extends Controller
             ->download('decompte-sortie-'.$departure->id_demande_sortie.'.pdf');
     }
 
-      public function updateEdl(Request $request, string $id)
+    /** PDF d'un état des lieux (même document que celui de l'espace étudiant), remplace l'impression de l'ancienne page. */
+    public function edlPdf(string $id)
     {
+        $inventory = EtatDesLieux::with(['pieces.elements', 'pieces.images', 'etudiant', 'cite', 'batiment', 'chambre'])->findOrFail($id);
 
+        return app(\App\Http\Services\StudentInventoryPdfService::class)->document($inventory)
+            ->stream('etat-des-lieux-'.$inventory->type_etat.'-'.$inventory->getKey().'.pdf')
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function updateEdl(Request $request, string $id)
+    {
         $data = $this->buildData($this->validateEdl($request), $request);
         $this->etatDesLieux->update($id, $data);
+        $message = 'État des lieux mis à jour avec succès.';
 
-        
-            return response()->json([
-                'success' => true,
-                'message' => 'État des lieux mis à jour avec succès.',
-                'data' => $data,
-            ]);
-        
-
-   //     return redirect()->back()->with('success', 'État des lieux mis à jour avec succès.');
+        return $request->wantsJson()
+            ? response()->json(['success' => true, 'message' => $message, 'data' => $data])
+            : back()->with('success', $message);
     }
- private function validateEdl(Request $request): array
+
+    private function validateEdl(Request $request): array
     {
         $data = $request->validate([
             'type_etat'            => 'required|in:entree,sortie',
@@ -352,7 +485,7 @@ class DepartEtatDesLieuxController extends Controller
             'signature_etudiant'   => 'nullable|string',
             'pieces_json'          => 'nullable|json',
             'etat_chambre_sortie'  => 'required_if:type_etat,sortie|in:disponible,maintenance,hors_service',
-        ]);
+        ], ['etat_chambre_sortie.required_if' => 'Choisissez le statut de la chambre après la sortie.']);
         if (!empty($data['pieces_json'])) {
             \Illuminate\Support\Facades\Validator::make(
                 ['pieces'=>json_decode($data['pieces_json'],true)],

@@ -24,7 +24,8 @@ class HousingReportingTest extends TestCase
             $t->string('id_batiment'); $t->string('cite_id'); $t->softDeletes();
         });
         Schema::create('chambre', function (Blueprint $t) {
-            $t->string('id_chambre'); $t->string('cite_id'); $t->integer('capacite_max'); $t->string('etat'); $t->softDeletes();
+            $t->string('id_chambre'); $t->string('cite_id'); $t->string('numero_chambre')->nullable(); $t->string('type_chambre_id')->nullable();
+            $t->integer('capacite_max'); $t->string('etat'); $t->softDeletes();
         });
         Schema::create('assignation_chambres', function (Blueprint $t) {
             $t->string('id_assignation'); $t->string('chambre_id'); $t->string('etudiant_id'); $t->string('statut');
@@ -32,9 +33,11 @@ class HousingReportingTest extends TestCase
         });
         DB::table('cite')->insert([['id_cite' => 'A', 'name' => 'Cité A'], ['id_cite' => 'B', 'name' => 'Cité B']]);
         DB::table('chambre')->insert([
-            ['id_chambre' => 'r1', 'cite_id' => 'A', 'capacite_max' => 4, 'etat' => 'disponible'],
-            ['id_chambre' => 'r2', 'cite_id' => 'A', 'capacite_max' => 2, 'etat' => 'maintenance'],
-            ['id_chambre' => 'r3', 'cite_id' => 'B', 'capacite_max' => 20, 'etat' => 'disponible'],
+            ['id_chambre' => 'r1', 'cite_id' => 'A', 'numero_chambre' => '101', 'type_chambre_id' => 't', 'capacite_max' => 4, 'etat' => 'disponible'],
+            ['id_chambre' => 'r2', 'cite_id' => 'A', 'numero_chambre' => '102', 'type_chambre_id' => 't', 'capacite_max' => 2, 'etat' => 'maintenance'],
+            ['id_chambre' => 'r3', 'cite_id' => 'B', 'numero_chambre' => '201', 'type_chambre_id' => 't', 'capacite_max' => 20, 'etat' => 'disponible'],
+            // Chambre non configurée (sans numéro ni type) : absente de la page Parc immobilier, donc du reporting.
+            ['id_chambre' => 'r4', 'cite_id' => 'A', 'numero_chambre' => null, 'type_chambre_id' => null, 'capacite_max' => 8, 'etat' => 'disponible'],
         ]);
     }
 
@@ -51,11 +54,12 @@ class HousingReportingTest extends TestCase
         $this->assertFalse($reports['parc-immobilier']['sections'][0]['unavailable']);
     }
 
-    public function test_module_view_compiles_to_valid_php(): void
+    public function test_tables_declare_their_chart_kind_for_the_react_page(): void
     {
-        $compiled = app('blade.compiler')->compileString(file_get_contents(resource_path('views/admin/hebergement/reporting/modules.blade.php')));
+        $tables = $this->report('parc-immobilier')[0]['tables'];
 
-        $this->assertNotEmpty(token_get_all($compiled, TOKEN_PARSE));
+        $this->assertSame(['distribution', 'comparison'], array_column($tables, 'kind'));
+        $this->assertFileExists(resource_path('js/pages/Admin/Hebergement/Reporting/Index.tsx'));
     }
 
     private function assignment(string $id, string $status = 'confirmee', string $date = '2026-09-01', string $room = 'r1'): void
@@ -75,6 +79,17 @@ class HousingReportingTest extends TestCase
         $this->assertSame(1, $metrics['Places occupées']);
         $this->assertSame(2, $metrics['Places réservées']);
         $this->assertSame(1, $metrics['Places libres utilisables']);
+    }
+
+    public function test_park_counts_only_configured_rooms_like_the_park_page(): void
+    {
+        $this->assignment('ghost', 'confirmee', '2026-09-01', 'r4');
+        $metrics = $this->report('parc-immobilier')[0]['metrics'];
+
+        $this->assertSame(1, $metrics['Cités']);
+        $this->assertSame(2, $metrics['Chambres']);
+        $this->assertSame(6, $metrics['Capacité totale']);
+        $this->assertSame(0, $metrics['Places occupées']);
     }
 
     public function test_finance_uses_validated_payments_and_non_cancelled_rents_in_the_selected_period(): void

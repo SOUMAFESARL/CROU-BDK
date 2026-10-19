@@ -71,9 +71,6 @@ class ResidentContratControler extends Controller
         $modifiable = $access->allows($admin, 'admin.hebergement.residents_contrat.update_etudiant');
 
         $stats = $repository->getStats();
-        $stats['sans_chambre'] = Etudiant::whereRaw('LOWER(statut_inscription) = ?', ['residents'])
-            ->whereDoesntHave('assignationsChambre', fn ($q) => $q->where('statut', 'confirmee'))
-            ->count();
 
         return Inertia::render('Admin/Hebergement/Residents/Index', [
             'residents' => $page->through(function (Etudiant $etudiant) use ($personnel, $historique, $url, $etat, $modifiable) {
@@ -122,7 +119,6 @@ class ResidentContratControler extends Controller
             'stats' => [
                 'residents' => $stats['residents'],
                 'en_verification' => $stats['en_verification'],
-                'sans_chambre' => $stats['sans_chambre'],
             ],
             'etat' => $etat,
             'filters' => ['q' => $recherche],

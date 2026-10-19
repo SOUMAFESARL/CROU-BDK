@@ -41,12 +41,21 @@ class dashboardController extends Controller
             ->get(['montant', 'date_paiement']), collect()) : collect();
         $revenue = (float) $periodPayments->sum('montant');
 
-        $requests = $dashboardAccess['admissions'] ? $safe(fn () => DemandeEtudiant::query()->get(['statut_demande', 'created_at', 'date_demande']), collect()) : collect();
-        $periodRequests = $requests->filter(function ($item) use ($start, $end) {
-            $date = $item->date_demande ?? $item->created_at;
-            return $date && Carbon::parse($date)->between($start, $end);
-        });
-        $pendingRequests = $requests->whereIn('statut_demande', ['en_attente', 'en_cours'])->count();
+        // Nouvelles demandes déposées par les étudiants eux-mêmes (created_by vide) : hors brouillons et dossiers saisis par l'administration.
+        $periodRequests = $dashboardAccess['admissions'] ? $safe(fn () => DemandeEtudiant::query()
+            ->whereNull('created_by')
+            ->where(fn ($query) => $query->whereNull('etat_dossier')->orWhere('etat_dossier', '!=', 'brouillon'))
+            ->where(fn ($query) => $query->whereBetween('date_demande', [$start, $end])
+                ->orWhere(fn ($q) => $q->whereNull('date_demande')->whereBetween('created_at', [$start, $end])))
+            ->get(['created_at', 'date_demande']), collect()) : collect();
+
+        // Mêmes compteurs que la page Admissions (statut_inscription synchronisé par DossierWorkflow).
+        $admissionStats = $dashboardAccess['admissions']
+            ? $safe(fn () => app(\App\Repositories\EtudiantRepository::class)->getStats(), [])
+            : [];
+        $admissionCount = fn (string $key) => (int) ($admissionStats[$key] ?? 0);
+        // Dossiers attendant une décision de l'administration : onglet « Nouvelles demandes ».
+        $pendingRequests = $admissionCount('nouvelles_demandes');
 
         $workOrders = $dashboardAccess['maintenance'] ? $safe(fn () => OrdreTravail::query()->get(['statut', 'priorite', 'titre', 'created_at', 'date_echeance']), collect()) : collect();
         $openWorkOrders = $workOrders->whereIn('statut', ['en_attente', 'en_cours', 'en_attente_pieces'])->count();
@@ -54,12 +63,15 @@ class dashboardController extends Controller
             ->whereIn('priorite', ['urgente', 'urgent', 'critique'])->count();
 
         $requestStatuses = [
-            'labels' => ['En attente', 'En cours', 'Validées', 'Rejetées'],
+            'labels' => ['Nouvelles demandes', 'En attente', 'Vérification', 'Résidents', 'Rejetées'],
             'values' => [
-                $requests->where('statut_demande', 'en_attente')->count(),
-                $requests->where('statut_demande', 'en_cours')->count(),
-                $requests->where('statut_demande', 'validee')->count(),
-                $requests->where('statut_demande', 'rejetee')->count(),
+                $pendingRequests,
+                // Éligibles en attente de la confirmation de l'étudiant.
+                $admissionCount('en_attente'),
+                // Confirmées par l'étudiant, pas encore attribuées : même compteur que « En vérification » de la page Résidents.
+                $admissionCount('en_verification'),
+                $admissionCount('residents'),
+                $admissionCount('annulees'),
             ],
         ];
 

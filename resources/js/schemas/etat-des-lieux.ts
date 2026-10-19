@@ -40,6 +40,17 @@ const element = z
         message: "Commentaire obligatoire quand l’état est mauvais.",
     });
 
+/** Pièces d'un constat (entrée saisie par l'étudiant ou sortie établie par le CROU). */
+export const piecesSchema = z
+    .array(
+        z.object({
+            nom: z.string().trim().min(1, "Nommez la pièce.").max(255, "255 caractères maximum."),
+            photos: z.array(z.string()).max(MAX_PHOTOS_PIECE, `${MAX_PHOTOS_PIECE} photos maximum par pièce.`),
+            elements: z.array(element).min(1, "Ajoutez au moins un élément à cette pièce."),
+        }),
+    )
+    .min(1, "Ajoutez au moins une pièce.");
+
 /**
  * État des lieux d'entrée saisi par l'étudiant (dashboardController::storeEdl / updateEdl).
  * Confort de saisie uniquement : le serveur revérifie le verrouillage, la chambre, les photos et les commentaires.
@@ -53,15 +64,7 @@ export function entreeSchema(signatureExistante: boolean) {
         nbre_cle_recus: z
             .string()
             .regex(/^\d{1,2}$/, "Indiquez le nombre de clés remises (0 à 99)."),
-        pieces: z
-            .array(
-                z.object({
-                    nom: z.string().trim().min(1, "Nommez la pièce.").max(255, "255 caractères maximum."),
-                    photos: z.array(z.string()).max(MAX_PHOTOS_PIECE, `${MAX_PHOTOS_PIECE} photos maximum par pièce.`),
-                    elements: z.array(element).min(1, "Ajoutez au moins un élément à cette pièce."),
-                }),
-            )
-            .min(1, "Ajoutez au moins une pièce."),
+        pieces: piecesSchema,
         observation_generale: z.string().max(5000, "5 000 caractères maximum."),
         signature_etudiant: z
             .string()

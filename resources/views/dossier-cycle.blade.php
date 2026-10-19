@@ -3,7 +3,7 @@
     $labels = \App\Http\Services\DossierWorkflow::LABELS;
     $next = \App\Http\Services\DossierWorkflow::NEXT[$dossier->etat_dossier] ?? [];
     $allowed = ($mode ?? 'student') === 'admin'
-        ? ['en_etude','incomplet','eligible','refuse','annule']
+        ? ['soumis','incomplet','eligible','refuse','annule']
         : (in_array($dossier->etat_dossier,['brouillon','incomplet'],true) ? ['soumis','annule']
             : ($dossier->etat_dossier === 'soumis' ? ['annule']
             : ($dossier->etat_dossier === 'eligible' ? ['confirme','refuse']
@@ -18,7 +18,7 @@
     <div class="card-body">
         <h3>Suivi du dossier</h3>
         <p>État actuel : <strong>{{ $labels[$dossier->etat_dossier] ?? $dossier->etat_dossier }}</strong></p>
-        <p class="text-muted">Brouillon → Soumis → En étude → Éligible → Confirmé par l’étudiant → Attribué définitif.</p>
+        <p class="text-muted">Brouillon → Soumis → Éligible → Confirmé par l’étudiant → Attribué définitif.</p>
         @if($proposal && in_array($dossier->etat_dossier,['pre_attribue','accepte','attribue_definitif'],true))
             <p>Proposition : chambre <strong>{{ $proposal->chambre?->numero_chambre ?? $proposal->chambre_id }}</strong>
                 @if($proposal->date_fin) — valable jusqu’au {{ $proposal->date_fin->format('d/m/Y H:i') }} @endif
@@ -37,7 +37,7 @@
                 <label class="d-block">Action
                     <select name="etat" class="form-control" required>
                         <option value="">Choisir</option>
-                        @foreach($actions as $state)<option value="{{ $state }}">{{ $labels[$state] }}</option>@endforeach
+                        @foreach($actions as $state)<option value="{{ $state }}">{{ ($mode ?? 'student') === 'admin' && $state === 'soumis' ? 'Réexaminer (retour à « Soumis »)' : $labels[$state] }}</option>@endforeach
                     </select>
                 </label>
                 <label class="d-block mt-2">Motif ou éléments à compléter

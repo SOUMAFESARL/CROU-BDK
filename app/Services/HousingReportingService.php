@@ -85,12 +85,12 @@ class HousingReportingService
         return compact('title', 'note') + ['unavailable' => false] + $load();
     }
 
-    private function distribution($query, string $column, string $title): array
+    private function distribution($query, string $column, string $title, array $labels = []): array
     {
         $rows = (clone $query)->select($column)->selectRaw('COUNT(*) as total')
             ->groupBy($column)->orderByDesc('total')->toBase()->get()
-            ->map(fn ($row) => [$row->$column ?: 'Non renseigné', (int) $row->total])->all();
-        return ['title' => $title, 'headers' => ['Répartition', 'Nombre'], 'rows' => $rows];
+            ->map(fn ($row) => [$row->$column ? ($labels[$row->$column] ?? $row->$column) : 'Non renseigné', (int) $row->total])->all();
+        return ['kind' => 'distribution', 'title' => $title, 'headers' => ['Répartition', 'Nombre'], 'rows' => $rows];
     }
 
     private function monthly($query, string $date, string $title, ?string $amount = null): array
@@ -100,7 +100,7 @@ class HousingReportingService
         $rows = (clone $query)->selectRaw("SUBSTR($date, 1, 7) as month, $aggregate as total")
             ->groupBy('month')->orderBy('month')->toBase()->get()
             ->map(fn ($row) => [$row->month, (float) $row->total])->all();
-        return ['title' => $title, 'headers' => ['Mois', $amount ? 'Montant (F CFA)' : 'Nombre'], 'rows' => $rows];
+        return ['kind' => 'monthly', 'title' => $title, 'headers' => ['Mois', $amount ? 'Montant (F CFA)' : 'Nombre'], 'rows' => $rows];
     }
 
     private function sectionFor(User $user, string $permission, string $title, string $note, array $models, callable $load): ?array
@@ -113,16 +113,19 @@ class HousingReportingService
         $period = [$start->toDateString(), $end->toDateTimeString()];
         switch ($module) {
             case 'parc-immobilier':
-                return [$this->section('Occupation et capacité', 'Situation actuelle. Les places indisponibles et réservées sont exclues des places libres. La période ne modifie pas cet instantané.', [Chambre::class, AssignationChambre::class, Batiment::class, Cite::class], function () use ($cite) {
-                    $rooms = $this->rooms($cite)->get(['id_chambre', 'cite_id', 'capacite_max', 'etat']);
-                    $active = $this->assignments($cite)->actives()->count();
-                    $reserved = $this->assignments($cite)->mobilisantPlace()->where(fn ($q) => $q->where('statut', 'en_attente')->orWhere('date_assignation', '>', now()))->count();
-                    $used = $this->assignments($cite)->mobilisantPlace()->select('chambre_id')->selectRaw('COUNT(*) as total')->groupBy('chambre_id')->pluck('total', 'chambre_id');
+                return [$this->section('Occupation et capacité', 'Situation actuelle des chambres configurées (numéro et type renseignés), comme la page Parc immobilier. Les places indisponibles et réservées sont exclues des places libres. La période ne modifie pas cet instantané.', [Chambre::class, AssignationChambre::class, Batiment::class, Cite::class], function () use ($cite) {
+                    // Même périmètre que la page Parc immobilier : seules les chambres configurées comptent.
+                    $parc = fn () => $this->rooms($cite)->configurees();
+                    $assignments = fn () => AssignationChambre::query()->whereIn('chambre_id', $parc()->select('id_chambre'));
+                    $rooms = $parc()->get(['id_chambre', 'cite_id', 'capacite_max', 'etat']);
+                    $active = $assignments()->actives()->count();
+                    $reserved = $assignments()->mobilisantPlace()->where(fn ($q) => $q->where('statut', 'en_attente')->orWhere('date_assignation', '>', now()))->count();
+                    $used = $assignments()->mobilisantPlace()->select('chambre_id')->selectRaw('COUNT(*) as total')->groupBy('chambre_id')->pluck('total', 'chambre_id');
                     $available = fn ($room) => in_array($room->etat, ['maintenance', 'hors_service', 'fermee']) ? 0 : max(0, $room->capacite_max - ($used[$room->id_chambre] ?? 0));
                     $capacity = $rooms->sum('capacite_max');
                     $names = Cite::query()->pluck('name', 'id_cite');
                     $rows = $rooms->groupBy('cite_id')->map(fn ($items, $id) => [$names[$id] ?? 'Non renseignée', $items->count(), (int) $items->sum('capacite_max'), (int) $items->sum($available)])->values()->all();
-                    return ['metrics' => ['Bâtiments' => $this->scope(Batiment::query(), $cite)->count(), 'Chambres' => $rooms->count(), 'Capacité totale' => (int) $capacity, 'Places occupées' => $active, 'Places réservées' => $reserved, 'Places libres utilisables' => (int) $rooms->sum($available), 'Occupation / capacité totale (%)' => $capacity ? round(100 * $active / $capacity, 1) : 0], 'tables' => [$this->distribution($this->rooms($cite), 'etat', 'État des chambres'), ['title' => 'Comparatif des cités', 'headers' => ['Cité', 'Chambres', 'Capacité', 'Places libres'], 'rows' => $rows]]];
+                    return ['metrics' => ['Cités' => $this->scope(Cite::query(), $cite, 'id_cite')->count(), 'Bâtiments' => $this->scope(Batiment::query(), $cite)->count(), 'Chambres' => $rooms->count(), 'Capacité totale' => (int) $capacity, 'Places occupées' => $active, 'Places réservées' => $reserved, 'Places libres utilisables' => (int) $rooms->sum($available), 'Occupation / capacité totale (%)' => $capacity ? round(100 * $active / $capacity, 1) : 0], 'tables' => [$this->distribution($parc(), 'etat', 'État des chambres'), ['kind' => 'comparison', 'title' => 'Comparatif des cités', 'headers' => ['Cité', 'Chambres', 'Capacité', 'Places libres'], 'rows' => $rows]]];
                 })];
             case 'equipements':
                 return [$this->section('Stock et mouvements', 'Stock central global, sans rattachement à une cité. Stock actuel ; mouvements enregistrés dans la période.', [Equipement::class, EquipementMouvement::class], function () use ($period) {
@@ -132,7 +135,7 @@ class HousingReportingService
                     $stock = Equipement::query()->whereNull('deleted_at')->toBase()->get(['equipement_id', 'stock_initial', 'stock_actuel', 'threshold']);
                     $quantity = fn ($row) => $row->stock_actuel ?? ($balances[$row->equipement_id] ?? $row->stock_initial ?? 0);
                     $movements->whereBetween('created_at', $period);
-                    return ['metrics' => ['Références' => $stock->count(), 'Unités en stock' => $stock->sum($quantity), 'Références au seuil d’alerte' => $stock->filter(fn ($row) => $quantity($row) <= $row->threshold)->count(), 'Unités entrées' => (float) (clone $movements)->where('type', 'entry')->sum('quantity'), 'Unités sorties' => (float) (clone $movements)->where('type', 'exit')->sum('quantity')], 'tables' => [$this->distribution($movements, 'type', 'Mouvements de la période')]];
+                    return ['metrics' => ['Références' => $stock->count(), 'Unités en stock' => $stock->sum($quantity), 'Références au seuil d’alerte' => $stock->filter(fn ($row) => $quantity($row) <= $row->threshold)->count(), 'Unités entrées' => (float) (clone $movements)->where('type', 'entry')->sum('quantity'), 'Unités sorties' => (float) (clone $movements)->where('type', 'exit')->sum('quantity')], 'tables' => [$this->distribution($movements, 'type', 'Mouvements de la période', ['entry' => 'Entrée', 'exit' => 'Sortie'])]];
                 })];
             case 'campagnes':
                 return [$this->section('Dossiers déposés', 'Dépôts de la période, état actuel du dossier. Avec une cité, seuls les dossiers liés à une affectation de cette cité sont retenus ; les dossiers sans affectation restent dans la vue globale.', [DemandeEtudiant::class, AssignationChambre::class, Chambre::class], function () use ($period, $cite) {

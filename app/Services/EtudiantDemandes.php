@@ -19,7 +19,7 @@ use Carbon\Carbon;
 class EtudiantDemandes
 {
     /** Parcours nominal d'un dossier (DossierWorkflow::NEXT), affiché en frise. */
-    private const PARCOURS = ['soumis', 'en_etude', 'eligible', 'confirme', 'attribue_definitif'];
+    private const PARCOURS = ['soumis', 'eligible', 'confirme', 'attribue_definitif'];
 
     public const MOTIFS_SORTIE = [
         'fin_etudes' => 'Fin des études',
@@ -128,7 +128,7 @@ class EtudiantDemandes
     private function etapes(string $etat, DemandeEtudiant $demande): array
     {
         $position = array_search($etat, self::PARCOURS, true);
-        if ($etat === 'incomplet') $position = 0;
+        if (in_array($etat, ['incomplet', 'en_etude'], true)) $position = 0;
         if ($etat === 'cloture') $position = count(self::PARCOURS);
         // Dossier arrêté (refus, annulation, expiration) : la frise s'arrête à la dernière étape atteinte.
         $arrete = in_array($etat, ['refuse', 'annule', 'expire'], true);
