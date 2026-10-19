@@ -3,6 +3,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { CalendrierSorties } from '@/components/departs/calendrier-sorties';
 import { ApprobationDialog, DetailDemandeDialog, NouvelleDemandeDialog, RefusDialog, RestitutionDialog, type ResidentSortie } from '@/components/departs/demande-dialogs';
 import { EtatsDesLieuxPanel, type DonneesEtatsDesLieux } from '@/components/departs/etats-des-lieux-panel';
+import { EtatsDesLieuxRealises, type Inspection } from '@/components/departs/etats-des-lieux-realises';
 import {
     correspond,
     fcfa,
@@ -31,20 +32,6 @@ import { StatCard, type KpiTone } from '@/components/ui/stat-card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { dateFr, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
-
-type Inspection = {
-    id: string;
-    date: string | null;
-    etudiant: string;
-    matricule: string | null;
-    cite: string | null;
-    cite_id: string | null;
-    batiment: string | null;
-    chambre: string | null;
-    type: 'entree' | 'sortie';
-    observation: string | null;
-    pdf: string | null;
-};
 
 type Props = {
     demandes: Demande[];
@@ -76,7 +63,7 @@ export default function DepartsIndex({ demandes, inspections, residents, cites, 
     const filtrer = (suivants: Partial<Filtres>) => setFiltres((f) => ({ ...f, ...suivants }));
     const filtreActif = Object.values(filtres).some(Boolean);
 
-    // Recherche, statut, date de sortie et cité communs aux demandes, au calendrier et aux historiques.
+    // Recherche, statut, date de sortie et cité communs aux demandes, au calendrier et aux sorties traitées.
     const filtrees = useMemo(
         () =>
             demandes.filter(
@@ -90,16 +77,6 @@ export default function DepartsIndex({ demandes, inspections, residents, cites, 
     );
     const enCours = useMemo(() => filtrees.filter((d) => d.statut === 'en_attente' || d.statut === 'approuvee'), [filtrees]);
     const historique = useMemo(() => filtrees.filter((d) => d.statut === 'cloturee' || d.statut === 'refusee'), [filtrees]);
-    const constats = useMemo(
-        () =>
-            inspections.filter(
-                (i) =>
-                    correspond(filtres.recherche, i.etudiant, i.matricule, i.chambre, i.batiment, i.cite) &&
-                    (!filtres.date || i.date === filtres.date) &&
-                    (!filtres.cite || i.cite_id === filtres.cite),
-            ),
-        [inspections, filtres],
-    );
 
     const stats = useMemo(() => {
         const ouvertes = demandes.filter((d) => d.statut === 'en_attente' || d.statut === 'approuvee');
@@ -124,7 +101,6 @@ export default function DepartsIndex({ demandes, inspections, residents, cites, 
 
     const pagesDemandes = usePaginationLocale(enCours);
     const pagesHistorique = usePaginationLocale(historique);
-    const pagesConstats = usePaginationLocale(constats);
 
     const etudiant = (nom: string, matricule: string | null) => (
         <div className="min-w-36">
@@ -236,20 +212,6 @@ export default function DepartsIndex({ demandes, inspections, residents, cites, 
         },
     ];
 
-    const colonnesConstats: DataTableColumn<Inspection>[] = [
-        { key: 'date', header: 'Date', className: 'whitespace-nowrap tabular-nums', cell: (i) => (i.date ? dateFr(i.date) : <span className="text-muted">Non renseignée</span>) },
-        { key: 'etudiant', header: 'Étudiant', cell: (i) => etudiant(i.etudiant, i.matricule) },
-        { key: 'logement', header: 'Logement', cell: (i) => logement(i.chambre, i.batiment, i.cite) },
-        { key: 'type', header: 'Type', cell: (i) => <Badge variant={i.type === 'entree' ? 'info' : 'success'}>{i.type === 'entree' ? 'Entrée' : 'Sortie'}</Badge> },
-        { key: 'observation', header: 'Observations', cell: (i) => <p className="line-clamp-2 max-w-80 whitespace-pre-line">{i.observation || <span className="text-muted">—</span>}</p> },
-        {
-            key: 'actions',
-            header: <span className="sr-only">Actions</span>,
-            className: 'text-right',
-            cell: (i) => <RowActions>{i.pdf && <RowAction label="État des lieux PDF" icon={FileDown} href={i.pdf} newTab />}</RowActions>,
-        },
-    ];
-
     const vide = (icone: ReactNode, message: string) => (
         <span className="flex flex-col items-center gap-2">
             {icone}
@@ -285,6 +247,9 @@ export default function DepartsIndex({ demandes, inspections, residents, cites, 
                     <TabsTrigger value="etats">
                         <ClipboardCheck {...ICON} aria-hidden /> États des lieux <Badge variant="neutral">{nombre(etatsDesLieux.residents.length)}</Badge>
                     </TabsTrigger>
+                    <TabsTrigger value="realises">
+                        <History {...ICON} aria-hidden /> États des lieux réalisés <Badge variant="neutral">{nombre(inspections.length)}</Badge>
+                    </TabsTrigger>
                     <TabsTrigger value="demandes">
                         <LogOut {...ICON} aria-hidden /> Demandes de sortie <Badge variant="neutral">{nombre(stats.ouvertes)}</Badge>
                     </TabsTrigger>
@@ -292,6 +257,11 @@ export default function DepartsIndex({ demandes, inspections, residents, cites, 
 
                 <TabsContent value="etats">
                     <EtatsDesLieuxPanel {...etatsDesLieux} cites={cites} cible={cibleSortie} onCibleOuverte={() => setCibleSortie(null)} />
+                </TabsContent>
+
+                <TabsContent value="realises">
+                    <p className="mb-3 text-sm text-muted">États des lieux d’entrée et de sortie déjà enregistrés, du plus récent au plus ancien.</p>
+                    <EtatsDesLieuxRealises inspections={inspections} cites={cites} />
                 </TabsContent>
 
                 <TabsContent value="demandes">
@@ -374,9 +344,6 @@ export default function DepartsIndex({ demandes, inspections, residents, cites, 
                             <TabsTrigger value="historique">
                                 <History {...ICON} aria-hidden /> Sorties traitées <Badge variant="neutral">{nombre(historique.length)}</Badge>
                             </TabsTrigger>
-                            <TabsTrigger value="constats">
-                                <ClipboardCheck {...ICON} aria-hidden /> États des lieux réalisés <Badge variant="neutral">{nombre(constats.length)}</Badge>
-                            </TabsTrigger>
                         </TabsList>
 
                         <TabsContent value="demandes">
@@ -395,14 +362,6 @@ export default function DepartsIndex({ demandes, inspections, residents, cites, 
                             <div className="overflow-hidden rounded-brand border bg-white">
                                 <SimpleTable columns={colonnesHistorique} rows={pagesHistorique.visibles} rowKey={(d) => d.id} emptyMessage={vide(<History {...ICON} aria-hidden />, 'Aucune sortie clôturée ou refusée.')} />
                                 <PaginationLocale {...pagesHistorique} />
-                            </div>
-                        </TabsContent>
-
-                        <TabsContent value="constats">
-                            <p className="mb-3 text-sm text-muted">États des lieux d’entrée et de sortie enregistrés, du plus récent au plus ancien (le filtre de statut ne s’applique pas ici).</p>
-                            <div className="overflow-hidden rounded-brand border bg-white">
-                                <SimpleTable columns={colonnesConstats} rows={pagesConstats.visibles} rowKey={(i) => i.id} emptyMessage={vide(<ClipboardCheck {...ICON} aria-hidden />, 'Aucun état des lieux enregistré.')} />
-                                <PaginationLocale {...pagesConstats} />
                             </div>
                         </TabsContent>
                     </Tabs>

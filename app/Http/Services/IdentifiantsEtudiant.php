@@ -3,6 +3,7 @@ namespace App\Http\Services;
 
 use App\Models\Etudiant;
 use App\Notifications\EtudiantIdentifiantsNotification;
+use App\Services\AnnonceDiffusionService;
 use Illuminate\Support\Facades\{Hash,Notification};
 use Illuminate\Support\Str;
 
@@ -23,6 +24,8 @@ class IdentifiantsEtudiant
         if (!$this->aEnvoyer($etudiant)) return false;
         $motDePasse = Str::password(10, symbols: false);
         try {
+            // Même transport que les autres e-mails : SMTP du paramétrage, et pas seulement celui du .env.
+            app(AnnonceDiffusionService::class)->configureMail();
             Notification::route('mail', $etudiant->email1)
                 ->notify(new EtudiantIdentifiantsNotification($etudiant->email1, $motDePasse, route('etudiant.login'), ...array_filter([$introduction])));
         } catch (\Throwable $exception) {

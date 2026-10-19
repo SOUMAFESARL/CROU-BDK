@@ -27,6 +27,7 @@ abstract class DossierTestCase extends TestCase
         parent::setUp();
         config(['database.default' => 'sqlite', 'database.connections.sqlite.database' => ':memory:']);
         DB::purge('sqlite');
+        Schema::create('config_app', fn (Blueprint $t) => $t->string('config_id')->primary());
         (require database_path('migrations/2026_08_10_000001_create_sanctions_tables.php'))->up();
         (require database_path('migrations/2026_08_10_000002_add_scope_to_sanctions_table.php'))->up();
         foreach (['cite' => 'id_cite', 'batiment' => 'id_batiment', 'chambre' => 'id_chambre',

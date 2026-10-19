@@ -5,6 +5,7 @@ namespace App\Http\Controllers\web;
 use App\Http\Controllers\Controller;
 use App\Models\Etudiant;
 use App\Notifications\EtudiantResetPasswordNotification;
+use App\Services\AnnonceDiffusionService;
 use App\Support\SystemSecurity;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\RedirectResponse;
@@ -45,6 +46,8 @@ class EtudiantPasswordResetController extends Controller
         ]);
 
         try {
+            // Hors du callback : une erreur de paramétrage ne doit pas révéler si le compte existe.
+            app(AnnonceDiffusionService::class)->configureMail();
             Password::broker('etudiants')->sendResetLink(['email1' => $data['email']], function (Etudiant $etudiant, string $token) {
                 $url = route('etudiant.password.reset', ['token' => $token, 'email' => $etudiant->email1]);
                 $expire = (int) config('auth.passwords.etudiants.expire', 60);

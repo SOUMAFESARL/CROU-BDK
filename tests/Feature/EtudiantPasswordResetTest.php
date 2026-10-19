@@ -26,6 +26,7 @@ class EtudiantPasswordResetTest extends TestCase
         // Paramétrage vide : règles de mot de passe par défaut (8 caractères, majuscules, chiffre).
         $this->mock(ConfigAppRepositoryInterface::class)->shouldReceive('getConfig')->andReturn(new ConfigApp());
 
+        Schema::create('config_app', fn (Blueprint $t) => $t->string('config_id')->primary());
         Schema::create('etudiants', function (Blueprint $t) {
             $t->string('id_etudiant')->primary();
             $t->string('name')->nullable();
