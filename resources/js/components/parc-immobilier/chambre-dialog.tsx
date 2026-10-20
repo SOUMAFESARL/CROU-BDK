@@ -11,7 +11,10 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { messageErreur, parcHttp } from './http';
-import type { ChambreItem } from './types';
+import { ETATS } from './labels';
+import type { ChambreItem, EtatChambre } from './types';
+
+const ETATS_CHAMBRE = Object.keys(ETATS) as [EtatChambre, ...EtatChambre[]];
 
 const schema = z.object({
     numero_chambre: z.string().trim().min(1, 'Le numéro est obligatoire.').max(250, '250 caractères au maximum.'),
@@ -19,13 +22,17 @@ const schema = z.object({
     niveau_confort: z.enum(['standard', 'eleve']),
     pmr: z.enum(['0', '1']),
     nb_lits: z.coerce.number({ error: 'Indiquez un nombre.' }).int('Nombre entier attendu.').min(1, 'Au moins 1 lit.').max(20, '20 lits au maximum.'),
+    etat: z.enum(ETATS_CHAMBRE).optional(),
 });
 
 type FormInput = z.input<typeof schema>;
 type FormOutput = z.output<typeof schema>;
 
 /** Champs utiles à la modification (une `ChambreItem` du parc convient, comme une chambre du formulaire d'ajout). */
-export type ChambreModifiable = Pick<ChambreItem, 'id' | 'name' | 'type_chambre_id' | 'niveau_confort' | 'pmr' | 'nb_lits'>;
+export type ChambreModifiable = Pick<ChambreItem, 'id' | 'name' | 'type_chambre_id' | 'niveau_confort' | 'pmr' | 'nb_lits'> & {
+    /** Statut actuel ; absent, le champ « Statut » n'est pas proposé. */
+    etat?: EtatChambre | null;
+};
 
 type ChambreDialogProps = {
     chambre: ChambreModifiable | null;
@@ -56,6 +63,7 @@ export function ChambreDialog({ chambre, onClose, url, typesChambre, onSaved }: 
                 niveau_confort: chambre.niveau_confort === 'eleve' ? 'eleve' : 'standard',
                 pmr: chambre.pmr ? '1' : '0',
                 nb_lits: chambre.nb_lits || 1,
+                etat: chambre.etat && ETATS[chambre.etat] ? chambre.etat : undefined,
             });
         }
     }, [chambre, reset]);
@@ -80,7 +88,7 @@ export function ChambreDialog({ chambre, onClose, url, typesChambre, onSaved }: 
                 <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex min-h-0 flex-col">
                     <DialogHeader>
                         <DialogTitle>Modifier la chambre {chambre?.name}</DialogTitle>
-                        <DialogDescription>Numéro de porte, type, confort, accessibilité et nombre de lits.</DialogDescription>
+                        <DialogDescription>Numéro de porte, type, confort, accessibilité, nombre de lits et statut.</DialogDescription>
                     </DialogHeader>
                     <DialogBody className="space-y-5">
                         {serverError && (
@@ -150,6 +158,28 @@ export function ChambreDialog({ chambre, onClose, url, typesChambre, onSaved }: 
                             <Field id="nb_lits" label="Nombre de lits" required error={errors.nb_lits?.message}>
                                 <Input id="nb_lits" type="number" min={1} max={20} inputMode="numeric" invalid={!!errors.nb_lits} {...register('nb_lits')} />
                             </Field>
+                            {chambre?.etat && ETATS[chambre.etat] && (
+                                <Field id="etat" label="Statut" error={errors.etat?.message}>
+                                    <Controller
+                                        control={control}
+                                        name="etat"
+                                        render={({ field }) => (
+                                            <Select value={field.value} onValueChange={field.onChange}>
+                                                <SelectTrigger id="etat" ref={field.ref} invalid={!!errors.etat}>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {ETATS_CHAMBRE.map((etat) => (
+                                                        <SelectItem key={etat} value={etat}>
+                                                            {ETATS[etat].label}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        )}
+                                    />
+                                </Field>
+                            )}
                         </div>
                     </DialogBody>
                     <DialogFooter>
