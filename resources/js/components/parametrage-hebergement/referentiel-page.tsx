@@ -1,12 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { Button } from '@/components/ui/button';
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -24,8 +25,22 @@ import { ChampRecherche, ErreurGenerale, PiedAssistant, Recap, useAssistant, use
 export type ElementReferentiel = {
     id: string;
     name: string;
-    description: string | null;
+    description?: string | null;
     urls: { update: string | null; destroy: string | null };
+};
+
+/** Champ du formulaire d'ajout / modification ; sa valeur initiale est lue dans l'élément (`element[cle]`). */
+export type ChampReferentiel = {
+    cle: string;
+    label: string;
+    type?: 'texte' | 'zone' | 'liste';
+    max: number;
+    /** Message affiché quand le champ obligatoire est vide (absent : champ facultatif). */
+    requis?: string;
+    placeholder?: string;
+    hint?: string;
+    /** Choix d'un champ `liste`. */
+    options?: ComboboxOption[];
 };
 
 type Props<T extends ElementReferentiel> = {
@@ -34,30 +49,50 @@ type Props<T extends ElementReferentiel> = {
     /** Libellés : « type de cité », « un type de cité »… */
     singulier: string;
     un: string;
-    nameMax: number;
+    /** Accords au féminin (« Cette filière », « Aucune filière enregistrée »). */
+    feminin?: boolean;
+    /** Longueur maximale du nom, pour le formulaire par défaut (nom + description). */
+    nameMax?: number;
+    /** Champs du formulaire, à la place du nom + description par défaut. */
+    champs?: ChampReferentiel[];
     elements: Paginated<T>;
     stats: { total: number; utilises: number; inutilises: number };
-    filters: { q: string };
+    /** Libellés des trois indicateurs (par défaut : types du parc immobilier). */
+    kpis?: { total: string; utilises: string; inutilises: string };
+    filters: { q: string } & Record<string, string>;
     urls: { index: string; store: string | null };
-    /** Nombre d'éléments du parc qui utilisent ce type (bloque la suppression) et son libellé. */
+    /** Nombre d'éléments qui utilisent celui-ci (bloque la suppression) et son libellé. */
     usage: (element: T) => { total: number; libelle: string };
+    /** Conseil affiché quand la suppression est bloquée. */
+    conseilSuppression?: string;
     /** Colonnes ajoutées entre la description et les actions. */
     colonnes?: DataTableColumn<T>[];
+    /** Filtres ajoutés à côté de la recherche ; `filters` (hors `q`) est conservé pendant la recherche. */
+    filtres?: ReactNode;
+    recherche?: string;
     actions?: ReactNode;
     note?: ReactNode;
     icone: ReactNode;
 };
 
-const ETAPES = ['Informations', 'Vérification'];
-const CHAMPS = [['name', 'description'], []] as const;
-
-/** Liste paginée + fenêtre d'ajout / modification en 2 étapes + suppression confirmée, commune aux référentiels « nom + description ». */
+/** Liste paginée + fenêtre d'ajout / modification en 2 étapes + suppression confirmée, commune aux référentiels simples. */
 export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
-    const { titre, description, singulier, un, elements, stats, filters, urls, usage, colonnes = [], actions, note, icone } = props;
-    const [recherche, setRecherche] = useRecherche(urls.index, filters.q, {}, ['elements', 'types', 'stats', 'filters']);
+    const { titre, description, singulier, un, feminin = false, elements, stats, filters, urls, usage, colonnes = [], filtres, actions, note, icone } = props;
+    const champs = useMemo<ChampReferentiel[]>(
+        () =>
+            props.champs ?? [
+                { cle: 'name', label: 'Nom', max: props.nameMax ?? 255, requis: 'Renseignez le nom.', placeholder: `Nom du ${singulier}` },
+                { cle: 'description', label: 'Description', type: 'zone', max: 2000, placeholder: 'Description', hint: 'Facultative : usage, public concerné…' },
+            ],
+        [props.champs, props.nameMax, singulier],
+    );
+    const { q, ...autresFiltres } = filters;
+    const [recherche, setRecherche] = useRecherche(urls.index, q, autresFiltres, ['elements', 'types', 'stats', 'filters']);
     const [edition, setEdition] = useState<T | 'nouveau' | null>(null);
     const [suppression, setSuppression] = useState<T | null>(null);
     const [suppressionEnCours, setSuppressionEnCours] = useState(false);
+    const kpis = props.kpis ?? { total: 'Types enregistrés', utilises: 'Utilisés dans le parc', inutilises: 'Inutilisés' };
+    const avecDescription = champs.some((c) => c.cle === 'description');
 
     const supprimer = async () => {
         if (!suppression?.urls.destroy) return;
@@ -73,12 +108,16 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
             header: 'Nom',
             cell: (e) => <span className="font-medium text-gray-900">{e.name}</span>,
         },
-        {
-            key: 'description',
-            header: 'Description',
-            className: 'max-w-md',
-            cell: (e) => (e.description ? <span className="line-clamp-2 text-muted">{e.description}</span> : <span className="text-gray-400">—</span>),
-        },
+        ...(avecDescription
+            ? [
+                  {
+                      key: 'description',
+                      header: 'Description',
+                      className: 'max-w-md',
+                      cell: (e: T) => (e.description ? <span className="line-clamp-2 text-muted">{e.description}</span> : <span className="text-gray-400">—</span>),
+                  },
+              ]
+            : []),
         ...colonnes,
         {
             key: 'actions',
@@ -94,6 +133,7 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
     ];
 
     const utilisation = suppression ? usage(suppression) : null;
+    const filtre = Object.values(autresFiltres).some((v) => v !== '' && v !== 'tous');
 
     return (
         <AdminLayout title={titre}>
@@ -118,9 +158,9 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
                 label={`Indicateurs : ${titre}`}
                 className="mb-4 xl:grid-cols-3"
                 items={[
-                    { key: 'total', label: 'Types enregistrés', value: nombre(stats.total), tone: 'green' },
-                    { key: 'utilises', label: 'Utilisés dans le parc', value: nombre(stats.utilises), tone: 'blue' },
-                    { key: 'inutilises', label: 'Inutilisés', value: nombre(stats.inutilises), tone: 'neutral' },
+                    { key: 'total', label: kpis.total, value: nombre(stats.total), tone: 'green' },
+                    { key: 'utilises', label: kpis.utilises, value: nombre(stats.utilises), tone: 'blue' },
+                    { key: 'inutilises', label: kpis.inutilises, value: nombre(stats.inutilises), tone: 'neutral' },
                 ]}
             />
 
@@ -132,7 +172,8 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
                 rowKey={(e) => e.id}
                 toolbar={
                     <>
-                        <ChampRecherche value={recherche} onChange={setRecherche} placeholder="Rechercher un nom ou une description" />
+                        <ChampRecherche value={recherche} onChange={setRecherche} placeholder={props.recherche ?? 'Rechercher un nom ou une description'} />
+                        {filtres}
                         <span className="text-sm text-muted sm:ml-auto">{nombre(elements.total)} résultat(s)</span>
                     </>
                 }
@@ -141,7 +182,9 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
                         <span className="text-gray-400" aria-hidden>
                             {icone}
                         </span>
-                        {filters.q ? 'Aucun résultat pour cette recherche.' : `Aucun ${singulier} enregistré.`}
+                        {q || filtre
+                            ? 'Aucun résultat pour cette recherche.'
+                            : `${feminin ? 'Aucune' : 'Aucun'} ${singulier} ${feminin ? 'enregistrée' : 'enregistré'}.`}
                     </span>
                 }
             />
@@ -153,9 +196,8 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
                             key={edition === 'nouveau' ? 'nouveau' : edition.id}
                             element={edition === 'nouveau' ? null : edition}
                             url={edition === 'nouveau' ? urls.store : edition.urls.update}
-                            singulier={singulier}
                             un={un}
-                            nameMax={props.nameMax}
+                            champs={champs}
                             onClose={() => setEdition(null)}
                         />
                     )}
@@ -168,7 +210,9 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
                 title={`Supprimer « ${suppression?.name ?? ''} » ?`}
                 description={
                     utilisation && utilisation.total > 0
-                        ? `Ce ${singulier} est utilisé par ${nombre(utilisation.total)} ${utilisation.libelle}. Choisissez un autre type pour ces éléments avant de le supprimer.`
+                        ? `${feminin ? 'Cette' : 'Ce'} ${singulier} est ${feminin ? 'utilisée' : 'utilisé'} par ${nombre(utilisation.total)} ${utilisation.libelle}. ${
+                              props.conseilSuppression ?? 'Choisissez un autre type pour ces éléments avant de le supprimer.'
+                          }`
                         : 'Cette suppression est définitive.'
                 }
                 confirmLabel="Supprimer"
@@ -182,25 +226,27 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
     );
 }
 
+const ETAPES = ['Informations', 'Vérification'];
+
 function Formulaire({
     element,
     url,
-    singulier,
     un,
-    nameMax,
+    champs,
     onClose,
 }: {
     element: ElementReferentiel | null;
     url: string | null;
-    singulier: string;
     un: string;
-    nameMax: number;
+    champs: ChampReferentiel[];
     onClose: () => void;
 }) {
-    const schema = useMemo(() => referentielSchema(nameMax), [nameMax]);
+    const schema = useMemo(() => referentielSchema(champs), [champs]);
+    const etapes = useMemo(() => [champs.map((c) => c.cle), []] as const, [champs]);
     const [erreur, setErreur] = useState<string | null>(null);
     const {
         register,
+        control,
         trigger,
         watch,
         setError,
@@ -209,21 +255,24 @@ function Formulaire({
     } = useForm<ReferentielValeurs>({
         resolver: zodResolver(schema),
         mode: 'onTouched',
-        defaultValues: { name: element?.name ?? '', description: element?.description ?? '' },
+        defaultValues: Object.fromEntries(champs.map((c) => [c.cle, String((element as Record<string, unknown> | null)?.[c.cle] ?? '')])),
     });
-    const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<ReferentielValeurs>(CHAMPS, trigger, element !== null);
+    const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<ReferentielValeurs>(etapes, trigger, element !== null);
     const valeurs = watch();
 
     const enregistrer = (v: ReferentielValeurs) =>
-        envoyer<ReferentielValeurs>(
-            url!,
-            { name: v.name.trim(), description: v.description.trim() },
-            {
-                method: element ? 'put' : 'post',
-                onSuccess: onClose,
-                onError: (erreurs) => setErreur(repartirErreurs(erreurs, CHAMPS, (champ, e) => setError(champ, e), aller)),
-            },
-        );
+        envoyer<ReferentielValeurs>(url!, Object.fromEntries(champs.map((c) => [c.cle, (v[c.cle] ?? '').trim()])), {
+            method: element ? 'put' : 'post',
+            onSuccess: onClose,
+            onError: (erreurs) => setErreur(repartirErreurs(erreurs, etapes, (champ, e) => setError(champ, e), aller)),
+        });
+
+    const apercu = (champ: ChampReferentiel) => {
+        const valeur = (valeurs[champ.cle] ?? '').trim();
+        if (champ.type === 'liste') return champ.options?.find((o) => o.value === valeur)?.label || <span className="text-muted">Aucun</span>;
+        if (!valeur) return <span className="text-muted">{champ.cle === 'description' ? 'Aucune' : '—'}</span>;
+        return champ.cle === 'name' ? <span className="font-medium">{valeur}</span> : valeur;
+    };
 
     return (
         <form
@@ -246,21 +295,37 @@ function Formulaire({
             <DialogBody className="space-y-4">
                 <ErreurGenerale message={erreur} />
                 {etape === 0 ? (
-                    <>
-                        <Field id="ref-name" label="Nom" required error={errors.name?.message}>
-                            <Input id="ref-name" maxLength={nameMax} placeholder={`Nom du ${singulier}`} invalid={!!errors.name} autoFocus {...register('name')} />
-                        </Field>
-                        <Field id="ref-description" label="Description" error={errors.description?.message} hint="Facultative : usage, public concerné…">
-                            <Textarea id="ref-description" rows={4} maxLength={2000} placeholder="Description" invalid={!!errors.description} {...register('description')} />
-                        </Field>
-                    </>
+                    champs.map((champ, index) => {
+                        const id = `ref-${champ.cle}`;
+                        const message = errors[champ.cle]?.message;
+                        return (
+                            <Field key={champ.cle} id={id} label={champ.label} required={!!champ.requis} error={message} hint={champ.hint}>
+                                {champ.type === 'liste' ? (
+                                    <Controller
+                                        control={control}
+                                        name={champ.cle}
+                                        render={({ field }) => (
+                                            <Combobox
+                                                id={id}
+                                                value={field.value}
+                                                onChange={field.onChange}
+                                                onBlur={field.onBlur}
+                                                options={champ.options ?? []}
+                                                placeholder={champ.placeholder}
+                                                invalid={!!message}
+                                            />
+                                        )}
+                                    />
+                                ) : champ.type === 'zone' ? (
+                                    <Textarea id={id} rows={4} maxLength={champ.max} placeholder={champ.placeholder} invalid={!!message} {...register(champ.cle)} />
+                                ) : (
+                                    <Input id={id} maxLength={champ.max} placeholder={champ.placeholder} invalid={!!message} autoFocus={index === 0} {...register(champ.cle)} />
+                                )}
+                            </Field>
+                        );
+                    })
                 ) : (
-                    <Recap
-                        lignes={[
-                            { label: 'Nom', valeur: <span className="font-medium">{valeurs.name.trim()}</span> },
-                            { label: 'Description', valeur: valeurs.description.trim() || <span className="text-muted">Aucune</span> },
-                        ]}
-                    />
+                    <Recap lignes={champs.map((champ) => ({ label: champ.label, valeur: apercu(champ) }))} />
                 )}
             </DialogBody>
             <PiedAssistant

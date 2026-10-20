@@ -24,6 +24,7 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
+import { symboleDevise } from '@/lib/systeme';
 import { nombre, saisieMilliers } from '@/lib/text';
 import type { Paginated } from '@/types/global';
 
@@ -327,7 +328,7 @@ function CreationDialog({ open, onClose, url, types }: { open: boolean; onClose:
                         <Field id="eq-qty" label="Quantité reçue" required error={errors.stock_initial?.message}>
                             <Input id="eq-qty" type="number" min={0} step={1} placeholder="0" invalid={!!errors.stock_initial} {...register('stock_initial')} />
                         </Field>
-                        <Field id="eq-prix" label="Coût unitaire (FCFA)" required error={errors.prix?.message}>
+                        <Field id="eq-prix" label={`Coût unitaire (${symboleDevise()})`} required error={errors.prix?.message}>
                             <Controller
                                 control={control}
                                 name="prix"

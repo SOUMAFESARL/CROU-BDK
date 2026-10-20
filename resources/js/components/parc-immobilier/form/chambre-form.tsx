@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { montant } from '@/lib/systeme';
 import { cn } from '@/lib/utils';
 import { ChambreDialog, type ChambreModifiable } from '../chambre-dialog';
 import { messageErreur, parcHttp } from '../http';
@@ -790,7 +791,7 @@ function SelectChamp({
 }
 
 const optionsTypes = (types: TypeChambreOption[]) =>
-    types.map((t) => ({ value: t.id, label: `${t.name}${t.montant ? ` — ${nombre.format(t.montant)} FCFA` : ''}` }));
+    types.map((t) => ({ value: t.id, label: `${t.name}${t.montant ? ` — ${montant(t.montant)}` : ''}` }));
 
 function LigneConfiguration({
     index,

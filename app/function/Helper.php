@@ -27,8 +27,8 @@ if (!function_exists('allConfig')) {
         return $config;
     }
 
-    $repo=  app()->make(ConfigAppRepositoryInterface::class);
-    $config = $repo->getConfig();
+    // Table absente (installation incomplète, tests) : valeurs par défaut de systemConfig().
+    $config = rescue(fn () => app()->make(ConfigAppRepositoryInterface::class)->getConfig(), null, false);
     $loaded = true;
 
     return $config;
@@ -69,7 +69,20 @@ if (!function_exists('systemLogo')) {
             return asset($fallback);
         }
 
-        return filter_var($logo, FILTER_VALIDATE_URL) ? $logo : asset(ltrim($logo, '/'));
+        // Anciens enregistrements : URL absolue d'un autre domaine (ex. la prod vue depuis le local).
+        // Si le fichier existe dans public/, on le sert depuis le domaine courant.
+        if (filter_var($logo, FILTER_VALIDATE_URL)) {
+            $chemin = ltrim(rawurldecode((string) parse_url($logo, PHP_URL_PATH)), '/');
+            foreach ([$chemin, preg_replace('~^public/~', '', $chemin)] as $candidat) {
+                if ($candidat !== '' && is_file(public_path($candidat))) {
+                    return asset($candidat);
+                }
+            }
+
+            return $logo;
+        }
+
+        return asset(ltrim($logo, '/'));
     }
 }
 
@@ -100,10 +113,73 @@ if (!function_exists('systemCurrencySymbol')) {
     }
 }
 
+if (!function_exists('systemAppName')) {
+    /** Nom court du CROU (Configuration › Général), affiché dans les en-têtes, titres et e-mails. */
+    function systemAppName(): string
+    {
+        return (string) (systemConfig('app_name') ?: config('app.name') ?: 'CROU Bondoukou');
+    }
+}
+
+if (!function_exists('systemFullName')) {
+    /** Nom complet du CROU (Configuration › Général), affiché sur les pages de connexion et les documents. */
+    function systemFullName(): string
+    {
+        return (string) (systemConfig('company_name') ?: 'Centre Régional des Œuvres Universitaires de Bondoukou');
+    }
+}
+
+if (!function_exists('systemBrandColor')) {
+    /**
+     * Couleur principale de l'interface (Configuration › Profil), #006400 par défaut.
+     * #000000 est la valeur d'un sélecteur jamais réglé dans l'ancienne page : traitée comme non renseignée.
+     */
+    function systemBrandColor(): string
+    {
+        $couleur = strtoupper((string) systemConfig('brand_color', ''));
+
+        return preg_match('/^#[0-9A-F]{6}$/D', $couleur) && $couleur !== '#000000' ? $couleur : '#006400';
+    }
+}
+
+if (!function_exists('systemBrandStyle')) {
+    /** Balise <style> qui remplace la couleur principale des pages (React et Blade) ; vide pour la couleur par défaut. */
+    function systemBrandStyle(): \Illuminate\Support\HtmlString
+    {
+        $couleur = systemBrandColor();
+        if ($couleur === '#006400') {
+            return new \Illuminate\Support\HtmlString('');
+        }
+
+        return new \Illuminate\Support\HtmlString("<style>:root{--color-primary:{$couleur};--color-primary-hover:color-mix(in srgb,{$couleur} 82%,#000);"
+            ."--sidebar-primary:{$couleur};--sidebar-accent-foreground:{$couleur};--shell-primary:{$couleur}}</style>");
+    }
+}
+
+if (!function_exists('systemPaymentMethods')) {
+    /** Modes de paiement acceptés (Configuration › Paiements) : cash, mobile, transfer, card. */
+    function systemPaymentMethods(): array
+    {
+        $modes = systemConfig('methods');
+
+        return is_array($modes) ? array_values($modes) : ['cash', 'mobile'];
+    }
+}
+
+if (!function_exists('systemThousandsSeparator')) {
+    function systemThousandsSeparator(): string
+    {
+        $separateur = systemConfig('thousands_separator');
+
+        return in_array($separateur, ['.', ','], true) ? $separateur : ' ';
+    }
+}
+
 if (!function_exists('formatSystemAmount')) {
     function formatSystemAmount($amount, $decimals = 0)
     {
-        $formatted = number_format((float) $amount, $decimals, ',', systemConfig('thousands_separator', ' '));
+        $separateur = systemThousandsSeparator();
+        $formatted = number_format((float) $amount, $decimals, $separateur === ',' ? '.' : ',', $separateur);
         $symbol = systemCurrencySymbol();
 
         return systemConfig('symbol_position', 'after') === 'before'

@@ -15,6 +15,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatCard } from '@/components/ui/stat-card';
+import { symboleDevise } from '@/lib/systeme';
 import { nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 
@@ -368,7 +369,7 @@ function Donut({ donnees, vide }: { donnees: { name: string; value: number; fill
                 </ChartContainer>
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
                     <strong className="text-lg leading-6 font-medium text-gray-900 tabular-nums">{fcfaCourt(total)}</strong>
-                    <small className="text-xs text-muted">FCFA au total</small>
+                    <small className="text-xs text-muted">{symboleDevise()} au total</small>
                 </div>
             </div>
             <ul className="space-y-1.5 text-sm">

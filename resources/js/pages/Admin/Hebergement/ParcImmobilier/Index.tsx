@@ -53,6 +53,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { systeme } from '@/lib/systeme';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
 
@@ -279,7 +280,7 @@ export default function ParcImmobilierIndex({ niveau, items, plan, filters, stat
             <div className="mb-6 flex flex-col gap-4">
                 <div className="flex flex-col gap-1">
                     <h1 className="page-title text-xl font-medium text-gray-900">Parc immobilier</h1>
-                    <p className="text-sm text-muted">Cités, bâtiments et chambres du CROU de Bondoukou.</p>
+                    <p className="text-sm text-muted">Cités, bâtiments et chambres — {systeme().nom}.</p>
                 </div>
                 <Separator />
                 <div className="flex flex-wrap items-center justify-end gap-2">

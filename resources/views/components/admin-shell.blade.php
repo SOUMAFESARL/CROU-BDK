@@ -40,14 +40,15 @@
     }
 @endphp
 
+{{ systemBrandStyle() }}
 <div class="admin-shell" data-admin-shell data-state="{{ $collapsed ? 'collapsed' : 'expanded' }}">
     <aside class="as-sidebar" id="admin-shell-sidebar">
         <div class="as-sidebar-header">
             {{-- Logo au-dessus du nom ; replié : logo seul. --}}
             <div class="as-brand-row">
                 <a href="{{ $menu[0]['href'] ?? '#' }}" class="as-brand">
-                    <img src="{{ asset('admin/assets/images/logos/crou_bdk.jpeg') }}" alt="CROU Bondoukou">
-                    <span class="as-brand-name">CROU Bondoukou</span>
+                    <img src="{{ systemLogo('admin/assets/images/logos/crou_bdk.jpeg') }}" alt="{{ systemAppName() }}">
+                    <span class="as-brand-name">{{ systemAppName() }}</span>
                 </a>
             </div>
         </div>

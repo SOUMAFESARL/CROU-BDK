@@ -387,7 +387,13 @@ class PaiementController extends Controller
                 'resident_id' => 'required|exists:etudiants,id_etudiant',
                 'montant' => 'required|numeric|min:100',
                 'type_paiement' => 'required|in:loyer,caution,penalite,autre',
-                'methode_paiement' => 'required|in:orange_money,mtn_money,moov_money,especes,autre',
+                // Méthodes limitées aux modes acceptés (Configuration › Paiements) ; « autre » couvre virement et carte.
+                'methode_paiement' => ['required', 'in:orange_money,mtn_money,moov_money,especes,autre', function ($attribut, $valeur, $echec) {
+                    $mode = match ($valeur) { 'especes' => 'cash', 'autre' => null, default => 'mobile' };
+                    if ($mode && !in_array($mode, systemPaymentMethods(), true)) {
+                        $echec('Cette méthode de paiement n’est pas acceptée (Configuration › Paiements).');
+                    }
+                }],
                 'chambre_id' => 'required|exists:chambre,id_chambre',
                 'cite_id' => 'nullable|exists:cite,id_cite',
                 'contrat_id' => 'nullable|exists:assignation_chambres,id_assignation',

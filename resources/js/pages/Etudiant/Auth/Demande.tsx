@@ -69,7 +69,7 @@ const anneePrecedente = (annee: string) => {
 
 /** Page publique « Demande d'hébergement » : création du compte et du premier dossier pendant une campagne ouverte. */
 export default function Demande(props: DemandeProps) {
-    const { flash } = usePage<SharedProps>().props;
+    const { flash, systeme } = usePage<SharedProps>().props;
     const [demarre, setDemarre] = useState(false);
 
     let contenu: ReactNode;
@@ -100,9 +100,9 @@ export default function Demande(props: DemandeProps) {
                 <header className="sticky top-0 z-30 border-b bg-white/95 backdrop-blur">
                     <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3">
                         <div className="flex min-w-0 items-center gap-3">
-                            <img src={props.logoUrl} alt="Logo CROU Bondoukou" className="size-10 shrink-0 rounded-full object-contain ring-1 ring-soft" />
+                            <img src={props.logoUrl} alt={`Logo ${systeme.nom}`} className="size-10 shrink-0 rounded-full object-contain ring-1 ring-soft" />
                             <div className="min-w-0">
-                                <p className="truncate text-sm font-medium text-gray-900">CROU de Bondoukou</p>
+                                <p className="truncate text-sm font-medium text-gray-900">{systeme.nom}</p>
                                 <p className="truncate text-xs text-muted">Hébergement universitaire</p>
                             </div>
                         </div>
@@ -125,7 +125,7 @@ export default function Demande(props: DemandeProps) {
                     {contenu}
                 </main>
 
-                <footer className="pb-6 text-center text-xs text-muted">© {props.year} CROU Bondoukou</footer>
+                <footer className="pb-6 text-center text-xs text-muted">© {props.year} {systeme.nom}</footer>
             </div>
         </>
     );

@@ -27,6 +27,7 @@ import { estActif, nombre, StatutBadge } from '@/components/parc-immobilier/labe
 import { tauxOccupation } from '@/components/parc-immobilier/occupation-bar';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { systeme } from '@/lib/systeme';
 import { cn } from '@/lib/utils';
 
 type Position = { lat: number; lng: number };
@@ -330,7 +331,7 @@ export default function CarteIndex({ cites, batiments, campus, urls }: CarteProp
             <div className="mb-6 flex flex-col gap-4">
                 <div className="flex flex-col gap-1">
                     <h1 className="page-title text-xl font-medium text-gray-900">Carte du parc</h1>
-                    <p className="text-sm text-muted">Localisation des cités, bâtiments et campus du CROU de Bondoukou.</p>
+                    <p className="text-sm text-muted">Localisation des cités, bâtiments et campus — {systeme().nom}.</p>
                 </div>
                 {urls.parc && <Separator />}
                 {urls.parc && (

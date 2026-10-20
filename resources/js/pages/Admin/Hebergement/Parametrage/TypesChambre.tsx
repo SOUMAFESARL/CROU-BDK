@@ -21,6 +21,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
+import { symboleDevise } from '@/lib/systeme';
 import { nombre, saisieMilliers } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import { enNombre, typeChambreSchema, type TypeChambreValeurs } from '@/schemas/parametrage-hebergement';
@@ -307,7 +308,7 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
                             control={control}
                             name="montant"
                             render={({ field }) => (
-                                <Field id="tc-montant" label="Loyer mensuel (FCFA)" required error={errors.montant?.message}>
+                                <Field id="tc-montant" label={`Loyer mensuel (${symboleDevise()})`} required error={errors.montant?.message}>
                                     <Input
                                         id="tc-montant"
                                         inputMode="numeric"

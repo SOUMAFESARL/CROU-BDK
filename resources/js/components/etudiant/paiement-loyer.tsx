@@ -28,6 +28,7 @@ import {
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Stepper } from "@/components/ui/stepper";
+import { montant, symboleDevise } from "@/lib/systeme";
 import { cn } from "@/lib/utils";
 import {
     CHAMP_SERVEUR,
@@ -70,7 +71,7 @@ type Lancement = {
 const ETAPES = ["Moyen de paiement", "Montant", "Vérification"];
 
 const francs = (valeur: string | number) =>
-    `${Number(valeur).toLocaleString("fr-FR")} FCFA`;
+    montant(valeur);
 
 /**
  * Assistant en 3 étapes pour régler le loyer en ligne. Le loyer et son solde viennent du serveur ;
@@ -272,7 +273,7 @@ export function PaiementLoyerDialog({
                                     />
                                     <Field
                                         id="pl-montant"
-                                        label="Montant à payer (FCFA)"
+                                        label={`Montant à payer (${symboleDevise()})`}
                                         required
                                         error={errors.montant?.message}
                                         hint={`Tout ou partie du solde, sans dépasser ${loyer.solde}.${valeurs.reseau === "cinetpay" ? " CinetPay : multiples de 5 FCFA." : ""}`}

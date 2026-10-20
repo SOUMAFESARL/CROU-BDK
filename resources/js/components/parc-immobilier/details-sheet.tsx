@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
+import { montant } from '@/lib/systeme';
 import { cn } from '@/lib/utils';
 import { peutModifier, type ParcActions } from './actions';
 import { EtatBadge, estActif, nombre, StatutBadge, TYPE_ICONS, TYPE_LABELS } from './labels';
@@ -178,7 +179,7 @@ function lignes(item: ParcItem): [string, ReactNode][] {
                 ['Capacité', `${item.capacite} place${item.capacite > 1 ? 's' : ''}`],
                 ['Lits', item.nb_lits || null],
                 ['Superficie', item.superficie ? `${nombre.format(item.superficie)} m²` : null],
-                ['Loyer', item.prix ? `${nombre.format(item.prix)} FCFA` : null],
+                ['Loyer', item.prix ? montant(item.prix) : null],
                 ['Confort', item.niveau_confort ? (CONFORT[item.niveau_confort] ?? item.niveau_confort) : null],
                 ['Accès PMR', item.pmr ? 'Oui' : 'Non'],
             ];

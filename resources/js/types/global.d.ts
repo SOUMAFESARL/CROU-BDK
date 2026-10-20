@@ -54,8 +54,10 @@ export interface SharedProps extends InertiaPageProps {
     menuEtudiant: EtudiantMenuGroup[];
     csrfToken: string;
     sidebarOpen: boolean;
-    /** URL absolue du logo, résolue côté serveur (asset()). */
+    /** URL absolue du logo (Configuration › Profil), résolue côté serveur (asset()). */
     logoUrl: string;
+    /** Nom du CROU et format des montants (Configuration) ; voir `@/lib/systeme`. */
+    systeme: import('@/lib/systeme').Systeme;
     flash: {
         success?: string | null;
         error?: string | null;

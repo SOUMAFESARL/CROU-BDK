@@ -24,13 +24,13 @@ class EtudiantIdentifiantsNotification extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('Vos identifiants – Espace étudiant CROU Bondoukou')
+            ->subject('Vos identifiants – Espace étudiant '.systemAppName())
             ->greeting('Bonjour,')
             ->line($this->introduction)
             ->line("Identifiant : {$this->email}")
             ->line("Mot de passe : {$this->motDePasse}")
             ->action('Accéder à mon espace', $this->urlConnexion)
             ->line('Pour votre sécurité, changez ce mot de passe depuis votre profil après votre première connexion.')
-            ->salutation('Le CROU de Bondoukou');
+            ->salutation(systemAppName());
     }
 }

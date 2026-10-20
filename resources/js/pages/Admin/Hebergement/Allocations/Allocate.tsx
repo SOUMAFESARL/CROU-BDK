@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { envoyer } from '@/lib/inertia-form';
+import { montant } from '@/lib/systeme';
 import { nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 
@@ -292,7 +293,7 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                                                 ['Type', chambre.type],
                                                 ['Emplacement', chambre.lieu || '—'],
                                                 ['Places libres', `${chambre.libres} / ${chambre.capacite}`],
-                                                ['Loyer mensuel', `${nombre(chambre.prix)} FCFA`],
+                                                ['Loyer mensuel', montant(chambre.prix)],
                                             ]}
                                         >
                                             <Progress value={chambre.capacite ? (chambre.occupes / chambre.capacite) * 100 : 0} label="Occupation de la chambre" className="mt-3" />

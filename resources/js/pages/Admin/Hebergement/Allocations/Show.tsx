@@ -33,6 +33,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
+import { montant } from '@/lib/systeme';
 import { dateFr, initiales, nombre, sansAccents } from '@/lib/text';
 import { cn } from '@/lib/utils';
 
@@ -493,7 +494,7 @@ function TuileChambre({ chambre }: { chambre: ChambreDisponible }) {
                 </div>
                 <div className="flex justify-between py-1">
                     <dt className="text-muted">Loyer</dt>
-                    <dd className="font-medium">{nombre(chambre.prix)} FCFA</dd>
+                    <dd className="font-medium">{montant(chambre.prix)}</dd>
                 </div>
             </dl>
             <div>

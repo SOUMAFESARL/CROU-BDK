@@ -112,7 +112,7 @@ class EtudiantPasswordResetController extends Controller
     private function layoutProps(): array
     {
         return [
-            'logoUrl' => asset('admin/assets/images/logos/crou_bdk.jpeg'),
+            'logoUrl' => systemLogo('admin/assets/images/logos/crou_bdk.jpeg'),
             'backgroundUrl' => asset('files/assets/images/auth/crou_bondoukou.jpg'),
             'year' => now()->year,
         ];

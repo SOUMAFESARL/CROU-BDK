@@ -22,7 +22,7 @@ class AuthController extends Controller
             'forgotUrl' => route('admin.forgot'),
             'csrfToken' => csrf_token(),
             'oldEmail' => old('email'),
-            'logoUrl' => asset('admin/assets/images/logos/crou_bdk.jpeg'),
+            'logoUrl' => systemLogo('admin/assets/images/logos/crou_bdk.jpeg'),
             'backgroundUrl' => asset('files/assets/images/auth/crou_bondoukou.jpg'),
             'year' => now()->year,
         ]);

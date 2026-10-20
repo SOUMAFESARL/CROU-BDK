@@ -32,11 +32,24 @@ class OnlinePaymentService
             ->orderBy('annee_facturation')->orderBy('mois_facturation')->orderBy('id_loyer')->first();
     }
 
+    /** Raison pour laquelle le paiement en ligne est fermé par la Configuration › Paiements, ou null. */
+    public static function indisponibilite(): ?string
+    {
+        return match (true) {
+            ! systemConfig('online_payment_enabled', true) => 'Le paiement en ligne est désactivé par l’administration. Réglez votre loyer au guichet.',
+            ! in_array('mobile', systemPaymentMethods(), true) => 'Le paiement par Mobile Money n’est pas accepté actuellement. Réglez votre loyer au guichet.',
+            default => null,
+        };
+    }
+
     public function start(string $studentId, string $loyerId, string $providerCode, string $phone = '', ?int $requestedAmount = null): OnlinePayment
     {
         $base = rtrim((string) config('app.url'), '/');
         if (!filter_var($base, FILTER_VALIDATE_URL) || parse_url($base, PHP_URL_SCHEME) !== 'https') {
             throw ValidationException::withMessages(['provider' => 'Le paiement en ligne nécessite une adresse publique HTTPS configurée par l’administration.']);
+        }
+        if ($raison = self::indisponibilite()) {
+            throw ValidationException::withMessages(['provider' => $raison]);
         }
         $token = Str::random(64);
         $created = false;
@@ -66,6 +79,19 @@ class OnlinePaymentService
             $amount = $requestedAmount ?? (int) $loyer->solde_restant;
             if ($amount <= 0 || $amount > (int) $loyer->solde_restant) {
                 throw ValidationException::withMessages(['amount' => 'Le montant doit être supérieur à zéro et ne pas dépasser le solde restant du loyer.']);
+            }
+            // Configuration › Paiements : montant minimum (un solde plus faible reste payable en une fois) et plafond journalier.
+            $minimum = min((int) systemConfig('min_amount', 0), (int) $loyer->solde_restant);
+            if ($amount < $minimum) {
+                throw ValidationException::withMessages(['amount' => 'Le montant minimum d’un paiement en ligne est de '.formatSystemAmount($minimum).'.']);
+            }
+            $plafond = (int) systemConfig('daily_limit', 0);
+            if ($plafond > 0) {
+                $dejaEngage = (int) OnlinePayment::where('student_id', $studentId)->where('created_at', '>=', now()->startOfDay())
+                    ->whereIn('status', ['initializing', 'pending', 'review', 'succeeded'])->sum('amount');
+                if ($dejaEngage + $amount > $plafond) {
+                    throw ValidationException::withMessages(['amount' => 'Ce paiement dépasse le plafond journalier de '.formatSystemAmount($plafond).' (reste possible aujourd’hui : '.formatSystemAmount(max(0, $plafond - $dejaEngage)).').']);
+                }
             }
             if ($providerCode === 'cinetpay' && $amount % 5 !== 0) {
                 throw ValidationException::withMessages(['provider' => 'CinetPay exige un montant multiple de 5 FCFA. Choisissez un autre réseau.']);

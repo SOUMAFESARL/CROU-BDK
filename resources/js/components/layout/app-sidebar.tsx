@@ -148,14 +148,14 @@ export function AppSidebar() {
 
 /** Logo et nom en tête de la barre latérale (admin et espace étudiant) ; replié : logo seul. */
 export function SidebarBrand({ href }: { href: string }) {
-    const { logoUrl } = usePage<SharedProps>().props;
+    const { logoUrl, systeme } = usePage<SharedProps>().props;
 
     return (
         <SidebarHeader className="border-b border-sidebar-border px-2 py-4 group-data-[collapsible=icon]:py-3">
             <div className="flex flex-col items-center">
                 <a href={href} className="flex max-w-full min-w-0 flex-col items-center gap-2 rounded-md px-1 group-data-[collapsible=icon]:px-0">
-                    <img src={logoUrl} alt="CROU Bondoukou" className="size-16 shrink-0 rounded-md object-contain group-data-[collapsible=icon]:size-9" />
-                    <span className="max-w-full truncate font-semibold text-primary group-data-[collapsible=icon]:hidden">CROU Bondoukou</span>
+                    <img src={logoUrl} alt={systeme.nom} className="size-16 shrink-0 rounded-md object-contain group-data-[collapsible=icon]:size-9" />
+                    <span className="max-w-full truncate font-semibold text-primary group-data-[collapsible=icon]:hidden">{systeme.nom}</span>
                 </a>
             </div>
         </SidebarHeader>

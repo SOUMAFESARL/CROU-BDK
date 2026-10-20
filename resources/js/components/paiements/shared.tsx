@@ -1,8 +1,9 @@
 import { Badge } from '@/components/ui/badge';
+import { montant } from '@/lib/systeme';
 import { nombre } from '@/lib/text';
 
-/** Montant au format « 12 500 FCFA ». */
-export const fcfa = (valeur: number | string | null | undefined) => `${nombre(valeur)} FCFA`;
+/** Montant au format de Configuration › Devises (« 12 500 FCFA » par défaut). */
+export const fcfa = (valeur: number | string | null | undefined) => montant(valeur);
 
 /** Montant abrégé pour les axes des graphiques (« 1,2 M », « 350 k »). */
 export const fcfaCourt = (valeur: number) => {

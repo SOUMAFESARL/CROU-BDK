@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 import type { Variante } from '@/components/vie-residentielle/shared';
-import { nombre } from '@/lib/text';
+import { montant } from '@/lib/systeme';
 
 export const PRIORITES = [
     { value: 'faible', label: 'Faible', description: 'Peut attendre une intervention planifiée.' },
@@ -43,7 +43,7 @@ export const RESULTATS = [
     { value: 'necessite_suivi', label: 'Nécessite un suivi' },
 ] as const;
 
-export const fcfa = (valeur: number | string | null | undefined) => `${nombre(valeur)} FCFA`;
+export const fcfa = (valeur: number | string | null | undefined) => montant(valeur);
 
 export type Maintenancier = { id: string; name: string; specialite: string; tel: string | null; email: string | null; cite: string | null };
 

@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
+import { montant as montantSysteme, symboleDevise, systeme } from '@/lib/systeme';
 import { initiales } from '@/lib/text';
 import { cn } from '@/lib/utils';
 
@@ -51,6 +52,10 @@ const METHODES = [
     { value: 'autre', label: 'Autre' },
 ] as const;
 
+/** Méthodes permises par Configuration › Paiements (espèces → cash, Mobile Money → mobile ; « Autre » toujours). */
+const methodesAcceptees = () =>
+    METHODES.filter((m) => m.value === 'autre' || systeme().modesPaiement.includes(m.value === 'especes' ? 'cash' : 'mobile'));
+
 const schema = z.object({
     resident_id: z.string().min(1, 'Sélectionnez un résident dans la liste.'),
     chambre_id: z.string().min(1, 'Ce résident n’a pas de chambre attribuée.'),
@@ -58,7 +63,7 @@ const schema = z.object({
     cite_id: z.string(),
     contrat_id: z.string(),
     type_paiement: z.enum(['loyer', 'caution', 'penalite', 'autre'], { error: 'Choisissez le type de paiement.' }),
-    montant: z.coerce.number({ error: 'Indiquez un montant.' }).min(100, 'Montant minimum : 100 FCFA.'),
+    montant: z.coerce.number({ error: 'Indiquez un montant.' }).min(100, `Montant minimum : ${montantSysteme(100)}.`),
     methode_paiement: z.enum(['orange_money', 'mtn_money', 'moov_money', 'especes', 'autre'], { error: 'Choisissez une méthode de paiement.' }),
     notes: z.string().trim().max(2000, '2 000 caractères au maximum.'),
 });
@@ -215,7 +220,7 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche }:
                                                         <SelectValue placeholder="Sélectionner une méthode" />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        {METHODES.map((methode) => (
+                                                        {methodesAcceptees().map((methode) => (
                                                             <SelectItem key={methode.value} value={methode.value}>
                                                                 {methode.label}
                                                             </SelectItem>
@@ -228,10 +233,10 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche }:
                                 </div>
                                 <Field
                                     id="np-montant"
-                                    label="Montant (FCFA)"
+                                    label={`Montant (${symboleDevise()})`}
                                     required
                                     error={errors.montant?.message}
-                                    hint={resident && resident.arriere > 0 ? `Montant recommandé : ${fcfa(resident.loyer_mensuel + resident.arriere)} (loyer + arriérés).` : 'Minimum 100 FCFA.'}
+                                    hint={resident && resident.arriere > 0 ? `Montant recommandé : ${fcfa(resident.loyer_mensuel + resident.arriere)} (loyer + arriérés).` : `Minimum ${montantSysteme(100)}.`}
                                 >
                                     <Input id="np-montant" type="number" min={100} step={100} inputMode="numeric" placeholder="Ex. 50000" invalid={!!errors.montant} {...register('montant')} />
                                 </Field>

@@ -31,8 +31,19 @@ class HandleInertiaRequests extends Middleware
             'csrfToken' => fn () => csrf_token(),
             // Cookie écrit par la barre latérale (React et Blade) : 'false' = repliée.
             'sidebarOpen' => $request->cookie('sidebar_state') !== 'false',
-            // Via asset() : en prod (racine du projet comme docroot) les fichiers publics sont sous /public.
-            'logoUrl' => asset('admin/assets/images/logos/crou_bdk.jpeg'),
+            // Logo de Configuration › Profil (via asset() : en prod les fichiers publics sont sous /public).
+            'logoUrl' => fn () => systemLogo('admin/assets/images/logos/crou_bdk.jpeg'),
+            // Identité et formats de Configuration (Général, Devises, Paiements), lus par resources/js/lib/systeme.ts.
+            'systeme' => fn () => [
+                'nom' => systemAppName(),
+                'nomComplet' => systemFullName(),
+                'devise' => [
+                    'symbole' => (string) systemCurrencySymbol(),
+                    'position' => systemConfig('symbol_position', 'after') === 'before' ? 'before' : 'after',
+                    'separateur' => systemThousandsSeparator(),
+                ],
+                'modesPaiement' => systemPaymentMethods(),
+            ],
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),

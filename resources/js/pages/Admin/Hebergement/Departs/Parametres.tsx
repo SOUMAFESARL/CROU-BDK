@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { StatCard } from '@/components/ui/stat-card';
 import { Stepper } from '@/components/ui/stepper';
 import { envoyer } from '@/lib/inertia-form';
+import { montant as montantSysteme, symboleDevise } from '@/lib/systeme';
 import { dateFr, nombre, saisieMilliers } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import { enEntier, parametresSchema, type Parametres as Valeurs } from '@/schemas/departs';
@@ -135,7 +136,7 @@ function Formulaire({ settings, url, departs }: { settings: Props['settings']; u
                     inputMode="numeric"
                     placeholder={placeholder}
                     invalid={invalide}
-                    trailing={<span className="text-xs text-muted">FCFA</span>}
+                    trailing={<span className="text-xs text-muted">{symboleDevise()}</span>}
                     value={field.value as string}
                     onBlur={field.onBlur}
                     onChange={(event) => field.onChange(saisieMilliers(event.target.value))}
@@ -196,7 +197,7 @@ function Formulaire({ settings, url, departs }: { settings: Props['settings']; u
                         <Note icone={<Hammer />}>
                             <p>
                                 Un élément constaté en <strong className="font-medium">mauvais état</strong> à la sortie entraîne la retenue indiquée lorsque son nom correspond à une ligne de la grille (ex. « Serrure » pour
-                                l’élément « Serrure de la porte »). Les lignes à 0 FCFA ne retiennent rien.
+                                l’élément « Serrure de la porte »). Les lignes à {montantSysteme(0)} ne retiennent rien.
                             </p>
                         </Note>
                         {grille.fields.length === 0 ? (

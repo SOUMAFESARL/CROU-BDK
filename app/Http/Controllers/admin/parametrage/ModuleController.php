@@ -6,9 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\ApplicationModule;
 use App\Models\Permission;
 use App\Models\Role;
+use App\Services\AdminAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class ModuleController extends Controller
 {
@@ -21,12 +24,56 @@ class ModuleController extends Controller
         'history'=>'Consulter l’historique',
     ];
 
-    public function index()
+    /** Page React `Admin/Parametrage/Modules` : liste à plat, l'arborescence est reconstruite côté client. */
+    public function index(Request $request, AdminAccess $access): Response
     {
-        return view('admin.parametrage.modules.index', [
-            'modules' => ApplicationModule::with(['children.children','permissions'])->whereNull('parent_id')->orderBy('position')->get(),
-            'allModules' => ApplicationModule::with('parent')->orderBy('level')->orderBy('position')->get(),
-            'availableActions' => self::ACTIONS,
+        $actor = $request->user('admin');
+        $can = [
+            'update' => $access->allows($actor, 'admin.parametrage.modules.update'),
+            'toggle' => $access->allows($actor, 'admin.parametrage.modules.toggle'),
+            'destroy' => $access->allows($actor, 'admin.parametrage.modules.destroy'),
+        ];
+
+        $modules = ApplicationModule::withCount(['children', 'permissions', 'permissions as permissions_attribuees_count' => fn ($q) => $q->whereHas('roles', self::horsSuperAdmin(...))])
+            ->orderBy('level')->orderBy('position')->orderBy('name')->get()
+            ->map(fn (ApplicationModule $module) => [
+                'id' => $module->id,
+                'parent_id' => $module->parent_id,
+                'name' => $module->name,
+                'slug' => $module->slug,
+                'description' => $module->description,
+                'icon' => $module->icon,
+                'route_name' => $module->route_name,
+                'menu_key' => $module->menu_key,
+                'submenu_key' => $module->submenu_key,
+                'position' => (int) $module->position,
+                'actions' => array_values($module->actions ?? []),
+                'is_active' => (bool) $module->is_active,
+                'show_in_menu' => (bool) $module->show_in_menu,
+                'is_system' => (bool) $module->is_system,
+                'enfants' => (int) $module->children_count,
+                'permissions' => (int) $module->permissions_count,
+                'permissions_attribuees' => (int) $module->permissions_attribuees_count,
+                'urls' => [
+                    'update' => $can['update'] ? route('admin.parametrage.modules.update', $module) : null,
+                    'toggle' => $can['toggle'] ? route('admin.parametrage.modules.toggle', $module) : null,
+                    'destroy' => $can['destroy'] && !$module->is_system ? route('admin.parametrage.modules.destroy', $module) : null,
+                ],
+            ]);
+
+        return Inertia::render('Admin/Parametrage/Modules', [
+            'modules' => $modules,
+            'actions' => self::ACTIONS,
+            'stats' => [
+                'total' => $modules->count(),
+                'actifs' => $modules->where('is_active', true)->count(),
+                'inactifs' => $modules->where('is_active', false)->count(),
+                'permissions' => $modules->sum('permissions'),
+            ],
+            'urls' => [
+                'store' => $access->allows($actor, 'admin.parametrage.modules.store') ? route('admin.parametrage.modules.store') : null,
+                'roles' => $access->allows($actor, 'admin.parametrage.roles-permissions.index') ? route('admin.parametrage.roles-permissions.index') : null,
+            ],
         ]);
     }
 
@@ -46,6 +93,10 @@ class ModuleController extends Controller
         if (($data['parent_id'] ?? null) == $module->id || $this->descendantIds($module)->contains((int) ($data['parent_id'] ?? 0))) {
             return back()->withErrors(['parent_id'=>'Un module ne peut pas dépendre de lui-même ou de l’un de ses enfants.']);
         }
+        // Les permissions des modules système sont référencées par config/admin_permissions.php.
+        if ($module->is_system && $data['slug'] !== $module->slug) {
+            return back()->withErrors(['slug'=>'L’identifiant technique d’un module système ne peut pas être modifié.']);
+        }
         DB::transaction(function () use ($module, $data) {
             $module->update($this->payload($data));
             $this->syncPermissions($module->fresh());
@@ -63,9 +114,19 @@ class ModuleController extends Controller
     {
         if ($module->is_system) return back()->withErrors(['module'=>'Un module système ne peut pas être supprimé.']);
         if ($module->children()->exists()) return back()->withErrors(['module'=>'Déplacez ou supprimez d’abord les sous-modules.']);
-        if ($module->permissions()->whereHas('roles')->exists()) return back()->withErrors(['module'=>'Ce module possède des permissions attribuées à des rôles.']);
-        DB::transaction(function () use ($module) { $module->permissions()->delete(); $module->delete(); });
+        if ($module->permissions()->whereHas('roles', self::horsSuperAdmin(...))->exists()) return back()->withErrors(['module'=>'Ce module possède des permissions attribuées à des rôles.']);
+        DB::transaction(function () use ($module) {
+            $module->permissions->each(fn ($permission) => $permission->roles()->detach());
+            $module->permissions()->delete();
+            $module->delete();
+        });
         return back()->with('success', 'Module supprimé.');
+    }
+
+    /** Le super-administrateur reçoit d'office toutes les permissions (syncPermissions) : il ne bloque pas la suppression. */
+    private static function horsSuperAdmin($query): void
+    {
+        $query->where('roles.id', '!=', 1);
     }
 
     private function validated(Request $request, ?ApplicationModule $module = null): array

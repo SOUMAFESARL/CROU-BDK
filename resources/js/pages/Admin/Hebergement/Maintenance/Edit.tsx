@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { Textarea } from '@/components/ui/textarea';
 import { aujourdhui, ChoixCarte, Lignes, repartirErreurs, type Structure } from '@/components/vie-residentielle/shared';
 import { envoyer } from '@/lib/inertia-form';
+import { symboleDevise } from '@/lib/systeme';
 import { dateFr, nombre } from '@/lib/text';
 
 type Valeurs = {
@@ -288,10 +289,10 @@ export default function MaintenanceEdit({ ordre, categories, structure, equipeme
                             <Textarea id="ed-cause" rows={3} placeholder="Usure, mauvaise utilisation, défaut d’installation…" {...register('cause')} />
                         </Field>
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                            <Field id="ed-cout_estime" label="Coût estimé (FCFA)" error={errors.cout_estime?.message}>
+                            <Field id="ed-cout_estime" label={`Coût estimé (${symboleDevise()})`} error={errors.cout_estime?.message}>
                                 <Input id="ed-cout_estime" type="number" min={0} inputMode="numeric" invalid={!!errors.cout_estime} {...register('cout_estime')} />
                             </Field>
-                            <Field id="ed-cout_reel" label="Coût réel (FCFA)" error={errors.cout_reel?.message} hint="Alimente le coût de maintenance des tableaux de bord.">
+                            <Field id="ed-cout_reel" label={`Coût réel (${symboleDevise()})`} error={errors.cout_reel?.message} hint="Alimente le coût de maintenance des tableaux de bord.">
                                 <Input id="ed-cout_reel" type="number" min={0} inputMode="numeric" invalid={!!errors.cout_reel} {...register('cout_reel')} />
                             </Field>
                             <Field id="ed-temps_passe" label="Temps passé (heures)" error={errors.temps_passe?.message}>

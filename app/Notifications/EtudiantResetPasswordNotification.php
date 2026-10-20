@@ -21,10 +21,10 @@ class EtudiantResetPasswordNotification extends Notification
         return (new MailMessage)
             ->subject('Réinitialisation de votre mot de passe')
             ->greeting('Bonjour,')
-            ->line('Vous recevez cet e-mail car une réinitialisation du mot de passe de votre espace étudiant CROU Bondoukou a été demandée.')
+            ->line('Vous recevez cet e-mail car une réinitialisation du mot de passe de votre espace étudiant '.systemAppName().' a été demandée.')
             ->action('Réinitialiser mon mot de passe', $this->url)
             ->line("Ce lien expire dans {$this->expireMinutes} minutes.")
             ->line("Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet e-mail : votre mot de passe reste inchangé.")
-            ->salutation('Le CROU de Bondoukou');
+            ->salutation(systemAppName());
     }
 }

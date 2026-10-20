@@ -1,7 +1,8 @@
-import { Head } from '@inertiajs/react';
+import { Head, usePage } from '@inertiajs/react';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import type { SharedProps } from '@/types/global';
 
 type AuthLayoutProps = {
     title: string;
@@ -14,6 +15,9 @@ type AuthLayoutProps = {
 
 /** Cadre commun des pages d'authentification : photo plein écran, message de marque et carte du formulaire. */
 export function AuthLayout({ title, subtitle, logoUrl, backgroundUrl, year, children }: AuthLayoutProps) {
+    // Nom court et nom complet de Configuration › Général.
+    const { systeme } = usePage<SharedProps>().props;
+
     return (
         <>
             <Head title={title} />
@@ -28,15 +32,15 @@ export function AuthLayout({ title, subtitle, logoUrl, backgroundUrl, year, chil
                     {/* Message de marque, visible sur grand écran uniquement */}
                     <section className="hidden max-w-lg text-white lg:block">
                         <span className="mb-5 block h-1 w-12 rounded-full bg-accent" />
-                        <h1 className="text-4xl leading-tight font-bold drop-shadow-lg xl:text-5xl">Centre Régional des Œuvres Universitaires de Bondoukou</h1>
+                        <h1 className="text-4xl leading-tight font-bold drop-shadow-lg xl:text-5xl">{systeme.nomComplet}</h1>
                         <p className="mt-4 text-lg text-white/90 drop-shadow-md">Plateforme intégrée de gestion des services universitaires.</p>
-                        <p className="mt-10 text-sm text-white/70">© {year} CROU Bondoukou</p>
+                        <p className="mt-10 text-sm text-white/70">© {year} {systeme.nom}</p>
                     </section>
 
                     <main className="login-card-enter w-full max-w-md">
                         <div className="rounded-brand border border-white/60 bg-surface/95 p-6 shadow-2xl ring-1 shadow-black/30 ring-black/5 backdrop-blur-md sm:p-8">
                             <div className="flex flex-col items-center text-center">
-                                <img src={logoUrl} alt="Logo CROU Bondoukou" className="size-20 rounded-full bg-white object-contain p-1.5 shadow-md ring-2 ring-soft" />
+                                <img src={logoUrl} alt={`Logo ${systeme.nom}`} className="size-20 rounded-full bg-white object-contain p-1.5 shadow-md ring-2 ring-soft" />
                                 <h2 className="mt-4 text-2xl font-bold text-gray-900">{title}</h2>
                                 <p className="mt-1 text-sm text-muted">{subtitle}</p>
                                 <span aria-hidden className="mt-5 block h-px w-24 bg-linear-to-r from-transparent via-secondary to-transparent" />

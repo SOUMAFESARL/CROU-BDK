@@ -114,6 +114,7 @@ class EtudiantPaiements
             'reseaux' => $reseaux,
             'telephone' => strlen($chiffres) === 10 ? $chiffres : '',
             'indisponible' => match (true) {
+                (bool) ($ferme = OnlinePaymentService::indisponibilite()) => $ferme,
                 ! $assignation?->chambre => 'Aucune chambre occupée n’est enregistrée dans votre dossier. Contactez le service d’hébergement.',
                 ! $loyer => 'Aucun loyer restant à régler. Si votre loyer n’a pas encore été établi, contactez le service financier.',
                 $reseaux === [] => 'Aucun moyen de paiement en ligne n’est disponible pour le moment. Contactez le service financier.',

@@ -30,13 +30,20 @@ export const enNombre = (valeur: string) => (valeur.trim() === '' ? null : Numbe
 
 const description = z.string().trim().max(2000, 'La description ne doit pas dépasser 2000 caractères.');
 
-/** Types de cité (`name` ≤ 250) et types d'équipements (`name` ≤ 255). */
-export const referentielSchema = (max: number) =>
-    z.object({
-        name: z.string().trim().min(1, 'Renseignez le nom.').max(max, `Le nom ne doit pas dépasser ${max} caractères.`),
-        description,
-    });
-export type ReferentielValeurs = z.infer<ReturnType<typeof referentielSchema>>;
+/**
+ * Référentiels simples (`ReferentielPage`) : un texte par champ, avec la longueur maximale du contrôleur
+ * (types de cité `name` ≤ 250, départements, filières, types d'utilisateur…). `requis` porte le message du champ obligatoire.
+ */
+export const referentielSchema = (champs: readonly { cle: string; label: string; max: number; requis?: string }[]) =>
+    z.object(
+        Object.fromEntries(
+            champs.map((champ) => {
+                const texte = z.string().trim().max(champ.max, `${champ.label} : ${champ.max} caractères au maximum.`);
+                return [champ.cle, champ.requis ? texte.min(1, champ.requis) : texte];
+            }),
+        ),
+    );
+export type ReferentielValeurs = Record<string, string>;
 
 /** `TypeChambreController::store/update`. */
 export const typeChambreSchema = z.object({

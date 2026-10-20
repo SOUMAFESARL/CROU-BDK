@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Variante } from '@/components/vie-residentielle/shared';
+import { montant } from '@/lib/systeme';
 import { nombre, sansAccents } from '@/lib/text';
 
 export type Option = { value: string; label: string };
@@ -59,7 +60,7 @@ export type Demande = {
     urls: { decision: string | null; etat_des_lieux: string | null; pdf: string | null; restitution: string | null };
 };
 
-export const fcfa = (valeur: number | null | undefined) => `${nombre(valeur)} FCFA`;
+export const fcfa = (valeur: number | null | undefined) => montant(valeur);
 
 /** `aaaa-mm-jj` du jour (heure locale). */
 export const jourIso = (date = new Date()) =>
