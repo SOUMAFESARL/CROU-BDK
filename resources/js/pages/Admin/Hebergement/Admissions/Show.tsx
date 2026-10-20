@@ -12,13 +12,14 @@ import {
     Info,
     ListChecks,
     Loader2,
+    Pencil,
     Route,
     Scale,
     ShieldAlert,
     TriangleAlert,
     X,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
@@ -27,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { PageHeader } from '@/components/ui/page-header';
+import { EtudiantEditDialog, type OptionsEtudiant, type ValeursEtudiant } from '@/components/residents/etudiant-edit-dialog';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -65,7 +67,10 @@ type Props = {
     } | null;
     profil: Record<string, string | boolean | null> | null;
     historique: { id: string; numero: string | null; annee: string | null; date: string | null; statut: string | null }[] | null;
-    urls: { admissions: string | null; contrat: string | null };
+    /** Valeurs et référentiels du formulaire de modification (`null` sans le droit de modifier). */
+    edition: ValeursEtudiant | null;
+    options: OptionsEtudiant | null;
+    urls: { admissions: string | null; contrat: string | null; modifier: string | null };
 };
 
 const PARCOURS = ['brouillon', 'soumis', 'eligible', 'confirme', 'attribue_definitif'];
@@ -104,7 +109,16 @@ const STATUTS_DEMANDE: Record<string, 'success' | 'warning' | 'danger' | 'neutra
 
 /** Traitement d'un dossier de candidature (remplace `admission/traiter-demande.blade.php`, `derogations.blade.php` et le mode admin de `dossier-cycle`). */
 export default function AdmissionShow(props: Props) {
-    const { etudiant, demande, discipline, eligibilite, documents, derogations, suivi, profil, historique, urls } = props;
+    const { etudiant, demande, discipline, eligibilite, documents, derogations, suivi, profil, historique, edition, options, urls } = props;
+    const [enEdition, setEnEdition] = useState(false);
+    // Objet stable : la fenêtre réinitialise son formulaire à chaque ouverture (et après rechargement des valeurs).
+    const etudiantEdite = useMemo(
+        () => (enEdition && urls.modifier && edition ? { name: etudiant.name, url: urls.modifier, valeurs: edition } : null),
+        [enEdition, urls.modifier, edition, etudiant.name],
+    );
+    const modifiable = !!(urls.modifier && edition && options);
+    // Tant qu'une pièce n'est pas validée, l'étape du dossier ne peut pas être enregistrée.
+    const documentsNonValides = documents?.filter((document) => document.statut !== 'valide').length ?? 0;
 
     return (
         <AdminLayout title="Traiter la demande">
@@ -123,8 +137,21 @@ export default function AdmissionShow(props: Props) {
                     </div>
                 }
                 actions={
-                    (urls.contrat || urls.admissions) && (
+                    (urls.contrat || urls.admissions || modifiable) && (
                         <>
+                            {urls.admissions && (
+                                <Link
+                                    href={urls.admissions}
+                                    className="inline-flex h-10 items-center gap-2 rounded-brand border border-gray-300 bg-white px-4 text-sm font-medium text-muted hover:bg-surface hover:text-primary"
+                                >
+                                    <ArrowLeft {...ICON} aria-hidden /> Retour aux admissions
+                                </Link>
+                            )}
+                            {modifiable && (
+                                <Button className="h-10 px-4" onClick={() => setEnEdition(true)} title="Corriger les informations saisies par l’étudiant">
+                                    <Pencil {...ICON} aria-hidden /> Modifier les informations
+                                </Button>
+                            )}
                             {urls.contrat && (
                                 <a
                                     href={urls.contrat}
@@ -135,14 +162,6 @@ export default function AdmissionShow(props: Props) {
                                 >
                                     <FileText {...ICON} aria-hidden /> Consulter le contrat
                                 </a>
-                            )}
-                            {urls.admissions && (
-                                <Link
-                                    href={urls.admissions}
-                                    className="inline-flex h-10 items-center gap-2 rounded-brand border border-gray-300 bg-white px-4 text-sm font-medium text-muted hover:bg-surface hover:text-primary"
-                                >
-                                    <ArrowLeft {...ICON} aria-hidden /> Retour aux admissions
-                                </Link>
                             )}
                         </>
                     )
@@ -163,7 +182,7 @@ export default function AdmissionShow(props: Props) {
                     {eligibilite && <Eligibilite {...eligibilite} />}
                     {documents && <Documents documents={documents} />}
                     {derogations && demande && <Derogations {...derogations} demandeId={demande.id} />}
-                    {suivi && demande && <Suivi suivi={suivi} etat={demande.etat} />}
+                    {suivi && demande && <Suivi suivi={suivi} etat={demande.etat} documentsNonValides={documentsNonValides} />}
                 </div>
 
                 <aside className="flex flex-col gap-6">
@@ -171,13 +190,15 @@ export default function AdmissionShow(props: Props) {
                     {historique && <Historique demandes={historique} />}
                 </aside>
             </div>
+
+            {modifiable && options && <EtudiantEditDialog etudiant={etudiantEdite} options={options} onClose={() => setEnEdition(false)} />}
         </AdminLayout>
     );
 }
 
-function Carte({ icone, teinte, titre, meta, children }: { icone: ReactNode; teinte: string; titre: string; meta?: ReactNode; children: ReactNode }) {
+function Carte({ id, icone, teinte, titre, meta, children }: { id?: string; icone: ReactNode; teinte: string; titre: string; meta?: ReactNode; children: ReactNode }) {
     return (
-        <section className="overflow-hidden rounded-brand border bg-white">
+        <section id={id} className="scroll-mt-6 overflow-hidden rounded-brand border bg-white">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
                 <h2 className="flex items-center gap-2 text-base font-medium text-gray-900">
                     <span className={cn('flex size-8 items-center justify-center rounded-brand', teinte)} aria-hidden>
@@ -280,7 +301,7 @@ function Documents({ documents }: { documents: Document[] }) {
         });
 
     return (
-        <Carte icone={<FileText size={18} strokeWidth={1.25} />} teinte="bg-[#E3EEFA] text-[#0B3A6E]" titre="Documents fournis" meta={`${valides} / ${documents.length} validé(s)`}>
+        <Carte id="documents-fournis" icone={<FileText size={18} strokeWidth={1.25} />} teinte="bg-[#E3EEFA] text-[#0B3A6E]" titre="Documents fournis" meta={`${valides} / ${documents.length} validé(s)`}>
             {documents.length > 0 && <Progress value={(valides / documents.length) * 100} className="mb-4" label="Documents validés" />}
             {documents.length === 0 ? (
                 <p className="flex flex-col items-center gap-2 py-6 text-sm text-muted">
@@ -474,7 +495,7 @@ function ArticleDerogation({ derogation }: { derogation: Derogation }) {
 /** Transitions pour lesquelles `DossierWorkflow` exige un motif (ainsi que toute sortie de l'état « refusé »). */
 const ETATS_AVEC_MOTIF = ['incomplet', 'refuse', 'annule', 'expire'];
 
-function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: string | null }) {
+function Suivi({ suivi, etat, documentsNonValides }: { suivi: NonNullable<Props['suivi']>; etat: string | null; documentsNonValides: number }) {
     const [action, setAction] = useState('');
     const [motif, setMotif] = useState('');
     const [erreurs, setErreurs] = useState<{ etat?: string; motif?: string }>({});
@@ -482,7 +503,10 @@ function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: stri
     // « En étude » ne subsiste que sur les dossiers de l'ancien parcours : affiché au niveau « Soumis ».
     const position = etat ? PARCOURS.indexOf(etat === 'en_etude' ? 'soumis' : etat) : -1;
 
+    const bloque = documentsNonValides > 0;
+
     const enregistrer = async () => {
+        if (bloque) return;
         const nouvelles: typeof erreurs = {};
         if (!action) nouvelles.etat = 'Choisissez une action.';
         // Motif exigé par le workflow (le serveur le revérifie).
@@ -570,8 +594,20 @@ function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: stri
                     >
                         <Textarea id="transition-motif" rows={2} maxLength={5000} invalid={!!erreurs.motif} value={motif} onChange={(event) => setMotif(event.target.value)} />
                     </Field>
+                    {bloque && (
+                        <p id="transition-bloquee" role="status" className="flex items-start gap-2 rounded-brand border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                            <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                            <span>
+                                {documentsNonValides === 1 ? '1 document n’est pas encore validé' : `${documentsNonValides} documents ne sont pas encore validés`} : validez toutes les pièces avant
+                                d’enregistrer cette étape.{' '}
+                                <a href="#documents-fournis" className="font-medium underline hover:no-underline">
+                                    Voir les documents fournis
+                                </a>
+                            </span>
+                        </p>
+                    )}
                     <div>
-                        <Button size="sm" className="h-10" disabled={enCours} onClick={enregistrer}>
+                        <Button size="sm" className="h-10" disabled={enCours || bloque} aria-describedby={bloque ? 'transition-bloquee' : undefined} onClick={enregistrer}>
                             {enCours ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
                             Enregistrer cette étape
                         </Button>

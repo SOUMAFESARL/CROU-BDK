@@ -245,6 +245,7 @@ Route::middleware(['admin'])->group(function () {
             Route::delete('/campagnes/{id}', 'destroyCampagne')->name('destroy_campagne');
             Route::get('/validateDocument/{documentId}/{statut}/{message?}', 'valideDocument')->name('validate_document');
             Route::get('campagne/{id}','getCampagne')->name('getCampagne');
+            Route::put('/etudiants/{etudiant}', 'updateEtudiant')->name('update_etudiant');
             Route::get('/{id}',  'show')->name('show');
             Route::post('/traiter-demande/{id}',  'submitTraitement')->name('submit-traitement');
             Route::post('/derogations/etudiant/{student}', [\App\Http\Controllers\admin\immobilier\campagnes_admission\AdmissionDerogationController::class, 'store'])->name('derogations.store');
@@ -580,6 +581,8 @@ Route::middleware(['admin'])->group(function () {
             Route::prefix('departement')->name('departement.')->controller(DepartementController::class)->group(function () {
                 Route::get('/', 'index')->name('index');
                 Route::post('/store', 'store')->name('store');
+                Route::get('/modele', 'modele')->name('modele');
+                Route::post('/import', 'import')->name('import');
                 Route::put('/update/{id}', 'update')->name('update');
                 Route::delete('/delete/{id}', 'delete')->name('delete');
             });
@@ -587,6 +590,8 @@ Route::middleware(['admin'])->group(function () {
             Route::prefix('filiere')->name('filiere.')->controller(FiliereController::class)->group(function () {
                 Route::get('/', 'index')->name('index');
                 Route::post('/store', 'store')->name('store');
+                Route::get('/modele', 'modele')->name('modele');
+                Route::post('/import', 'import')->name('import');
                 Route::put('/update/{id}', 'update')->name('update');
                 Route::delete('/delete/{id}', 'delete')->name('delete');
             });

@@ -7,15 +7,17 @@ use App\Http\Controllers\Controller;
 use App\Models\DemandeEtudiant;
 use App\Models\Departement;
 use App\Models\Filiere;
+use App\Support\SimpleXlsx;
 use App\Support\UserFacingErrors;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
 class FiliereController extends Controller
 {
-    use ReferentielInertia;
+    use ImportReferentiel, ReferentielInertia;
 
     public function index(Request $request)
     {
@@ -61,9 +63,12 @@ class FiliereController extends Controller
             ])->values(),
             'stats' => ['total' => $total, 'utilises' => $utilises, 'inutilises' => $total - $utilises],
             'filters' => ['q' => $q, 'departement' => $departement],
+            'import' => session('import_rapport'),
             'urls' => [
                 'index' => route('admin.parametrage.filiere.index'),
                 'store' => $url('admin.parametrage.filiere.store'),
+                'import' => $url('admin.parametrage.filiere.import'),
+                'modele' => $url('admin.parametrage.filiere.modele'),
                 'departements' => $url('admin.parametrage.departement.index'),
             ],
         ]);
@@ -82,6 +87,86 @@ class FiliereController extends Controller
         } catch (\Exception $e) {
             return back()->with('error', 'Problème survenu lors de l\'enregistrement : '.UserFacingErrors::caught($e));
         }
+    }
+
+    /** Modèle Excel de l'import : une ligne par filière, département désigné par son nom ou son abréviation. */
+    public function modele()
+    {
+        return SimpleXlsx::download('modele_import_filieres.xlsx', 'Filieres', ['nom', 'departement', 'description'], []);
+    }
+
+    /**
+     * Import en masse. Le département (facultatif) est retrouvé par son nom ou son abréviation, sans tenir compte de la casse.
+     * Une filière de même nom dans ce département (ou encore sans département) est mise à jour ; sinon elle est créée.
+     */
+    public function import(Request $request)
+    {
+        $lignes = $this->lignesImport($request, ['nom' => 'name', 'libelle' => 'name', 'filiere' => 'name', 'ufr' => 'departement'], ['name' => 'nom']);
+        $departements = [];
+        // L'abréviation d'abord : un nom complet identique à l'abréviation d'un autre département l'emporte.
+        foreach (Departement::query()->get(['code_departement', 'name', 'abreviation']) as $d) {
+            foreach ([$d->abreviation, $d->name] as $libelle) {
+                if (trim((string) $libelle) !== '') {
+                    $departements[mb_strtolower(trim($libelle))] = $d->code_departement;
+                }
+            }
+        }
+        $existantes = Filiere::query()->get()->groupBy(fn (Filiere $f) => mb_strtolower(trim((string) $f->name)));
+        $admin = getInfoAdmin()->users->code ?? null;
+        [$crees, $misAJour, $inchangees, $refusees] = [0, 0, 0, []];
+
+        foreach ($lignes as $numero => $ligne) {
+            $validator = Validator::make($ligne, [
+                'name' => ['required', 'string', 'max:150'],
+                'departement' => ['nullable', 'string', 'max:255'],
+                'description' => ['nullable', 'string', 'max:255'],
+            ], [], ['name' => 'nom', 'departement' => 'département']);
+            if ($validator->fails()) {
+                $refusees[] = 'Ligne '.$numero.' : '.implode(' ', $validator->errors()->all());
+                continue;
+            }
+            $donnees = $validator->validated();
+            $code = null;
+            if (($donnees['departement'] ?? null) !== null) {
+                $code = $departements[mb_strtolower($donnees['departement'])] ?? null;
+                if ($code === null) {
+                    $refusees[] = 'Ligne '.$numero.' : département « '.$donnees['departement'].' » introuvable. Créez-le ou importez d\'abord les départements.';
+                    continue;
+                }
+            }
+            $cle = mb_strtolower($donnees['name']);
+            $homonymes = $existantes->get($cle, collect());
+            $filiere = $code === null
+                ? $homonymes->first()
+                : ($homonymes->first(fn (Filiere $f) => $f->departement_code === $code) ?? $homonymes->first(fn (Filiere $f) => blank($f->departement_code)));
+
+            try {
+                if ($filiere) {
+                    // Cellule vide = valeur conservée.
+                    $filiere->fill(array_filter(['departement_code' => $code, 'description' => $donnees['description'] ?? null], fn ($v) => $v !== null));
+                    if (! $filiere->isDirty()) {
+                        $inchangees++;
+                        continue;
+                    }
+                    $filiere->updated_by = $admin;
+                    $filiere->save();
+                    $misAJour++;
+                } else {
+                    $existantes->put($cle, $homonymes->push(Filiere::create([
+                        'code_filiere' => generate('filiere', 'code_filiere', 50, 'a-zA-Z0-9'),
+                        'name' => $donnees['name'],
+                        'departement_code' => $code,
+                        'description' => $donnees['description'] ?? null,
+                        'created_by' => $admin,
+                    ])));
+                    $crees++;
+                }
+            } catch (\Throwable $e) {
+                $refusees[] = 'Ligne '.$numero.' : '.UserFacingErrors::caught($e);
+            }
+        }
+
+        return $this->retourImport($crees, $misAJour, $inchangees, $refusees);
     }
 
     public function update(Request $request, $id)

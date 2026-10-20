@@ -9,7 +9,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
-import { EtudiantEditDialog, type ValeursEtudiant } from '@/components/residents/etudiant-edit-dialog';
+import { EtudiantEditDialog, type OptionsEtudiant, type ValeursEtudiant } from '@/components/residents/etudiant-edit-dialog';
 import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
@@ -36,7 +36,8 @@ type Props = {
     filters: { q: string };
     colonnes: { personnel: boolean; historique: boolean };
     campagneActive: { annee: string } | null;
-    genres: { id: string; name: string }[];
+    /** Référentiels du formulaire de modification (`null` sans le droit de modifier). */
+    options: OptionsEtudiant | null;
     urls: { admissionDirecte: string | null; attributions: string | null; filtres: Record<Filtre, string> | null };
 };
 
@@ -46,7 +47,7 @@ const TITRES: Record<Filtre, string> = {
 };
 
 /** Résidents et contrats (remplace `resident_contrat/index.blade.php`). */
-export default function ResidentsIndex({ residents, stats, etat, filters, colonnes, campagneActive, genres, urls }: Props) {
+export default function ResidentsIndex({ residents, stats, etat, filters, colonnes, campagneActive, options, urls }: Props) {
     const [recherche, setRecherche] = useState(filters.q);
     const [enEdition, setEnEdition] = useState<Resident | null>(null);
     // Objet stable : la fenêtre réinitialise son formulaire quand l'étudiant change.
@@ -242,11 +243,7 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                 />
             </section>
 
-            <EtudiantEditDialog
-                etudiant={etudiantEdite}
-                genres={genres}
-                onClose={() => setEnEdition(null)}
-            />
+            {options && <EtudiantEditDialog etudiant={etudiantEdite} options={options} onClose={() => setEnEdition(null)} />}
         </AdminLayout>
     );
 }

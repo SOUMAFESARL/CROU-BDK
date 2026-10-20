@@ -163,6 +163,9 @@ class CampagnesAdmissionController extends Controller
         $historique = $vues->allows($admin, 'admissions.history');
 
         $statutDisciplinaire = $vues->allows($admin, 'housing.discipline') ? $etudiant->statut_disciplinaire : 'aucune';
+        // Modification des informations de l'étudiant : valeurs et référentiels envoyés seulement avec le droit de modifier.
+        $modifiable = $access->allows($admin, 'admin.hebergement.campagnes_admission.update_etudiant');
+        $edition = app(\App\Http\Services\EtudiantEditionService::class);
 
         return Inertia::render('Admin/Hebergement/Admissions/Show', [
             'etudiant' => [
@@ -245,9 +248,12 @@ class CampagnesAdmissionController extends Controller
                 'date' => $item->created_at ? Carbon::parse($item->created_at)->toDateString() : null,
                 'statut' => $item->statut_demande,
             ]) : null,
+            'edition' => $modifiable ? $edition->valeurs(Etudiant::with('derniereDemande')->findOrFail($etudiant->getKey())) : null,
+            'options' => $modifiable ? $edition->options() : null,
             'urls' => [
                 'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
                 'contrat' => $url('admin.etudiant.contrat', ['etudiant' => $etudiant->id_etudiant]),
+                'modifier' => $url('admin.hebergement.campagnes_admission.update_etudiant', ['etudiant' => $etudiant->id_etudiant]),
             ],
         ]);
     }
@@ -653,6 +659,17 @@ class CampagnesAdmissionController extends Controller
     /**
      * Traite la soumission du formulaire de traitement
      */
+    /**
+     * Correction par l'administration des informations saisies par l'étudiant (fiche + informations académiques de sa dernière demande).
+     * L'état du dossier reste géré par `DossierWorkflow`.
+     */
+    public function updateEtudiant(Request $request, string $etudiant, \App\Http\Services\EtudiantEditionService $edition): RedirectResponse
+    {
+        $edition->mettreAJour($request, Etudiant::with('derniereDemande')->findOrFail($etudiant));
+
+        return back()->with('success', 'Informations de l’étudiant mises à jour.');
+    }
+
     public function submitTraitement(Request $request, $id)
     {
         // Valider les données

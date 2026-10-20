@@ -1,14 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowLeft, ArrowRight, Loader2, Save } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Controller, useForm, useWatch, type FieldPath } from 'react-hook-form';
 import { z } from 'zod';
+import { ICON } from '@/components/layout/app-sidebar';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Stepper } from '@/components/ui/stepper';
 import { aujourdhui, Encadre, repartirErreurs } from '@/components/vie-residentielle/shared';
 import { envoyer } from '@/lib/inertia-form';
@@ -16,45 +18,101 @@ import { envoyer } from '@/lib/inertia-form';
 const requis = (message: string) => z.string().trim().min(1, message);
 const optionnel = (max: number) => z.string().trim().max(max, `${max} caractères au maximum.`);
 const email = z.string().trim().max(255, '255 caractères au maximum.').refine((valeur) => valeur === '' || z.email().safeParse(valeur).success, 'Adresse e-mail invalide.');
+const annee = z.string().trim().refine((valeur) => valeur === '' || /^\d{4}-\d{4}$/.test(valeur), 'Format attendu : 2025-2026.');
+/** Nombre facultatif saisi en texte : vide accepté, sinon borné (le serveur revérifie). */
+const nombre = (min: number, max: number | null, message: string, entier = false) =>
+    z
+        .string()
+        .trim()
+        .refine((valeur) => {
+            if (valeur === '') return true;
+            const n = Number(valeur.replace(',', '.'));
+            return Number.isFinite(n) && n >= min && (max === null || n <= max) && (!entier || Number.isInteger(n));
+        }, message);
 
-const schema = z.object({
-    name: requis('Le nom et les prénoms sont obligatoires.').max(255, '255 caractères au maximum.'),
-    genre_id: requis('Choisissez la civilité.'),
-    matricule: requis('Le matricule est obligatoire.').max(100, '100 caractères au maximum.'),
-    numero_etudiant: optionnel(100),
-    date_naissance: z.string(),
-    lieu_naissance: optionnel(255),
-    nationalite: optionnel(100),
-    telephone1: requis('Le téléphone principal est obligatoire.').max(30, '30 caractères au maximum.'),
-    telephone2: optionnel(30),
-    email1: email,
-    email2: email,
-    adresse: optionnel(255),
-    name_tuteur: optionnel(255),
-    telephone_tuteur: optionnel(30),
-    adresse_tuteur: optionnel(255),
-});
+const schema = z
+    .object({
+        // Identité
+        name: requis('Le nom et les prénoms sont obligatoires.').max(255, '255 caractères au maximum.'),
+        genre_id: requis('Choisissez la civilité.'),
+        date_naissance: z.string(),
+        lieu_naissance: optionnel(255),
+        nationalite: optionnel(100),
+        groupe_sanguin_id: z.string(),
+        // Pièce d'identité
+        type_piece_id: z.string(),
+        numero_piece: optionnel(50),
+        date_expiration: z.string(),
+        // Coordonnées
+        telephone1: requis('Le téléphone principal est obligatoire.').max(30, '30 caractères au maximum.'),
+        telephone2: optionnel(30),
+        email1: email,
+        email2: email,
+        regions_id: z.string(),
+        ville_id: z.string(),
+        adresse: optionnel(255),
+        distance: nombre(0, null, 'La distance doit être un nombre entier positif.', true),
+        // Études
+        matricule: requis('Le matricule est obligatoire.').max(100, '100 caractères au maximum.'),
+        numero_etudiant: optionnel(100),
+        annee_academique_actuel: annee,
+        annee_academique_precedent: annee,
+        niveau_etude_precedent_code: z.string(),
+        niveau_etude_actuel_code: z.string(),
+        filiere_code: z.string(),
+        moyenne: nombre(0, 20, 'La moyenne doit être comprise entre 0 et 20.'),
+        credit_valider: nombre(0, 100, 'Le pourcentage doit être un entier entre 0 et 100.', true),
+        // Situation et tuteur
+        boursier: z.boolean(),
+        type_bourse: optionnel(100),
+        allergies: z.boolean(),
+        maladies_chroniques: z.boolean(),
+        autiste: z.boolean(),
+        name_tuteur: optionnel(255),
+        telephone_tuteur: optionnel(30),
+        adresse_tuteur: optionnel(255),
+    });
 
-export type ValeursEtudiant = z.infer<typeof schema>;
+export type ValeursEtudiant = z.infer<typeof schema> & {
+    /** Faux si l'étudiant n'a aucune demande : les informations académiques de la demande ne sont alors pas modifiables. */
+    avec_demande: boolean;
+};
 
-const CHAMPS_ETAPES: (keyof ValeursEtudiant)[][] = [
-    ['name', 'genre_id', 'matricule', 'numero_etudiant', 'date_naissance', 'lieu_naissance', 'nationalite'],
-    ['telephone1', 'telephone2', 'email1', 'email2', 'adresse'],
-    ['name_tuteur', 'telephone_tuteur', 'adresse_tuteur'],
+type Option = { id: string; name: string };
+export type OptionsEtudiant = {
+    genres: Option[];
+    typesPiece: Option[];
+    groupesSanguins: Option[];
+    regions: Option[];
+    villes: (Option & { region_id: string })[];
+    niveaux: Option[];
+    filieres: Option[];
+};
+
+type Champ = FieldPath<z.infer<typeof schema>>;
+
+const CHAMPS_ETAPES: Champ[][] = [
+    ['name', 'genre_id', 'date_naissance', 'lieu_naissance', 'nationalite', 'groupe_sanguin_id'],
+    ['type_piece_id', 'numero_piece', 'date_expiration'],
+    ['telephone1', 'telephone2', 'email1', 'email2', 'regions_id', 'ville_id', 'adresse', 'distance'],
+    ['matricule', 'numero_etudiant', 'annee_academique_actuel', 'annee_academique_precedent', 'niveau_etude_precedent_code', 'niveau_etude_actuel_code', 'filiere_code', 'moyenne', 'credit_valider'],
+    ['boursier', 'type_bourse', 'allergies', 'maladies_chroniques', 'autiste', 'name_tuteur', 'telephone_tuteur', 'adresse_tuteur'],
 ];
-const ETAPES = ['Identité', 'Coordonnées', 'Tuteur'];
+const ETAPES = ['Identité', 'Pièce d’identité', 'Coordonnées', 'Études', 'Situation & tuteur'];
 
 type Props = {
     /** Étudiant à modifier (fenêtre fermée si `null`). */
     etudiant: { name: string; url: string; valeurs: ValeursEtudiant } | null;
-    genres: { id: string; name: string }[];
+    options: OptionsEtudiant;
     onClose: () => void;
 };
 
-/** Modification des informations personnelles d'un étudiant (action `residents_contrat.update_etudiant`). */
-export function EtudiantEditDialog({ etudiant, genres, onClose }: Props) {
+/**
+ * Modification de toutes les informations d'un étudiant par l'administration (`EtudiantEditionService`) :
+ * fiche étudiant et informations académiques de sa dernière demande. Utilisée par les résidents et le traitement d'une demande.
+ */
+export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const [erreurServeur, setErreurServeur] = useState<string | null>(null);
     const {
         control,
@@ -63,14 +121,18 @@ export function EtudiantEditDialog({ etudiant, genres, onClose }: Props) {
         reset,
         trigger,
         setError,
+        setValue,
         formState: { errors, isSubmitting },
-    } = useForm<ValeursEtudiant>({ resolver: zodResolver(schema), mode: 'onTouched' });
+    } = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema), mode: 'onTouched' });
+    const region = useWatch({ control, name: 'regions_id' });
+    const boursier = useWatch({ control, name: 'boursier' });
+    const avecDemande = etudiant?.valeurs.avec_demande ?? false;
 
     useEffect(() => {
         if (etudiant) {
-            reset(etudiant.valeurs);
+            const { avec_demande: _, ...valeurs } = etudiant.valeurs;
+            reset(valeurs);
             setEtape(0);
-            setAtteinte(0);
             setErreurServeur(null);
         }
     }, [etudiant, reset]);
@@ -88,10 +150,9 @@ export function EtudiantEditDialog({ etudiant, genres, onClose }: Props) {
             }
         }
         setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
     };
 
-    const onSubmit = (valeurs: ValeursEtudiant) => {
+    const onSubmit = (valeurs: z.infer<typeof schema>) => {
         if (!etudiant) return;
         setErreurServeur(null);
         return envoyer(etudiant.url, valeurs, {
@@ -101,17 +162,68 @@ export function EtudiantEditDialog({ etudiant, genres, onClose }: Props) {
         });
     };
 
-    const champ = (nom: keyof ValeursEtudiant, label: string, options: { required?: boolean; type?: string; placeholder?: string } = {}) => (
-        <Field id={`ed-${nom}`} label={label} required={options.required} error={errors[nom]?.message}>
-            <Input id={`ed-${nom}`} type={options.type ?? 'text'} placeholder={options.placeholder} invalid={!!errors[nom]} className="h-11" {...register(nom)} />
+    const champ = (nom: Champ, label: string, opts: { required?: boolean; type?: string; placeholder?: string; inputMode?: 'decimal' | 'numeric' } = {}) => (
+        <Field id={`ed-${nom}`} label={label} required={opts.required} error={errors[nom]?.message}>
+            <Input id={`ed-${nom}`} type={opts.type ?? 'text'} inputMode={opts.inputMode} placeholder={opts.placeholder} invalid={!!errors[nom]} className="h-11" {...register(nom)} />
         </Field>
     );
 
+    const liste = (nom: Champ, label: string, items: Option[], opts: { required?: boolean; onChange?: (valeur: string) => void } = {}) => (
+        <Field id={`ed-${nom}`} label={label} required={opts.required} error={errors[nom]?.message}>
+            <Controller
+                control={control}
+                name={nom}
+                render={({ field }) => (
+                    <Combobox
+                        id={`ed-${nom}`}
+                        value={(field.value as string) ?? ''}
+                        onChange={(valeur) => {
+                            field.onChange(valeur);
+                            opts.onChange?.(valeur);
+                        }}
+                        onBlur={field.onBlur}
+                        options={[...(opts.required ? [] : [{ value: '', label: 'Non renseigné' }]), ...items.map((item) => ({ value: item.id, label: item.name }))]}
+                        invalid={!!errors[nom]}
+                        className="h-11"
+                    />
+                )}
+            />
+        </Field>
+    );
+
+    const date = (nom: Champ, label: string, borne: { min?: string; max?: string } = {}) => (
+        <Field id={`ed-${nom}`} label={label} error={errors[nom]?.message}>
+            <Controller
+                control={control}
+                name={nom}
+                render={({ field }) => (
+                    <DatePicker id={`ed-${nom}`} value={(field.value as string) ?? ''} onChange={field.onChange} min={borne.min} max={borne.max} listesMoisAnnee invalid={!!errors[nom]} />
+                )}
+            />
+        </Field>
+    );
+
+    const caseACocher = (nom: Champ, label: string, aide?: string) => (
+        <label htmlFor={`ed-${nom}`} className="flex cursor-pointer items-start gap-3 rounded-brand border bg-white px-3 py-2.5 text-sm">
+            <Controller
+                control={control}
+                name={nom}
+                render={({ field }) => <Checkbox id={`ed-${nom}`} checked={field.value === true} onCheckedChange={(valeur) => field.onChange(valeur === true)} className="mt-0.5" />}
+            />
+            <span className="min-w-0">
+                {label}
+                {aide && <span className="mt-0.5 block text-xs text-muted">{aide}</span>}
+            </span>
+        </label>
+    );
+
+    const villes = options.villes.filter((ville) => !region || ville.region_id === region);
+
     return (
         <Dialog open={!!etudiant} onOpenChange={(ouvert) => !ouvert && !isSubmitting && onClose()}>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-3xl">
                 <form
-                    onSubmit={handleSubmit(onSubmit, (fautes) => setEtape(Math.max(0, CHAMPS_ETAPES.findIndex((champs) => champs.some((nom) => fautes[nom])))))}
+                    onSubmit={handleSubmit(onSubmit, (fautes) => setEtape(Math.max(0, CHAMPS_ETAPES.findIndex((champs) => champs.some((nom) => fautes[nom as keyof typeof fautes])))))}
                     noValidate
                     className="flex min-h-0 flex-col"
                 >
@@ -121,65 +233,79 @@ export function EtudiantEditDialog({ etudiant, genres, onClose }: Props) {
                             {etudiant?.name} · Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                         </DialogDescription>
                     </DialogHeader>
-                    <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} />
+                    {/* Fiche déjà renseignée : toutes les étapes sont accessibles, la validation complète a lieu à l'enregistrement. */}
+                    <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={setEtape} />
                     <DialogBody className="space-y-4">
                         {erreurServeur && <Encadre ton="danger">{erreurServeur}</Encadre>}
 
                         {etape === 0 && (
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <Grille>
                                 <div className="sm:col-span-2">{champ('name', 'Nom et prénoms', { required: true })}</div>
-                                <Field id="ed-genre_id" label="Civilité" required error={errors.genre_id?.message}>
-                                    <Controller
-                                        control={control}
-                                        name="genre_id"
-                                        render={({ field }) => (
-                                            <Select value={field.value || undefined} onValueChange={field.onChange}>
-                                                <SelectTrigger id="ed-genre_id" invalid={!!errors.genre_id} onBlur={field.onBlur}>
-                                                    <SelectValue placeholder="Sélectionner" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {genres.map((genre) => (
-                                                        <SelectItem key={genre.id} value={genre.id}>
-                                                            {genre.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        )}
-                                    />
-                                </Field>
-                                {champ('matricule', 'Matricule', { required: true })}
-                                {champ('numero_etudiant', 'Numéro étudiant')}
-                                <Field id="ed-date_naissance" label="Date de naissance" error={errors.date_naissance?.message}>
-                                    <Controller
-                                        control={control}
-                                        name="date_naissance"
-                                        render={({ field }) => (
-                                            <DatePicker id="ed-date_naissance" value={field.value} onChange={field.onChange} max={aujourdhui()} listesMoisAnnee invalid={!!errors.date_naissance} />
-                                        )}
-                                    />
-                                </Field>
+                                {liste('genre_id', 'Civilité', options.genres, { required: true })}
+                                {date('date_naissance', 'Date de naissance', { max: aujourdhui() })}
                                 {champ('lieu_naissance', 'Lieu de naissance')}
                                 {champ('nationalite', 'Nationalité', { placeholder: 'Ex. IVOIRIENNE' })}
-                            </div>
+                                {liste('groupe_sanguin_id', 'Groupe sanguin', options.groupesSanguins)}
+                            </Grille>
                         )}
 
                         {etape === 1 && (
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <Grille>
+                                {liste('type_piece_id', 'Type de pièce', options.typesPiece)}
+                                {champ('numero_piece', 'Numéro de la pièce')}
+                                {date('date_expiration', 'Date d’expiration')}
+                            </Grille>
+                        )}
+
+                        {etape === 2 && (
+                            <Grille>
                                 {champ('telephone1', 'Téléphone principal', { required: true, type: 'tel' })}
                                 {champ('telephone2', 'Téléphone secondaire', { type: 'tel' })}
                                 {champ('email1', 'E-mail principal', { type: 'email' })}
                                 {champ('email2', 'E-mail secondaire', { type: 'email' })}
-                                <div className="sm:col-span-2">{champ('adresse', 'Adresse')}</div>
-                            </div>
+                                {liste('regions_id', 'Région d’origine', options.regions, {
+                                    // Une ville d'une autre région n'est plus valable.
+                                    onChange: () => setValue('ville_id', ''),
+                                })}
+                                {liste('ville_id', 'Ville', villes)}
+                                {champ('adresse', 'Adresse')}
+                                {champ('distance', 'Distance domicile – campus (km)', { inputMode: 'numeric' })}
+                            </Grille>
                         )}
 
-                        {etape === 2 && (
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                <div className="sm:col-span-2">{champ('name_tuteur', 'Nom du tuteur')}</div>
-                                {champ('telephone_tuteur', 'Téléphone du tuteur', { type: 'tel' })}
-                                {champ('adresse_tuteur', 'Adresse du tuteur')}
-                            </div>
+                        {etape === 3 && (
+                            <>
+                                <Grille>
+                                    {champ('matricule', 'Matricule', { required: true })}
+                                    {champ('numero_etudiant', 'Numéro étudiant')}
+                                    {champ('annee_academique_actuel', 'Année académique actuelle', { placeholder: 'Ex. 2025-2026' })}
+                                    {avecDemande && champ('annee_academique_precedent', 'Année académique précédente', { placeholder: 'Ex. 2024-2025' })}
+                                    {avecDemande && liste('niveau_etude_precedent_code', 'Niveau précédent', options.niveaux)}
+                                    {avecDemande && liste('niveau_etude_actuel_code', 'Niveau actuel', options.niveaux)}
+                                    {avecDemande && <div className="sm:col-span-2">{liste('filiere_code', 'Filière', options.filieres)}</div>}
+                                    {avecDemande && champ('moyenne', 'Moyenne (sur 20)', { inputMode: 'decimal' })}
+                                    {avecDemande && champ('credit_valider', 'Crédits validés (%)', { inputMode: 'numeric' })}
+                                </Grille>
+                                {!avecDemande && <Encadre ton="info">Aucune demande : niveau, filière, moyenne et crédits ne sont pas modifiables.</Encadre>}
+                            </>
+                        )}
+
+                        {etape === 4 && (
+                            <>
+                                <Grille>
+                                    {caseACocher('boursier', 'Boursier')}
+                                    {boursier ? champ('type_bourse', 'Type de bourse') : <div className="hidden sm:block" />}
+                                    {caseACocher('allergies', 'Allergies')}
+                                    {caseACocher('maladies_chroniques', 'Maladies chroniques')}
+                                    {caseACocher('autiste', 'Trouble du spectre autistique')}
+                                </Grille>
+                                <h3 className="pt-2 text-sm font-medium text-gray-900">Tuteur</h3>
+                                <Grille>
+                                    <div className="sm:col-span-2">{champ('name_tuteur', 'Nom du tuteur')}</div>
+                                    {champ('telephone_tuteur', 'Téléphone du tuteur', { type: 'tel' })}
+                                    {champ('adresse_tuteur', 'Adresse du tuteur')}
+                                </Grille>
+                            </>
                         )}
                     </DialogBody>
                     <DialogFooter className="sm:justify-between">
@@ -189,16 +315,16 @@ export function EtudiantEditDialog({ etudiant, genres, onClose }: Props) {
                         <div className="flex flex-col-reverse gap-2 sm:flex-row">
                             {etape > 0 && (
                                 <Button variant="outline" size="sm" className="h-10" onClick={() => setEtape(etape - 1)} disabled={isSubmitting}>
-                                    <ArrowLeft className="size-4" aria-hidden /> Précédent
+                                    <ArrowLeft {...ICON} aria-hidden /> Précédent
                                 </Button>
                             )}
                             {etape < ETAPES.length - 1 ? (
                                 <Button size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
-                                    Suivant <ArrowRight className="size-4" aria-hidden />
+                                    Suivant <ArrowRight {...ICON} aria-hidden />
                                 </Button>
                             ) : (
                                 <Button type="submit" size="sm" className="h-10" disabled={isSubmitting}>
-                                    {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Save className="size-4" aria-hidden />}
+                                    {isSubmitting ? <Loader2 {...ICON} className="animate-spin" aria-hidden /> : <Save {...ICON} aria-hidden />}
                                     Enregistrer
                                 </Button>
                             )}
@@ -208,4 +334,8 @@ export function EtudiantEditDialog({ etudiant, genres, onClose }: Props) {
             </DialogContent>
         </Dialog>
     );
+}
+
+function Grille({ children }: { children: ReactNode }) {
+    return <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{children}</div>;
 }

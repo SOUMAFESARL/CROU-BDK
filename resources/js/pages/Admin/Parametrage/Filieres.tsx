@@ -2,6 +2,7 @@ import { Link, router } from '@inertiajs/react';
 import { BookOpen, Landmark } from 'lucide-react';
 import { useMemo } from 'react';
 import { ICON } from '@/components/layout/app-sidebar';
+import { ImportReferentiel, RapportImportDialog, type ColonneImport, type RapportImport } from '@/components/parametrage-hebergement/import-referentiel';
 import { ReferentielPage, type ChampReferentiel, type ElementReferentiel } from '@/components/parametrage-hebergement/referentiel-page';
 import { buttonVariants } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -17,13 +18,20 @@ type Props = {
     departements: Departement[];
     stats: { total: number; utilises: number; inutilises: number };
     filters: { q: string; departement: string };
-    urls: { index: string; store: string | null; departements: string | null };
+    import: RapportImport;
+    urls: { index: string; store: string | null; departements: string | null; import: string | null; modele: string | null };
 };
 
 const TOUS = 'tous';
 
-/** Filières (remplace `parametrage/filiere/index.blade.php`) ; actions `store`, `update`, `delete` inchangées. */
-export default function Filieres({ elements, departements, stats, filters, urls }: Props) {
+const COLONNES_IMPORT: ColonneImport[] = [
+    { nom: 'nom', requise: true, aide: 'Nom de la filière (ex. Mathématiques-Informatique).' },
+    { nom: 'departement', aide: 'Nom ou abréviation d’un département déjà enregistré.' },
+    { nom: 'description', aide: 'Description libre.' },
+];
+
+/** Filières (remplace `parametrage/filiere/index.blade.php`) ; actions `store`, `update`, `delete` inchangées, + import en masse. */
+export default function Filieres({ elements, departements, stats, filters, import: rapport, urls }: Props) {
     const champs = useMemo<ChampReferentiel[]>(
         () => [
             { cle: 'name', label: 'Nom', max: 150, requis: 'Renseignez le nom de la filière.', placeholder: 'Ex. Mathématiques-Informatique' },
@@ -69,11 +77,24 @@ export default function Filieres({ elements, departements, stats, filters, urls 
             usage={(f) => ({ total: f.etudiants, libelle: 'étudiant(s)' })}
             conseilSuppression="Modifiez la filière de ces étudiants avant de la supprimer."
             actions={
-                urls.departements && (
-                    <Link href={urls.departements} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-10')}>
-                        <Landmark className="size-4" aria-hidden /> Départements
-                    </Link>
-                )
+                <>
+                    {urls.departements && (
+                        <Link href={urls.departements} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-10')}>
+                            <Landmark className="size-4" aria-hidden /> Départements
+                        </Link>
+                    )}
+                    {urls.import && (
+                        <ImportReferentiel
+                            url={urls.import}
+                            modele={urls.modele}
+                            titre="Importer des filières"
+                            colonnes={COLONNES_IMPORT}
+                            note="Importez d’abord les départements. Une filière de même nom dans le même département est mise à jour ; les autres lignes sont ajoutées."
+                        />
+                    )}
+                    {/* `key` : un nouvel import rouvre le rapport même si le précédent a été fermé. */}
+                    <RapportImportDialog key={JSON.stringify(rapport)} rapport={rapport} />
+                </>
             }
             filtres={
                 <div className="w-full sm:w-64">

@@ -12,6 +12,8 @@ use Mockery;
 /** Pages React des admissions : liste des dossiers et traitement d'une demande (données filtrées selon les droits). */
 class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 {
+    use \Tests\Support\EditionEtudiantTables;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -21,6 +23,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
             $t->boolean('is_validation')->default(false);
             $t->boolean('is_rejet')->default(false);
         });
+        $this->creerTablesEditionEtudiant();
         Schema::table('admission_derogations', function (Blueprint $t) {
             $t->string('etudiant_id')->nullable();
             $t->timestamps();
@@ -123,6 +126,40 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNull($props['suivi']['historique']);
         $this->assertSame([], $props['derogations']['liste']);
         $this->assertNull($props['derogations']['demander']);
+        // Sans le droit de modifier : ni bouton, ni valeurs, ni référentiels.
+        $this->assertNull($props['urls']['modifier']);
+        $this->assertNull($props['edition']);
+        $this->assertNull($props['options']);
+    }
+
+    public function test_l_administration_modifie_les_informations_saisies_par_l_etudiant(): void
+    {
+        $this->agentLimite(['hebergement.admissions.update']);
+
+        $props = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props'];
+        $this->assertSame(route('admin.hebergement.campagnes_admission.update_etudiant', ['etudiant' => 'student']), $props['urls']['modifier']);
+        $this->assertSame('M-001', $props['edition']['matricule']);
+        $this->assertTrue($props['edition']['avec_demande']);
+        $this->assertCount(2, $props['options']['niveaux']);
+
+        $this->put($props['urls']['modifier'], ['name' => 'Konan Awa Marie', 'genre_id' => 2, 'matricule' => 'M-001', 'telephone1' => '0700000001',
+            'niveau_etude_actuel_code' => 'L1', 'moyenne' => '12'])
+            ->assertSessionHasNoErrors()->assertSessionHas('success');
+
+        $this->assertSame('Konan Awa Marie', DB::table('etudiants')->where('id_etudiant', 'student')->value('name'));
+        $demande = DB::table('demande')->where('etudiant_id', 'student')->first();
+        $this->assertSame('L1', $demande->niveau_etude_actuel_code);
+        $this->assertEquals(12, (float) $demande->moyenne);
+        $this->assertSame('soumis', $demande->etat_dossier);
+    }
+
+    public function test_modification_refusee_sans_le_droit_de_modifier_les_admissions(): void
+    {
+        $this->agentLimite();
+
+        $this->put(route('admin.hebergement.campagnes_admission.update_etudiant', ['etudiant' => 'student']), ['name' => 'Pirate'])
+            ->assertForbidden();
+        $this->assertSame('Konan Awa', DB::table('etudiants')->where('id_etudiant', 'student')->value('name'));
     }
 
     public function test_suivi_propose_les_transitions_permises(): void

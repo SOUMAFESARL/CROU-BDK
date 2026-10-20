@@ -2,13 +2,15 @@
 
 namespace App\Support;
 
+use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use ZipArchive;
 
 /**
  * Génère un classeur Excel (.xlsx) d'une seule feuille sans dépendance externe
- * (ZipArchive) : ligne d'en-tête en gras et figée, cellules texte.
+ * (ZipArchive) : ligne d'en-tête en gras et figée, cellules texte ; relit aussi un .xlsx ou un .csv importé.
  */
 class SimpleXlsx
 {
@@ -50,6 +52,117 @@ class SimpleXlsx
         return response()->download($path, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ])->deleteFileAfterSend(true);
+    }
+
+    /**
+     * Lit la première feuille d'un .xlsx ou un .csv (séparateur ; ou ,) : une ligne par enregistrement,
+     * indexée par les en-têtes de la première ligne ; les lignes vides sont ignorées.
+     *
+     * @return list<array<string, string>>
+     */
+    public static function read(UploadedFile $file): array
+    {
+        $extension = strtolower($file->getClientOriginalExtension());
+        if (in_array($extension, ['csv', 'txt'], true)) {
+            $content = (string) file_get_contents($file->getRealPath());
+            // Excel (Windows FR) enregistre souvent les CSV en Windows-1252 : on convertit pour garder les accents (Cité, Bâtiment…).
+            if (!mb_check_encoding($content, 'UTF-8')) {
+                $content = mb_convert_encoding($content, 'UTF-8', 'Windows-1252');
+            }
+            $handle = fopen('php://temp', 'w+b');
+            fwrite($handle, $content);
+            rewind($handle);
+            $delimiter = str_contains((string) fgets($handle), ';') ? ';' : ',';
+            rewind($handle);
+            $headers = fgetcsv($handle, 0, $delimiter) ?: [];
+            $rows = [];
+            while (($values = fgetcsv($handle, 0, $delimiter)) !== false) {
+                if (count(array_filter($values, fn ($value) => trim((string) $value) !== '')) === 0) continue;
+                $rows[] = array_combine(array_pad($headers, count($values), ''), array_pad($values, count($headers), '')) ?: [];
+            }
+            fclose($handle);
+            return $rows;
+        }
+
+        if ($extension !== 'xlsx' || !class_exists(ZipArchive::class)) {
+            throw ValidationException::withMessages(['fichier' => 'Format non supporté. Utilisez un fichier .xlsx ou .csv.']);
+        }
+        $zip = new ZipArchive();
+        if ($zip->open($file->getRealPath()) !== true) throw ValidationException::withMessages(['fichier' => 'Impossible de lire le fichier Excel.']);
+        // Texte d'une chaîne simple (<t>) ou enrichie (<r><t>…</t></r>…), partagée ou en ligne.
+        $text = function (?\SimpleXMLElement $node): string {
+            if ($node === null) return '';
+            if (isset($node->t)) return (string) $node->t;
+            $value = '';
+            foreach ($node->r as $run) $value .= (string) $run->t;
+            return $value;
+        };
+        $shared = [];
+        if (($xml = $zip->getFromName('xl/sharedStrings.xml')) !== false && ($sharedXml = simplexml_load_string($xml)) !== false) {
+            foreach ($sharedXml->si as $item) $shared[] = $text($item);
+        }
+        $sheetXml = $zip->getFromName(self::firstWorksheetPath($zip));
+        $sheet = $sheetXml !== false ? simplexml_load_string($sheetXml) : false;
+        if ($sheet === false || !isset($sheet->sheetData)) {
+            $zip->close();
+            throw ValidationException::withMessages(['fichier' => 'Impossible de lire la première feuille du fichier Excel.']);
+        }
+        $rows = [];
+        foreach ($sheet->sheetData->row as $row) {
+            $values = [];
+            $column = 0;
+            foreach ($row->c as $cell) {
+                // L'attribut r (ex. « C2 ») est facultatif : à défaut, la cellule suit la précédente.
+                if (preg_match('/^([A-Z]+)/', (string) $cell['r'], $match)) {
+                    $column = 0;
+                    foreach (str_split($match[1]) as $letter) $column = $column * 26 + ord($letter) - 64;
+                } else {
+                    $column++;
+                }
+                $type = (string) $cell['t'];
+                $value = match ($type) {
+                    'inlineStr' => $text($cell->is),
+                    's' => $shared[(int) $cell->v] ?? '',
+                    default => (string) ($cell->v ?? ''),
+                };
+                $values[$column - 1] = $value;
+            }
+            $rows[] = $values;
+        }
+        $zip->close();
+        $headers = array_shift($rows) ?: [];
+        if (!$headers) return [];
+        $width = max(array_keys($headers)) + 1;
+        $headerValues = [];
+        for ($index = 0; $index < $width; $index++) $headerValues[] = $headers[$index] ?? '';
+        $result = [];
+        foreach ($rows as $row) {
+            if (!array_filter($row, fn ($value) => trim((string) $value) !== '')) continue;
+            $values = [];
+            for ($index = 0; $index < $width; $index++) $values[] = $row[$index] ?? '';
+            $result[] = array_combine($headerValues, $values);
+        }
+        return $result;
+    }
+
+    /** Chemin de la première feuille du classeur (pas forcément sheet1.xml une fois le fichier réenregistré). */
+    private static function firstWorksheetPath(ZipArchive $zip): string
+    {
+        $workbook = $zip->getFromName('xl/workbook.xml');
+        $rels = $zip->getFromName('xl/_rels/workbook.xml.rels');
+        if ($workbook !== false && $rels !== false) {
+            $workbookXml = simplexml_load_string($workbook);
+            $relsXml = simplexml_load_string($rels);
+            $first = $workbookXml?->sheets?->sheet[0] ?? null;
+            $id = $first ? (string) ($first->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships')['id'] ?? '') : '';
+            foreach ($relsXml?->Relationship ?? [] as $relation) {
+                if ((string) $relation['Id'] === $id) {
+                    $target = ltrim((string) $relation['Target'], '/');
+                    return str_starts_with($target, 'xl/') ? $target : 'xl/' . $target;
+                }
+            }
+        }
+        return 'xl/worksheets/sheet1.xml';
     }
 
     private static function row(int $number, array $values, int $style = 0): string

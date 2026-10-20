@@ -9,6 +9,7 @@ use App\Models\Role;
 use App\Models\User;
 use App\Repositories\Interfaces\ConfigAppRepositoryInterface;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Mockery;
@@ -176,6 +177,61 @@ class ParametrageReferentielsPagesTest extends TestCase
         $this->delete(route(self::BASE.'filiere.delete', 1))->assertSessionHas('error');
         $this->delete(route(self::BASE.'filiere.delete', 3))->assertSessionHas('success');
         $this->assertSame(3, DB::table('filiere')->count());
+    }
+
+    public function test_import_departements_cree_met_a_jour_et_signale_les_lignes_invalides(): void
+    {
+        $this->admin();
+        // En-têtes accentués, séparateur « ; », encodage Windows-1252 comme un CSV enregistré par Excel.
+        $csv = mb_convert_encoding("Nom;Abréviation;Description\n"
+            ."Sciences et technologies;UFR ST;Sciences exactes\n"
+            ."Économie et gestion;UFR SEG;\n"
+            .";UFR X;Sans nom\n"
+            ."lettres et langues;;\n", 'Windows-1252', 'UTF-8');
+        $this->post(route(self::BASE.'departement.import'), ['fichier' => UploadedFile::fake()->createWithContent('departements.csv', $csv)])
+            ->assertSessionHas('import_rapport', fn ($r) => $r['message'] === '1 ligne(s) ajoutée(s), 1 mise(s) à jour, 1 déjà à jour.'
+                && count($r['lignes']) === 1 && str_starts_with($r['lignes'][0], 'Ligne 4 :'));
+
+        $this->assertSame(3, DB::table('departement')->count());
+        $this->assertSame('Sciences exactes', DB::table('departement')->where('id_departement', 1)->value('description'));
+        $this->assertSame('UFR SEG', DB::table('departement')->where('name', 'Économie et gestion')->value('abreviation'));
+        // Le rapport est transmis à la page pour la fenêtre des lignes refusées.
+        $this->assertCount(1, $this->page(route(self::BASE.'departement.index'))['props']['import']['lignes']);
+
+        $this->post(route(self::BASE.'departement.import'), ['fichier' => UploadedFile::fake()->createWithContent('d.csv', "sigle;description\nX;Y\n")])
+            ->assertSessionHasErrors(['fichier' => 'Colonne(s) manquante(s) : nom. Téléchargez le modèle et conservez ses en-têtes.']);
+        $this->post(route(self::BASE.'departement.import'), ['fichier' => UploadedFile::fake()->create('d.pdf', 10, 'application/pdf')])->assertSessionHasErrors('fichier');
+    }
+
+    public function test_import_filieres_depuis_le_modele_excel(): void
+    {
+        $this->admin();
+        $this->get(route(self::BASE.'filiere.modele'))->assertOk()->assertDownload('modele_import_filieres.xlsx');
+
+        // Fichier au format du modèle, relu par l'import (aller-retour .xlsx).
+        $xlsx = \App\Support\SimpleXlsx::download('f.xlsx', 'Filieres', ['nom', 'departement', 'description'], [
+            ['Anglais', 'lettres et langues', 'Langue anglaise'],
+            ['Histoire', 'Lettres et langues', ''],   // filière existante sans département : rattachée
+            ['Physique-Chimie', 'ufr st', 'PC'],      // trouvée par l'abréviation : mise à jour
+            ['Biologie', 'Médecine', ''],             // département inconnu : refusée
+            ['Mathématiques-Informatique', '', ''],   // rien à changer
+        ])->getFile()->getPathname();
+        $this->post(route(self::BASE.'filiere.import'), ['fichier' => new UploadedFile($xlsx, 'filieres.xlsx', null, null, true)])
+            ->assertSessionHas('import_rapport', fn ($r) => $r['message'] === '1 ligne(s) ajoutée(s), 2 mise(s) à jour, 1 déjà à jour.'
+                && $r['lignes'] === ['Ligne 5 : département « Médecine » introuvable. Créez-le ou importez d\'abord les départements.']);
+
+        $this->assertSame('D-LL', DB::table('filiere')->where('name', 'Anglais')->value('departement_code'));
+        $this->assertSame('D-LL', DB::table('filiere')->where('id_filiere', 3)->value('departement_code'));
+        $this->assertSame('PC', DB::table('filiere')->where('id_filiere', 2)->value('description'));
+        $this->assertSame(4, DB::table('filiere')->count());
+    }
+
+    public function test_import_refuse_sans_droit_de_creation(): void
+    {
+        $this->admin(2);
+        $this->get(route(self::BASE.'filiere.modele'))->assertForbidden();
+        $this->post(route(self::BASE.'departement.import'), ['fichier' => UploadedFile::fake()->createWithContent('d.csv', "nom\nX\n")])->assertForbidden();
+        $this->assertSame(2, DB::table('departement')->count());
     }
 
     public function test_pays_unicite_usage_et_suppression_bloquee(): void
