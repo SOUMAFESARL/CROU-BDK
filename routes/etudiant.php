@@ -54,6 +54,8 @@ Route::middleware(['etudiants'])->group(function () {
         Route::post('/demande/ot',  'storeOrdreTravail')->name('store_ot');
         Route::get('/contrat/{id?}',  'pdfContrat')->name('pdfContrat');
         Route::get('/annonce',  'annonces')->name('annonces');
+        Route::post('/annonce/{annonce}/jaime', 'toggleJaimeAnnonce')
+            ->middleware([\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class, 'throttle:30,1'])->name('annonce.jaime');
     });
 
 

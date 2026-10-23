@@ -18,7 +18,7 @@ use Illuminate\Http\Request;
 class EtudiantMenu
 {
     /** Sections `?section=` servies par une page Inertia (dashboardController::index). */
-    public const SECTIONS_REACT = ['dashboard', 'chambre', 'paiements', 'maintenance', 'etat-lieux', 'demandes'];
+    public const SECTIONS_REACT = ['dashboard', 'chambre', 'paiements', 'maintenance', 'etat-lieux', 'demandes', 'annonce', 'incidents'];
 
     /**
      * @return list<array{label: string, items: list<array{label: string, icon: string, href: string, active: bool, page: ?string, react: bool}>}>

@@ -634,7 +634,6 @@ const CHAMPS_NOTIFICATIONS = [
 ] as const;
 
 function FormulaireNotifications({ valeurs, secrets, url }: { valeurs: Props['notifications']; secrets: Secrets; url: string | null }) {
-    const schema = useMemo(() => notificationsSchema(secrets), [secrets]);
     const initiales = useMemo<NotificationsValeurs>(
         () => ({ ...valeurs, mail_driver: valeurs.mail_driver in PILOTES_MAIL ? valeurs.mail_driver : 'smtp', mail_password: '', sms_api_key: '' }),
         [valeurs],
@@ -650,7 +649,7 @@ function FormulaireNotifications({ valeurs, secrets, url }: { valeurs: Props['no
         setError,
         handleSubmit,
         formState: { errors, isSubmitting },
-    } = useForm<NotificationsValeurs>({ resolver: zodResolver(schema), mode: 'onTouched', defaultValues: initiales });
+    } = useForm<NotificationsValeurs>({ resolver: zodResolver(notificationsSchema), mode: 'onTouched', defaultValues: initiales });
     const champs = CHAMPS_NOTIFICATIONS as unknown as Path<NotificationsValeurs>[][];
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<NotificationsValeurs>(champs, trigger, true);
     const v = watch();
@@ -743,15 +742,14 @@ function FormulaireNotifications({ valeurs, secrets, url }: { valeurs: Props['no
                         label="Activer les e-mails"
                         description="Envoi des notifications par e-mail."
                         icone={<Mail />}
-                        onChange={(actif) => !actif && void trigger(['mail_host', 'mail_port', 'mail_password', 'mail_from_address'])}
                     />
                     {v.email_enabled && (
                         <div className="grid gap-4 md:grid-cols-2">
-                            <ChampListe control={control} name="mail_driver" id="cfg-driver" label="Pilote d’envoi" required options={choix(PILOTES_MAIL, '')} error={errors.mail_driver?.message} />
-                            <Field id="cfg-host" label="Hôte SMTP" required={v.mail_driver !== 'log'} error={errors.mail_host?.message}>
+                            <ChampListe control={control} name="mail_driver" id="cfg-driver" label="Pilote d’envoi" options={choix(PILOTES_MAIL, '')} error={errors.mail_driver?.message} />
+                            <Field id="cfg-host" label="Hôte SMTP" error={errors.mail_host?.message}>
                                 <Input id="cfg-host" maxLength={150} placeholder="smtp.monserveur.com" invalid={!!errors.mail_host} {...register('mail_host')} />
                             </Field>
-                            <Field id="cfg-port" label="Port" required={v.mail_driver !== 'log'} error={errors.mail_port?.message} hint="587 (TLS) ou 465 (SSL) en général.">
+                            <Field id="cfg-port" label="Port" error={errors.mail_port?.message} hint="587 (TLS) ou 465 (SSL) en général.">
                                 <Input id="cfg-port" inputMode="numeric" maxLength={5} placeholder="587" invalid={!!errors.mail_port} {...register('mail_port')} />
                             </Field>
                             <Field id="cfg-user" label="Identifiant SMTP" error={errors.mail_username?.message}>
@@ -777,7 +775,7 @@ function FormulaireNotifications({ valeurs, secrets, url }: { valeurs: Props['no
                             <Field id="cfg-from-name" label="Nom de l’expéditeur" error={errors.mail_from_name?.message} hint="Nom affiché dans la boîte de réception.">
                                 <Input id="cfg-from-name" maxLength={100} placeholder="CROU Bondoukou" invalid={!!errors.mail_from_name} {...register('mail_from_name')} />
                             </Field>
-                            <Field id="cfg-from" label="Adresse de l’expéditeur" required={v.mail_driver !== 'log'} error={errors.mail_from_address?.message}>
+                            <Field id="cfg-from" label="Adresse de l’expéditeur" error={errors.mail_from_address?.message}>
                                 <Input id="cfg-from" type="email" maxLength={150} placeholder="noreply@crou-bondoukou.ci" invalid={!!errors.mail_from_address} {...register('mail_from_address')} />
                             </Field>
                         </div>
@@ -795,32 +793,24 @@ function FormulaireNotifications({ valeurs, secrets, url }: { valeurs: Props['no
                         label="Activer les SMS"
                         description="Envoi des alertes par SMS."
                         icone={<MessageSquareText />}
-                        onChange={(actif) => !actif && void trigger(['sms_api_url', 'sms_api_key', 'sms_sender'])}
                     />
                     {v.sms_enabled && (
                         <>
-                            {v.sms_provider !== 'helper_json' && (
-                                <Note icone={<Info />} ton="attention">
-                                    <p>Seule la passerelle EnvoiSMS (JSON / Bearer) est utilisée par l’application pour envoyer les SMS. Avec un autre fournisseur, aucun SMS n’est envoyé.</p>
-                                </Note>
-                            )}
                             <div className="grid gap-4 md:grid-cols-2">
                                 <ChampListe
                                     control={control}
                                     name="sms_provider"
                                     id="cfg-sms-provider"
                                     label="Fournisseur SMS"
-                                    required
                                     options={choix(FOURNISSEURS_SMS, initiales.sms_provider)}
                                     error={errors.sms_provider?.message}
                                 />
-                                <Field id="cfg-sms-url" label="URL de la passerelle SMS" required error={errors.sms_api_url?.message} hint="Passerelle compatible EnvoiSMS : JSON et authentification Bearer.">
+                                <Field id="cfg-sms-url" label="URL de la passerelle SMS" error={errors.sms_api_url?.message} hint="Passerelle compatible EnvoiSMS : JSON et authentification Bearer.">
                                     <Input id="cfg-sms-url" type="url" maxLength={2048} placeholder="https://passerelle.example/api/sms/send" invalid={!!errors.sms_api_url} {...register('sms_api_url')} />
                                 </Field>
                                 <Field
                                     id="cfg-sms-key"
                                     label="Clé API SMS"
-                                    required={!secrets.sms}
                                     error={errors.sms_api_key?.message}
                                     hint={secrets.sms ? 'Une clé est enregistrée : laissez vide pour la conserver.' : undefined}
                                 >
@@ -835,7 +825,7 @@ function FormulaireNotifications({ valeurs, secrets, url }: { valeurs: Props['no
                                         {...register('sms_api_key')}
                                     />
                                 </Field>
-                                <Field id="cfg-sms-sender" label="Expéditeur SMS" required error={errors.sms_sender?.message} hint="Nom ou numéro affiché, 20 caractères au maximum.">
+                                <Field id="cfg-sms-sender" label="Expéditeur SMS" error={errors.sms_sender?.message} hint="Nom ou numéro affiché, 20 caractères au maximum.">
                                     <Input id="cfg-sms-sender" maxLength={20} placeholder="CROU BDK" invalid={!!errors.sms_sender} {...register('sms_sender')} />
                                 </Field>
                             </div>
@@ -1015,9 +1005,6 @@ function FormulairePaiements({ valeurs, url, apiPaiement }: { valeurs: Paiements
                     </Titre>
                     <ChoixMultiples control={control} name="methods" options={MODES_PAIEMENT.map((m) => ({ ...m, icone: ICONES_MODES[m.cle] }))} />
                     <ErreurChamp message={errors.methods?.message} />
-                    <Note icone={<Info />}>
-                        <p>Les méthodes proposées lors de l’enregistrement d’un paiement au guichet suivent ces choix (Espèces, Mobile Money ; « Autre » pour le virement et la carte).</p>
-                    </Note>
                 </>
             )}
             {etape === 1 && (

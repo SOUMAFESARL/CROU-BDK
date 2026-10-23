@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AssignationChambre;
 use App\Models\DisciplinaryReport;
 use App\Models\DisciplinaryReportHistory;
+use App\Services\EtudiantIncidents;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,9 +20,9 @@ class DisciplinaryIncidentController extends Controller
     {
         $student = Auth::guard('etudiant')->user();
 
-        $data = $request->validateWithBag('incident', [
+        $data = $request->validate([
             'date_incident' => ['required', 'date', 'before_or_equal:now'],
-            'nature' => ['required', Rule::in(['tapage', 'violence', 'harcelement', 'degradation', 'vol', 'non_respect_reglement', 'autre'])],
+            'nature' => ['required', Rule::in(array_keys(EtudiantIncidents::NATURES))],
             'lieu' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'min:20', 'max:5000'],
             'temoins' => ['nullable', 'string', 'max:2000'],
@@ -38,23 +39,13 @@ class DisciplinaryIncidentController extends Controller
             ->latest('date_assignation')
             ->first();
 
-        if (!$assignment || !$assignment->chambre) {
+        if (! $assignment || ! $assignment->chambre) {
             throw ValidationException::withMessages([
                 'residence' => 'Aucune chambre active n’est associée à votre compte. Contactez l’administration.',
             ]);
         }
 
-        $natureLabels = [
-            'tapage' => 'Tapage / nuisance sonore',
-            'violence' => 'Violence ou menace',
-            'harcelement' => 'Harcèlement',
-            'degradation' => 'Dégradation volontaire',
-            'vol' => 'Vol ou tentative de vol',
-            'non_respect_reglement' => 'Non-respect du règlement',
-            'autre' => 'Autre incident',
-        ];
-
-        $report = DB::transaction(function () use ($data, $student, $assignment, $natureLabels) {
+        $report = DB::transaction(function () use ($data, $student, $assignment) {
             $report = DisciplinaryReport::create([
                 'etudiant_id' => $student->id_etudiant,
                 'declarant_id' => $student->id_etudiant,
@@ -63,7 +54,7 @@ class DisciplinaryIncidentController extends Controller
                 'batiment_id' => $assignment->chambre->batiment_id,
                 'chambre_id' => $assignment->chambre_id,
                 'date_incident' => $data['date_incident'],
-                'nature' => $natureLabels[$data['nature']],
+                'nature' => EtudiantIncidents::NATURES[$data['nature']],
                 'lieu' => $data['lieu'],
                 'description' => $data['description'],
                 'temoins' => $data['temoins'] ?? null,
@@ -86,6 +77,6 @@ class DisciplinaryIncidentController extends Controller
         });
 
         return redirect()->route('etudiants.dashboard', ['section' => 'incidents'])
-            ->with('incident_success', "Votre signalement {$report->numero_rapport} a été transmis au Service Sécurité.");
+            ->with('success', "Votre signalement {$report->numero_rapport} a été transmis au Service Sécurité.");
     }
 }

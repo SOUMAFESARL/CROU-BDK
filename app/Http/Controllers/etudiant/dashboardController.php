@@ -20,7 +20,6 @@ use Illuminate\Support\Str;
 use Barryvdh\DomPDF\Facade\Pdf;
 use App\Models\Paiement;
 use App\Models\Loyer;
-use App\Models\DisciplinaryReport;
 use App\Models\AssignationChambre;
 use App\Models\DepartureRequest;
 use Carbon\Carbon;
@@ -65,7 +64,7 @@ class dashboardController extends Controller
 
 
     /** Sections encore servies par la page Blade etudiant/index (`?section=`) ; les autres sont des pages React (EtudiantMenu::SECTIONS_REACT). */
-    private const SECTIONS_BLADE = ['annonce', 'incidents', 'carte-interactive'];
+    private const SECTIONS_BLADE = ['carte-interactive'];
 
     public function index()
     {
@@ -126,6 +125,8 @@ class dashboardController extends Controller
                 'maintenance' => ['Etudiant/Maintenance', fn () => app(\App\Services\EtudiantMaintenance::class)->props($etudiant, request())],
                 'etat-lieux' => ['Etudiant/EtatDesLieux', fn () => app(\App\Services\EtudiantEtatDesLieux::class)->props($etudiant)],
                 'demandes' => ['Etudiant/MesDemandes', fn () => app(\App\Services\EtudiantDemandes::class)->props($etudiant, request('focus') === 'departure')],
+                'annonce' => ['Etudiant/Annonces', fn () => app(\App\Services\EtudiantAnnonces::class)->props($etudiant, request())],
+                'incidents' => ['Etudiant/Incidents', fn () => app(\App\Services\EtudiantIncidents::class)->props($etudiant)],
                 default => null,
             };
             if ($pageReact) {
@@ -145,11 +146,6 @@ class dashboardController extends Controller
 
             // Récupérer les données pour la carte
             $result['carte'] = $this->carte();
-            $result['disciplinaryReports'] = DisciplinaryReport::query()
-                ->where('declarant_id', $idEtudiant)
-                ->latest('date_incident')
-                ->limit(10)
-                ->get();
 
 //dd($result);
             // Retourner la vue avec les données
@@ -318,6 +314,14 @@ class dashboardController extends Controller
             'success' => true,
             'data'    => $annonces,
         ]);
+    }
+
+    /** « J'aime » d'une annonce (page React Etudiant/Annonces) : ajouté ou retiré, retour à la page. */
+    public function toggleJaimeAnnonce(string $annonce): RedirectResponse
+    {
+        $aimee = app(\App\Services\EtudiantAnnonces::class)->basculerJaime(Auth::guard('etudiant')->user(), $annonce);
+
+        return back()->with('success', $aimee ? 'Vous avez aimé cette annonce.' : 'J’aime retiré.');
     }
 
     public function carte()

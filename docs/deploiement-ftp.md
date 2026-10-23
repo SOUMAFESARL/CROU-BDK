@@ -1,5 +1,8 @@
 # Deploiement FTP de dev
 
+Procedure complete de mise en production (sauvegarde, envoi manuel sans git,
+migrations, taches cron, retour arriere) : voir [`deploiement-production.md`](deploiement-production.md).
+
 Le workflow `.github/workflows/deploy.yml` se lance sur les push vers `dev`
 ou manuellement depuis cette branche. Il utilise l'environnement `development`.
 

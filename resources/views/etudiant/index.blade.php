@@ -52,14 +52,11 @@
 @endphp
 
 <x-etudiant-shell :student="$data['etudiant']">
-    {{-- Tableau de bord, Ma chambre, Paiements, Maintenance, État des lieux et Demandes sont des pages React (EtudiantMenu::SECTIONS_REACT). Ce partial ne garde ici que les styles communs aux sections Blade restantes. --}}
+    {{-- Tableau de bord, Ma chambre, Paiements, Maintenance, État des lieux, Demandes, Annonces et Incidents sont des pages React (EtudiantMenu::SECTIONS_REACT). Ce partial ne garde ici que les styles communs aux sections Blade restantes. --}}
     @include('etudiant.partials.proposition-modals', $data)
-
-    @include('etudiant.incidents', ['reports' => $result['disciplinaryReports'] ?? collect(), 'assignment' => $data['derniereAssignation']])
 
     @include('etudiant.carte', $data)
 
-    @include('etudiant.annonce', $data)
 </x-etudiant-shell>
 
 <div id="toast"></div>

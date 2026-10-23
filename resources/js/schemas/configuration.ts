@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /**
  * Schémas de la page Configuration (`ConfigurationRequest` reste la source de vérité).
- * Les champs indispensables au fonctionnement (nom du CROU, serveur d'envoi quand les e-mails sont activés…) sont exigés ici.
+ * Les champs indispensables au fonctionnement (nom du CROU…) sont exigés ici.
  */
 
 const texte = (max: number, label: string) => z.string().trim().max(max, `${label} : ${max} caractères au maximum.`);
@@ -67,43 +67,27 @@ export const EVENEMENTS = [
 ] as const;
 export type CleEvenement = (typeof EVENEMENTS)[number]['cle'];
 
-/** `secrets` : mot de passe SMTP et clé SMS déjà enregistrés (un champ secret vide conserve la valeur enregistrée). */
-export const notificationsSchema = (secrets: { smtp: boolean; sms: boolean }) =>
-    z
-        .object({
-            email_enabled: z.boolean(),
-            mail_driver: cleDe(PILOTES_MAIL),
-            mail_host: texte(150, 'L’hôte SMTP'),
-            mail_port: z
-                .string()
-                .trim()
-                .refine((v) => v === '' || (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 65535), 'Le port doit être un nombre entre 1 et 65535.'),
-            mail_username: texte(150, 'L’identifiant SMTP'),
-            mail_password: z.string().max(255, 'Le mot de passe : 255 caractères au maximum.'),
-            mail_from_name: texte(100, 'Le nom de l’expéditeur'),
-            mail_from_address: email(150, 'L’adresse de l’expéditeur'),
-            sms_enabled: z.boolean(),
-            sms_provider: texte(50, 'Le fournisseur SMS'),
-            sms_api_url: url(2048, 'L’URL de la passerelle', true),
-            sms_api_key: z.string().trim().max(255, 'La clé API : 255 caractères au maximum.'),
-            sms_sender: texte(20, 'L’expéditeur SMS'),
-            ...(Object.fromEntries(EVENEMENTS.map((e) => [e.cle, z.boolean()])) as Record<CleEvenement, z.ZodBoolean>),
-        })
-        .superRefine((v, ctx) => {
-            const exiger = (champ: string, message: string) => ctx.addIssue({ code: 'custom', path: [champ], message });
-            if (v.email_enabled && v.mail_driver !== 'log') {
-                if (!v.mail_host.trim()) exiger('mail_host', 'Renseignez l’hôte du serveur d’envoi.');
-                if (!v.mail_port.trim()) exiger('mail_port', 'Renseignez le port.');
-                if (!v.mail_from_address.trim()) exiger('mail_from_address', 'Renseignez l’adresse de l’expéditeur.');
-                if (v.mail_username.trim() && !v.mail_password && !secrets.smtp) exiger('mail_password', 'Renseignez le mot de passe SMTP.');
-            }
-            if (v.sms_enabled) {
-                if (!v.sms_api_url.trim()) exiger('sms_api_url', 'Renseignez l’URL de la passerelle SMS.');
-                if (!v.sms_api_key.trim() && !secrets.sms) exiger('sms_api_key', 'Renseignez la clé API SMS.');
-                if (!v.sms_sender.trim()) exiger('sms_sender', 'Renseignez l’expéditeur SMS.');
-            }
-        });
-export type NotificationsValeurs = z.infer<ReturnType<typeof notificationsSchema>>;
+/** Tous les champs sont facultatifs : chaque canal (e-mail, SMS) se configure indépendamment. Un champ secret vide conserve la valeur enregistrée. */
+export const notificationsSchema = z.object({
+    email_enabled: z.boolean(),
+    mail_driver: cleDe(PILOTES_MAIL),
+    mail_host: texte(150, 'L’hôte SMTP'),
+    mail_port: z
+        .string()
+        .trim()
+        .refine((v) => v === '' || (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 65535), 'Le port doit être un nombre entre 1 et 65535.'),
+    mail_username: texte(150, 'L’identifiant SMTP'),
+    mail_password: z.string().max(255, 'Le mot de passe : 255 caractères au maximum.'),
+    mail_from_name: texte(100, 'Le nom de l’expéditeur'),
+    mail_from_address: email(150, 'L’adresse de l’expéditeur'),
+    sms_enabled: z.boolean(),
+    sms_provider: texte(50, 'Le fournisseur SMS'),
+    sms_api_url: url(2048, 'L’URL de la passerelle', true),
+    sms_api_key: z.string().trim().max(255, 'La clé API : 255 caractères au maximum.'),
+    sms_sender: texte(20, 'L’expéditeur SMS'),
+    ...(Object.fromEntries(EVENEMENTS.map((e) => [e.cle, z.boolean()])) as Record<CleEvenement, z.ZodBoolean>),
+});
+export type NotificationsValeurs = z.infer<typeof notificationsSchema>;
 
 /** Nombre saisi sous forme de texte : entier (ou décimal) borné, champ obligatoire. */
 const nombreTexte = (label: string, min: number, max: number, decimal = false) =>
