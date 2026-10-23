@@ -63,9 +63,6 @@ class dashboardController extends Controller
      */
 
 
-    /** Sections encore servies par la page Blade etudiant/index (`?section=`) ; les autres sont des pages React (EtudiantMenu::SECTIONS_REACT). */
-    private const SECTIONS_BLADE = ['carte-interactive'];
-
     public function index()
     {
         // Vérifier si l'étudiant est authentifié
@@ -127,6 +124,7 @@ class dashboardController extends Controller
                 'demandes' => ['Etudiant/MesDemandes', fn () => app(\App\Services\EtudiantDemandes::class)->props($etudiant, request('focus') === 'departure')],
                 'annonce' => ['Etudiant/Annonces', fn () => app(\App\Services\EtudiantAnnonces::class)->props($etudiant, request())],
                 'incidents' => ['Etudiant/Incidents', fn () => app(\App\Services\EtudiantIncidents::class)->props($etudiant)],
+                'carte-interactive' => ['Etudiant/Carte', fn () => app(\App\Services\EtudiantCarte::class)->props($etudiant)],
                 default => null,
             };
             if ($pageReact) {
@@ -134,22 +132,13 @@ class dashboardController extends Controller
                     ->toResponse(request())->header('Cache-Control', 'private, no-store');
             }
 
-            // Tableau de bord migré en React ; les autres sections restent sur la page Blade etudiant/index.
-            if (! in_array(request('section'), self::SECTIONS_BLADE, true)) {
-                return \Inertia\Inertia::render('Etudiant/TableauDeBord', app(\App\Services\EtudiantDashboard::class)->props(
-                    $etudiant,
-                    $campagneTableauDeBord,
-                    $this->getPaiementData($idEtudiant),
-                    $this->serviceOrdreTravail->getPaginated(['etudiant_id' => $idEtudiant], 10),
-                ))->toResponse(request())->header('Cache-Control', 'private, no-store');
-            }
-
-            // Récupérer les données pour la carte
-            $result['carte'] = $this->carte();
-
-//dd($result);
-            // Retourner la vue avec les données
-            return view('etudiant.index', compact('result'));
+            // Toutes les sections sont des pages React ; le tableau de bord est la page par défaut.
+            return \Inertia\Inertia::render('Etudiant/TableauDeBord', app(\App\Services\EtudiantDashboard::class)->props(
+                $etudiant,
+                $campagneTableauDeBord,
+                $this->getPaiementData($idEtudiant),
+                $this->serviceOrdreTravail->getPaginated(['etudiant_id' => $idEtudiant], 10),
+            ))->toResponse(request())->header('Cache-Control', 'private, no-store');
 
         } catch (\Exception $e) {
             Log::error('Erreur dashboard étudiant: ' . $e->getMessage());
@@ -322,29 +311,6 @@ class dashboardController extends Controller
         $aimee = app(\App\Services\EtudiantAnnonces::class)->basculerJaime(Auth::guard('etudiant')->user(), $annonce);
 
         return back()->with('success', $aimee ? 'Vous avez aimé cette annonce.' : 'J’aime retiré.');
-    }
-
-    public function carte()
-    {
-        // Récupérer tous les campus avec coordonnées
-        $campuses = Campus::where('statut', '!=', 'ferme')
-            ->whereNotNull('latitude')
-            ->whereNotNull('longitude')
-            ->get();
-
-        // Récupérer toutes les cités avec coordonnées
-        $cites = Cite::with('typeCite')->where('statut', '!=', 'ferme')
-            ->whereNotNull('latitude')
-            ->whereNotNull('longitude')
-            ->get();
-
-        // Récupérer tous les bâtiments avec coordonnées
-        $batiments = Batiment::where('is_valid', 1)
-            ->whereNotNull('latitude')
-            ->whereNotNull('longitude')
-            ->get();
-
-        return ['campuses' => $campuses, 'cites' =>$cites, 'batiments'=>$batiments];
     }
 
     /**

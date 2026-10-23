@@ -173,6 +173,10 @@ body {
     box-shadow: 0 0 0 4px rgba(134, 187, 70, 0.55), 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+.carte-marqueur--residence {
+    box-shadow: 0 0 0 4px rgba(250, 171, 4, 0.7), 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
 .leaflet-tooltip.carte-infobulle {
     padding: 6px 10px;
     border: 1px solid var(--color-border);
