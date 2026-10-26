@@ -13,14 +13,11 @@ import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { Encadre, Lignes, repartirErreurs, type CiteOption } from '@/components/vie-residentielle/shared';
 import { envoyer } from '@/lib/inertia-form';
+import { avecFormatTelephone, PROPS_TELEPHONE, telephoneObligatoire } from '@/lib/telephone';
 
 const schema = z.object({
     name: z.string().trim().min(2, 'Le nom est obligatoire.').max(255, '255 caractères au maximum.'),
-    tel: z
-        .string()
-        .trim()
-        .min(1, 'Le téléphone est obligatoire.')
-        .refine((valeur) => /^\+?[0-9 .-]{8,20}$/.test(valeur), 'Numéro de téléphone invalide.'),
+    tel: telephoneObligatoire('Le téléphone est obligatoire.'),
     email: z.union([z.literal(''), z.email('Adresse e-mail invalide.')]),
     adresse: z.string().max(255, '255 caractères au maximum.'),
     specialite: z.string().min(1, 'Choisissez la spécialité.'),
@@ -109,7 +106,7 @@ export function MaintenancierDialog({ open, onClose, url, specialites, cites }: 
                                 </Field>
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                     <Field id="mt-tel" label="Téléphone" required error={errors.tel?.message}>
-                                        <Input id="mt-tel" type="tel" placeholder="07 00 00 00 00" invalid={!!errors.tel} {...register('tel')} />
+                                        <Input id="mt-tel" {...PROPS_TELEPHONE} invalid={!!errors.tel} {...avecFormatTelephone(register('tel'))} />
                                     </Field>
                                     <Field id="mt-email" label="E-mail" error={errors.email?.message}>
                                         <Input id="mt-email" type="email" placeholder="nom@exemple.ci" invalid={!!errors.email} {...register('email')} />

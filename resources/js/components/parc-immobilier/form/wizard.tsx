@@ -48,6 +48,8 @@ type WizardProps = {
     submitLabel: string;
     /** Désactive le bouton final (ex. droit manquant). */
     submitDisabled?: boolean;
+    /** Étape terminée (coche) ; par défaut, toute étape déjà dépassée. */
+    isDone?: (index: number) => boolean;
     children: ReactNode;
 };
 
@@ -66,6 +68,7 @@ export function Wizard({
     submitting = false,
     submitLabel,
     submitDisabled = false,
+    isDone,
     children,
 }: WizardProps) {
     const step = steps[current];
@@ -79,7 +82,7 @@ export function Wizard({
                 <ol className="sticky top-24 space-y-1">
                     {steps.map((item, index) => {
                         // Étape validée : déjà dépassée au moins une fois.
-                        const done = index !== current && index < reached;
+                        const done = index !== current && (isDone ? isDone(index) : index < reached);
                         const active = index === current;
                         const accessible = index <= reached && !submitting;
                         const Icon = item.icon;

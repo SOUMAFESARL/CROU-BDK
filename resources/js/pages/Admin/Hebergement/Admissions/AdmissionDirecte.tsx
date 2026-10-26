@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
 import { Stepper } from '@/components/ui/stepper';
 import { envoyer } from '@/lib/inertia-form';
+import { avecFormatTelephone, PROPS_TELEPHONE, telephoneObligatoire } from '@/lib/telephone';
 import { cn } from '@/lib/utils';
 
 type Option = { id: string; name: string };
@@ -40,7 +41,7 @@ const schema = (aujourdhui: string) =>
         name: z.string().trim().min(1, 'Le nom et les prénoms sont obligatoires.').max(255, '255 caractères au maximum.'),
         genre_id: z.string().min(1, 'Choisissez une civilité.'),
         matricule: z.string().trim().min(1, 'Le matricule est obligatoire.').max(100, '100 caractères au maximum.'),
-        telephone1: z.string().trim().min(1, 'Le téléphone est obligatoire.').max(30, '30 caractères au maximum.'),
+        telephone1: telephoneObligatoire('Le téléphone est obligatoire.'),
         cite_id: z.string().min(1, 'Choisissez une cité.'),
         batiment_id: z.string().min(1, 'Choisissez un bâtiment.'),
         chambre_id: z.string().min(1, 'Choisissez une chambre.'),
@@ -210,7 +211,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
                                 <Input id="ad-matricule" invalid={!!errors.matricule} {...register('matricule')} />
                             </Field>
                             <Field id="ad-telephone1" label="Téléphone" required error={errors.telephone1?.message}>
-                                <Input id="ad-telephone1" type="tel" autoComplete="tel" invalid={!!errors.telephone1} {...register('telephone1')} />
+                                <Input id="ad-telephone1" {...PROPS_TELEPHONE} invalid={!!errors.telephone1} {...avecFormatTelephone(register('telephone1'))} />
                             </Field>
                         </div>
                     </Section>

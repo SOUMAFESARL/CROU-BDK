@@ -11,6 +11,7 @@ use App\Models\NiveauEtude;
 use App\Models\Region;
 use App\Models\TypePiece;
 use App\Models\Ville;
+use App\Support\Telephone;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -85,6 +86,7 @@ class EtudiantEditionService
         $unique = fn (string $colonne) => Rule::unique('etudiants', $colonne)->ignore($etudiant->getKey(), 'id_etudiant');
         $demande = $etudiant->derniereDemande;
 
+        Telephone::normaliserRequete($request, ['telephone1', 'telephone2', 'telephone_tuteur']);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'genre_id' => ['required', 'integer', Rule::exists('genre', 'id')],
@@ -95,8 +97,8 @@ class EtudiantEditionService
             'type_piece_id' => ['nullable', 'integer', Rule::exists('type_piece', 'id')],
             'numero_piece' => ['nullable', 'string', 'max:50', $unique('numero_piece')],
             'date_expiration' => ['nullable', 'date'],
-            'telephone1' => ['required', 'string', 'max:30', $unique('telephone1')],
-            'telephone2' => ['nullable', 'string', 'max:30'],
+            'telephone1' => ['required', Telephone::regle(), $unique('telephone1')],
+            'telephone2' => ['nullable', Telephone::regle()],
             'email1' => ['nullable', 'email', 'max:255', $unique('email1')],
             'email2' => ['nullable', 'email', 'max:255'],
             'regions_id' => ['nullable', 'integer', Rule::exists('regions', 'id')],
@@ -112,7 +114,7 @@ class EtudiantEditionService
             'maladies_chroniques' => ['nullable', 'boolean'],
             'autiste' => ['nullable', 'boolean'],
             'name_tuteur' => ['nullable', 'string', 'max:255'],
-            'telephone_tuteur' => ['nullable', 'string', 'max:30'],
+            'telephone_tuteur' => ['nullable', Telephone::regle()],
             'adresse_tuteur' => ['nullable', 'string', 'max:255'],
             // Informations académiques : seulement si l'étudiant a une demande.
             'annee_academique_precedent' => ['nullable', 'string', 'regex:/^\d{4}-\d{4}$/'],

@@ -1,9 +1,9 @@
-import { CalendarDays, Check, FileText, Hotel, Info, ListChecks, Pencil, Star, X } from 'lucide-react';
+import { CalendarDays, Check, FileText, Hotel, ListChecks, Pencil, Star, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { CONDITIONS, NIVEAUX, TYPES_ADMISSION, type Niveau } from '@/components/campagnes/types';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
-import { Bloc, ChoixCampagne, Note, Vide, type CampagneOption } from '@/components/parametrage-hebergement/shared';
+import { Bloc, ChoixCampagne, Vide, type CampagneOption } from '@/components/parametrage-hebergement/shared';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
@@ -132,15 +132,6 @@ export default function ReglesCampagne({ campagnes, campagneId, regles, urls }: 
                                 <Liste elements={regles.residences} vide="Aucune résidence associée." />
                             </Bloc>
                         </div>
-                    </div>
-
-                    <div className="mt-4">
-                        <Note icone={<Info />}>
-                            <p>
-                                Ces règles se modifient dans le formulaire de la campagne. Une campagne active a déjà reçu des demandes : un changement de critère ne
-                                s’applique qu’aux dossiers étudiés ensuite.
-                            </p>
-                        </Note>
                     </div>
                 </>
             )}

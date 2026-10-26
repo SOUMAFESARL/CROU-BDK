@@ -128,6 +128,24 @@ function reglesCroisees(values: FormInput): Partial<Record<Champ, string>> {
     return erreurs;
 }
 
+/** Champs obligatoires : on peut avancer sans eux, mais l'enregistrement reste grisé tant qu'il en manque un. */
+const OBLIGATOIRES: { champ: Champ; label: string }[] = [
+    { champ: 'annee_campagne', label: 'Année universitaire' },
+    { champ: 'description', label: 'Description' },
+    ...DATES.map((item) => ({ champ: item.name as Champ, label: item.label })),
+    { champ: 'admission', label: 'Type d’admission (admission ou réadmission)' },
+    { champ: 'residences', label: 'Résidences concernées' },
+];
+
+/** Champ non renseigné (texte vide, liste vide ; pour les types d'admission : ni admission ni réadmission). */
+function estVide(champ: Champ, values: FormInput): boolean {
+    if (champ === 'admission' || champ === 'readmission') return !values.admission && !values.readmission;
+    const valeur = values[champ];
+    if (typeof valeur === 'string') return valeur.trim() === '';
+    if (Array.isArray(valeur)) return valeur.length === 0;
+    return false;
+}
+
 const VALEURS_INITIALES: CampagneFormValues = {
     annee_campagne: '',
     description: '',
@@ -173,9 +191,13 @@ type CampagneFormProps = CreateCampagneProps & {
 /** Assistant de saisie d'une campagne d'admission, en création comme en modification. */
 export function CampagneForm({ residences, documents, urls, campagne, dossiers = 0 }: CampagneFormProps) {
     const { errors: serverErrors } = usePage<SharedProps>().props;
-    // Modification : toutes les étapes sont cliquables d'emblée (les étapes intermédiaires restent validées par `allerA`).
-    const wizard = useWizard(STEPS.length, { toutesAccessibles: campagne !== undefined });
+    // Toutes les étapes sont cliquables d'emblée, en création comme en modification (les champs vides sont tolérés ;
+    // `allerA` bloque seulement sur une valeur saisie invalide dans une étape intermédiaire).
+    const wizard = useWizard(STEPS.length, { toutesAccessibles: true });
     const [submitting, setSubmitting] = useState(false);
+    // Étapes déjà ouvertes (toutes en modification) : seules celles-ci peuvent être cochées comme terminées.
+    const [visitees, setVisitees] = useState(() => new Set<number>(campagne ? STEPS.map((_, index) => index) : [0]));
+    useEffect(() => setVisitees((actuelles) => (actuelles.has(wizard.current) ? actuelles : new Set(actuelles).add(wizard.current))), [wizard.current]);
 
     const {
         register,
@@ -187,6 +209,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
         setError,
         clearErrors,
         getFieldState,
+        setFocus,
         handleSubmit,
         formState: { errors },
     } = useForm<FormInput, unknown, FormOutput>({ resolver: zodResolver(schema), mode: 'onTouched', defaultValues: campagne ?? VALEURS_INITIALES });
@@ -208,25 +231,39 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [serverErrors]);
 
-    const validerEtape = async (index: number) => {
+    /**
+     * Vérifie une étape. `tolererVides` (navigation) : les champs laissés vides ne bloquent pas et ne sont pas
+     * signalés ; seules les valeurs saisies mais invalides empêchent d'avancer. Sans lui (enregistrement), tout est exigé.
+     */
+    const validerEtape = async (index: number, { tolererVides = false } = {}) => {
         const champs = STEPS[index].fields;
-        const ok = await trigger(champs, { shouldFocus: true });
-        const croisees = reglesCroisees(getValues());
+        let ok = await trigger(champs, { shouldFocus: !tolererVides });
+        const valeurs = getValues();
+        const verifies = tolererVides ? champs.filter((champ) => !estVide(champ, valeurs)) : champs;
+        if (tolererVides) {
+            clearErrors(champs.filter((champ) => estVide(champ, valeurs)));
+            ok = verifies.every((champ) => !getFieldState(champ).error);
+        }
+        const croisees = reglesCroisees(valeurs);
         let premiere: Champ | null = null;
-        champs.forEach((champ) => {
+        verifies.forEach((champ) => {
             const message = croisees[champ];
             if (message && !getFieldState(champ).error) {
                 setError(champ, { message }, { shouldFocus: premiere === null && ok });
                 premiere ??= champ;
             }
         });
+        if (tolererVides && !ok) {
+            const enErreur = verifies.find((champ) => getFieldState(champ).error);
+            if (enErreur) setFocus(enErreur);
+        }
         return ok && premiere === null;
     };
 
-    /** Aller à une étape plus loin impose de valider chacune des étapes intermédiaires. */
+    /** Aller à une étape plus loin vérifie les valeurs saisies des étapes intermédiaires (les champs vides sont tolérés). */
     const allerA = async (cible: number) => {
         for (let index = wizard.current; index < cible; index++) {
-            if (!(await validerEtape(index))) {
+            if (!(await validerEtape(index, { tolererVides: true }))) {
                 wizard.goTo(index);
                 return;
             }
@@ -265,10 +302,20 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
             void handleSubmit(envoyer)();
             return;
         }
-        if (await validerEtape(wizard.current)) wizard.next();
+        if (await validerEtape(wizard.current, { tolererVides: true })) wizard.next();
     };
 
     const values = watch();
+    const manquants = OBLIGATOIRES.filter(({ champ }) => estVide(champ, values)).map((item) => ({
+        ...item,
+        etape: STEPS.findIndex((step) => step.fields.includes(item.champ)),
+    }));
+    /** Coche d'une étape : ouverte au moins une fois, sans champ obligatoire vide ni erreur. */
+    const etapeTerminee = (index: number) =>
+        index < STEPS.length - 1 &&
+        visitees.has(index) &&
+        !manquants.some((item) => item.etape === index) &&
+        !STEPS[index].fields.some((champ) => errors[champ]);
     const selection = useMemo(() => residences.filter((residence) => values.residences.includes(residence.id)), [residences, values.residences]);
     const placesSelectionnees = selection.reduce((total, residence) => total + residence.places, 0);
     const describedBy = (champ: Champ) => (errors[champ] ? `${champ}-error` : undefined);
@@ -296,7 +343,10 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
         <AdminLayout title={titre} breadcrumbs={breadcrumbs}>
             <div className="mb-6 flex flex-col gap-1">
                 <h1 className="page-title text-xl font-medium text-gray-900">{titre}</h1>
-                <p className="text-sm text-muted">Renseignez la campagne étape par étape ; chaque étape est vérifiée avant de passer à la suivante.</p>
+                <p className="text-sm text-muted">
+                    Renseignez la campagne étape par étape. Vous pouvez avancer sans tout remplir ; l’enregistrement n’est possible qu’une fois les champs
+                    obligatoires (<span className="text-red-600">*</span>) renseignés.
+                </p>
             </div>
 
             <form
@@ -316,7 +366,8 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                     cancelUrl={urls.index}
                     submitting={submitting}
                     submitLabel={campagne ? 'Enregistrer les modifications' : 'Enregistrer la campagne'}
-                    submitDisabled={!urls.submit}
+                    submitDisabled={!urls.submit || manquants.length > 0}
+                    isDone={etapeTerminee}
                 >
                     {unknownError && <FormAlert>{unknownError}</FormAlert>}
                     {!urls.submit && <FormAlert>Vous n’avez pas le droit de {campagne ? 'modifier' : 'créer'} une campagne.</FormAlert>}
@@ -601,6 +652,21 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
 
                     {wizard.current === 5 && (
                         <div className="space-y-4">
+                            {manquants.length > 0 && (
+                                <div role="status" className="rounded-brand border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                    <p>Renseignez les champs obligatoires suivants pour pouvoir enregistrer la campagne :</p>
+                                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                                        {manquants.map((item) => (
+                                            <li key={item.champ}>
+                                                <button type="button" className="cursor-pointer underline-offset-2 hover:underline" onClick={() => wizard.goTo(item.etape)}>
+                                                    {item.label}
+                                                </button>{' '}
+                                                <span className="text-amber-700/80">· étape {STEPS[item.etape].label}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
                             <RecapSection
                                 title="Informations"
                                 onEdit={() => wizard.goTo(0)}

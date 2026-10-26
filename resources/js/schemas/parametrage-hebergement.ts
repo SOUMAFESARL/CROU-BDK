@@ -79,9 +79,24 @@ export const scoringSchema = (fields: Record<string, Record<string, string>>) =>
                     Object.entries(fields).map(([g, champs]) => [g, z.object(Object.fromEntries(Object.keys(champs).map((k) => [k, nombreSaisi('le nombre de points', { max: 100, entier: false })])))]),
                 ),
             ),
+            distance_thresholds: z.object(
+                Object.fromEntries(Object.keys(SEUILS_DISTANCE_DEFAUT).map((k) => [k, nombreSaisi('le seuil de distance', { min: 1, max: 10000 })])),
+            ),
             minimum_score: nombreSaisi('le score minimum', { max: 100, entier: false }),
             pmr_first: z.boolean(),
             active: z.boolean(),
+        })
+        .superRefine((v, ctx) => {
+            // Tranches de distance : chaque seuil doit dépasser le précédent.
+            let precedent: number | null = null;
+            for (const cle of Object.keys(SEUILS_DISTANCE_DEFAUT)) {
+                const seuil = enNombre((v.distance_thresholds as Record<string, string>)[cle]);
+                if (seuil === null || !Number.isFinite(seuil)) return;
+                if (precedent !== null && seuil <= precedent) {
+                    ctx.addIssue({ code: 'custom', path: ['distance_thresholds', cle], message: 'Ce seuil doit être supérieur au précédent.' });
+                }
+                precedent = seuil;
+            }
         })
         .superRefine((v, ctx) => {
             const valeurs = Object.values(v.weights as Record<string, string>).map(enNombre);
@@ -91,9 +106,13 @@ export const scoringSchema = (fields: Record<string, Record<string, string>>) =>
                 ctx.addIssue({ code: 'custom', path: ['weights'], message: `Le total des pondérations doit être égal à 100 % (actuellement ${arrondi(total)} %).` });
             }
         });
+/** Début (km) de chaque tranche de distance au-delà de « local » (`CampaignScoringService::DISTANCE_THRESHOLDS`). */
+export const SEUILS_DISTANCE_DEFAUT = { proche: 50, loin: 100, tres_loin: 200 } as const;
+
 export type ScoringValeurs = {
     weights: Record<string, string>;
     points: Record<string, Record<string, string>>;
+    distance_thresholds: Record<string, string>;
     minimum_score: string;
     pmr_first: boolean;
     active: boolean;

@@ -24,7 +24,7 @@ class EtudiantRequest extends FormRequest
             'name' => 'required|string|max:255',
             'date_naissance' => 'required|date|before:today',
             'lieu_naissance' => 'required|string|max:255',
-            'telephone' => 'required|unique:etudiants,telephone1|string|max:20',
+            'telephone' => ['required', \App\Support\Telephone::regle(), 'unique:etudiants,telephone1'],
           'email' => 'required|email|unique:etudiants,email1',
             'type_piece' => 'required',
             'num_piece' => 'required|unique:etudiants,numero_piece',
@@ -166,9 +166,11 @@ class EtudiantRequest extends FormRequest
 
     protected function prepareForValidation()
     {
+        $telephone = \App\Support\Telephone::normaliser($this->telephone);
         $this->merge([
             'email1' => $this->email,
-            'telephone1' => $this->telephone,
+            'telephone' => $telephone,
+            'telephone1' => $telephone,
             'regions_id' => $this->region,
             'ville_id' => $this->ville,
             'genre_id' => $this->genre,

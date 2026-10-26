@@ -47,6 +47,7 @@ import { Stepper } from '@/components/ui/stepper';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { envoyer } from '@/lib/inertia-form';
 import { montant, symboleDevise } from '@/lib/systeme';
+import { avecFormatTelephone, formatTelephone, PROPS_TELEPHONE } from '@/lib/telephone';
 import {
     AFFICHAGES_PRIX,
     DEVISES,
@@ -450,7 +451,7 @@ const ETAPES_PROFIL = ['Coordonnées', 'Identité visuelle', 'Vérification'];
 const CHAMPS_PROFIL = [['address', 'country', 'phone', 'email', 'website'], ['logo', 'brand_color'], []] as const;
 
 function FormulaireProfil({ valeurs, url }: { valeurs: Props['profil']; url: string | null }) {
-    const initiales = useMemo<ProfilValeurs>(() => ({ ...valeurs, logo: null }), [valeurs]);
+    const initiales = useMemo<ProfilValeurs>(() => ({ ...valeurs, phone: formatTelephone(valeurs.phone), logo: null }), [valeurs]);
     const [erreur, setErreur] = useState<string | null>(null);
     const {
         register,
@@ -550,8 +551,8 @@ function FormulaireProfil({ valeurs, url }: { valeurs: Props['profil']; url: str
                             <Input id="cfg-address" maxLength={255} placeholder="Rue, quartier, ville" invalid={!!errors.address} autoFocus {...register('address')} />
                         </Field>
                         <ChampListe control={control} name="country" id="cfg-country" label="Pays" required options={choix(PAYS, initiales.country)} error={errors.country?.message} />
-                        <Field id="cfg-phone" label="Téléphone" error={errors.phone?.message} hint="Numéro principal.">
-                            <Input id="cfg-phone" type="tel" maxLength={30} placeholder="+225 07 00 00 00 00" invalid={!!errors.phone} {...register('phone')} />
+                        <Field id="cfg-phone" label="Téléphone" error={errors.phone?.message} hint="Numéro principal, 10 chiffres.">
+                            <Input id="cfg-phone" {...PROPS_TELEPHONE} invalid={!!errors.phone} {...avecFormatTelephone(register('phone'))} />
                         </Field>
                         <Field id="cfg-email" label="E-mail de contact" error={errors.email?.message} hint="Adresse officielle.">
                             <Input id="cfg-email" type="email" maxLength={150} placeholder="contact@crou-bondoukou.ci" invalid={!!errors.email} {...register('email')} />

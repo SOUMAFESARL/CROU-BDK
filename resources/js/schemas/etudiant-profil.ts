@@ -1,16 +1,10 @@
 import { z } from 'zod';
-
-/** Mêmes caractères que la règle serveur, avec un minimum de 8 (le serveur garde `max:30`). */
-const TELEPHONE = /^[0-9 +().-]{8,30}$/;
-const MESSAGE_TELEPHONE = 'Saisissez un numéro valide (chiffres, espaces, +).';
+import { telephoneFacultatif, telephoneObligatoire } from '@/lib/telephone';
 
 /** Coordonnées modifiables par l'étudiant (`dashboardController::updateProfile`, qui revérifie tout). */
 export const coordonneesSchema = z.object({
-    telephone1: z.string().trim().min(1, 'Le numéro de téléphone principal est obligatoire.').regex(TELEPHONE, MESSAGE_TELEPHONE),
-    telephone2: z
-        .string()
-        .trim()
-        .refine((valeur) => valeur === '' || TELEPHONE.test(valeur), MESSAGE_TELEPHONE),
+    telephone1: telephoneObligatoire('Le numéro de téléphone principal est obligatoire.'),
+    telephone2: telephoneFacultatif(),
     email2: z
         .string()
         .trim()

@@ -35,6 +35,7 @@ class HebergementParametragePagesTest extends TestCase
             '2026_08_11_000001_create_role_permissions_tables.php',
             '2026_08_11_000002_create_modules_table.php',
             '2026_09_23_000003_create_campaign_scorings.php',
+            '2026_10_26_000001_add_distance_thresholds_to_campaign_scorings.php',
             '2026_09_24_000001_create_housing_entry_workflow.php',
         ] as $migration) {
             (require database_path('migrations/'.$migration))->up();

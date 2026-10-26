@@ -635,11 +635,7 @@ class ParcImmobilierController extends Controller
     private function validerCite(Request $request, ?string $id = null): void
     {
         // Téléphones saisis par paires (« 07 00 00 00 00 ») : enregistrés sans espaces.
-        foreach (['telephone1', 'telephone2', 'telephone3'] as $champ) {
-            if (is_string($request->input($champ))) {
-                $request->merge([$champ => preg_replace('/\s+/', '', $request->input($champ))]);
-            }
-        }
+        \App\Support\Telephone::normaliserRequete($request, ['telephone1', 'telephone2', 'telephone3']);
 
         $request->validate([
             'code' => $id !== null ? 'required|exists:cite,id_cite' : 'nullable',
@@ -653,9 +649,9 @@ class ParcImmobilierController extends Controller
             'annee_construction' => 'nullable|integer|between:1900,' . date('Y'),
             'statut' => 'nullable|in:ouvert,ferme,en_renovation,en_construction',
             'responsable_id' => 'nullable|exists:users,id_user',
-            'telephone1' => 'nullable|string|max:20',
-            'telephone2' => 'nullable|string|max:20',
-            'telephone3' => 'nullable|string|max:20',
+            'telephone1' => ['nullable', \App\Support\Telephone::regle()],
+            'telephone2' => ['nullable', \App\Support\Telephone::regle()],
+            'telephone3' => ['nullable', \App\Support\Telephone::regle()],
             'email1' => 'nullable|email|max:255',
             'email2' => 'nullable|email|max:255',
             'reglement_id' => 'nullable|string|max:150',

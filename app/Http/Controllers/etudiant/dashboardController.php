@@ -251,10 +251,11 @@ class dashboardController extends Controller
     }
     public function updateProfile(Request $request): RedirectResponse
     {
+        \App\Support\Telephone::normaliserRequete($request, ['telephone1', 'telephone2']);
         $data = $request->validate([
             'email2' => ['nullable', 'email', 'max:255'],
-            'telephone1' => ['required', 'string', 'max:30'],
-            'telephone2' => ['nullable', 'string', 'max:30'],
+            'telephone1' => ['required', \App\Support\Telephone::regle()],
+            'telephone2' => ['nullable', \App\Support\Telephone::regle()],
         ], [
             'email2.email' => 'L’adresse e-mail secondaire n’est pas valide.',
             'telephone1.required' => 'Le numéro de téléphone principal est obligatoire.',

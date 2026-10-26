@@ -18,11 +18,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm, type FieldPath } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import { formatTelephoneCI } from '@/components/users/user-form';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { formatTelephone } from '@/lib/telephone';
 import type { SharedProps } from '@/types/global';
 import { STATUTS } from '../labels';
 import { Counter, erreurPlan, PlanUpload, RecapSection, ToggleCard } from './inputs';
@@ -101,10 +101,7 @@ const SERVICES = [
 ] as const;
 
 /** Téléphone enregistré → affichage par paires (l'indicatif +225 éventuel est retiré). */
-const telephone = (valeur: string | null) => {
-    const chiffres = (valeur ?? '').replace(/\D/g, '');
-    return formatTelephoneCI(chiffres.length === 13 && chiffres.startsWith('225') ? chiffres.slice(3) : chiffres);
-};
+const telephone = (valeur: string | null) => formatTelephone(valeur);
 
 const valeursInitiales = (item: CiteItem | null): FormInput => ({
     name: texte(item?.name),
@@ -505,7 +502,7 @@ export function CiteForm({ item, campusId, typesCite, users, reglements, submitU
                                                 ref={field.ref}
                                                 value={field.value}
                                                 onBlur={field.onBlur}
-                                                onChange={(event) => field.onChange(formatTelephoneCI(event.target.value))}
+                                                onChange={(event) => field.onChange(formatTelephone(event.target.value))}
                                                 type="tel"
                                                 autoComplete="off"
                                                 inputMode="numeric"

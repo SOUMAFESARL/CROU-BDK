@@ -9,6 +9,7 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { envoyer } from '@/lib/inertia-form';
+import { avecFormatTelephone, formatTelephone, PROPS_TELEPHONE } from '@/lib/telephone';
 import { cn } from '@/lib/utils';
 import {
     coordonneesSchema,
@@ -161,7 +162,11 @@ function FormulaireCoordonnees({ valeurs, email1, url }: { valeurs: Coordonnees;
         handleSubmit,
         setError,
         formState: { errors, isSubmitting },
-    } = useForm<Coordonnees>({ resolver: zodResolver(coordonneesSchema), defaultValues: valeurs, mode: 'onTouched' });
+    } = useForm<Coordonnees>({
+        resolver: zodResolver(coordonneesSchema),
+        defaultValues: { ...valeurs, telephone1: formatTelephone(valeurs.telephone1), telephone2: formatTelephone(valeurs.telephone2) },
+        mode: 'onTouched',
+    });
 
     const envoyerCoordonnees = handleSubmit((donnees) =>
         envoyer<Coordonnees>(url, donnees, { method: 'patch', setError, champs: CHAMPS_COORDONNEES }),
@@ -172,27 +177,20 @@ function FormulaireCoordonnees({ valeurs, email1, url }: { valeurs: Coordonnees;
             <Field id="telephone1" label="Téléphone principal" required error={errors.telephone1?.message}>
                 <Input
                     id="telephone1"
-                    type="tel"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    maxLength={30}
-                    placeholder="Ex. 07 00 00 00 00"
+                    {...PROPS_TELEPHONE}
                     invalid={!!errors.telephone1}
                     aria-describedby={errors.telephone1 ? 'telephone1-error' : undefined}
-                    {...register('telephone1')}
+                    {...avecFormatTelephone(register('telephone1'))}
                 />
             </Field>
             <Field id="telephone2" label="Téléphone secondaire" error={errors.telephone2?.message}>
                 <Input
                     id="telephone2"
-                    type="tel"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    maxLength={30}
+                    {...PROPS_TELEPHONE}
                     placeholder="Facultatif"
                     invalid={!!errors.telephone2}
                     aria-describedby={errors.telephone2 ? 'telephone2-error' : undefined}
-                    {...register('telephone2')}
+                    {...avecFormatTelephone(register('telephone2'))}
                 />
             </Field>
             <Field

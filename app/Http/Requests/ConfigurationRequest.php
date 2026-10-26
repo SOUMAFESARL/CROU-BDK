@@ -20,6 +20,13 @@ class ConfigurationRequest extends FormRequest
         return (string) ($this->route('menus') ?? $this->query('menus', 'configuration'));
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->menu() === 'profil') {
+            \App\Support\Telephone::normaliserRequete($this, ['phone']);
+        }
+    }
+
     public function rules(): array
     {
         return match ($this->menu()) {
@@ -53,7 +60,7 @@ class ConfigurationRequest extends FormRequest
         return [
             'address'      => ['nullable', 'string', 'max:255'],
             'country'      => ['nullable', 'string', 'max:80'],
-            'phone'        => ['nullable', 'string', 'max:30'],
+            'phone'        => ['nullable', \App\Support\Telephone::regle()],
             'email'        => ['nullable', 'email', 'max:150'],
             'website'      => ['nullable', 'url', 'max:200'],
             'logo'         => ['nullable', 'image', 'mimes:png,jpg,jpeg,svg,webp', 'max:2048'],

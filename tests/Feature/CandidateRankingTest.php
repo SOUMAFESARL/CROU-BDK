@@ -17,6 +17,7 @@ class CandidateRankingTest extends TestCase
         config(['database.default'=>'sqlite','database.connections.sqlite.database'=>':memory:']);
         DB::purge('sqlite');
         (require database_path('migrations/2026_09_23_000003_create_campaign_scorings.php'))->up();
+        (require database_path('migrations/2026_10_26_000001_add_distance_thresholds_to_campaign_scorings.php'))->up();
         Schema::create('campagne',function(Blueprint $t){$t->string('id_campagne')->primary();$t->softDeletes();});
         DB::table('campagne')->insert(['id_campagne'=>'campaign']);
         $this->campaign=Campagne::find('campaign');
@@ -121,6 +122,32 @@ class CandidateRankingTest extends TestCase
         $this->assertSame(86.25,$score['score']);
         $s->distance=200;
         $this->assertSame(95.0,app(\App\Http\Services\CampaignScoringService::class)->calculate($s,$request,$config)['score']);
+    }
+    public function test_custom_distance_thresholds_define_the_distance_bands(): void {
+        $data=$this->scoringData(); $data['weights']=['social'=>0,'academique'=>0,'geographique'=>100,'specifique'=>0];
+        $data['distance_thresholds']=['proche'=>10,'loin'=>20,'tres_loin'=>30];
+        $config=new \App\Models\CampaignScoring($data);
+        $s=$this->student('a',100); $request=$s->demandes->first();
+        $service=app(\App\Http\Services\CampaignScoringService::class);
+        foreach ([9=>0.0,10=>35.0,25=>65.0,30=>100.0] as $distance=>$expected) {
+            $s->distance=$distance;
+            $this->assertSame($expected,$service->calculate($s,$request,$config)['score']);
+        }
+    }
+    public function test_distance_thresholds_must_increase(): void {
+        auth('admin')->setUser(new \App\Models\User(['id_user'=>'admin','role_id'=>1]));
+        $data=$this->scoringData(); $data['distance_thresholds']=['proche'=>20,'loin'=>20,'tres_loin'=>30];
+        try {
+            app(\App\Http\Controllers\admin\immobilier\parametrage\scoring_campagne\ScoringCampagneController::class)
+                ->store(\Illuminate\Http\Request::create('/','POST',$data));
+            $this->fail('Des seuils non croissants doivent être refusés.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertArrayHasKey('distance_thresholds.loin',$e->errors());
+        }
+        $data['distance_thresholds']=['proche'=>10,'loin'=>20,'tres_loin'=>30];
+        app(\App\Http\Controllers\admin\immobilier\parametrage\scoring_campagne\ScoringCampagneController::class)
+            ->store(\Illuminate\Http\Request::create('/','POST',$data));
+        $this->assertSame(['proche'=>10,'loin'=>20,'tres_loin'=>30],\App\Models\CampaignScoring::latest('id')->first()->distance_thresholds);
     }
     public function test_minimum_score_prevents_automatic_reservation(): void {
         \App\Models\CampaignScoring::create(array_replace($this->scoringData(),['minimum_score'=>90]));

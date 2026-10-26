@@ -316,7 +316,7 @@ Utiliser multipart lorsqu'il y a des documents à joindre.
 | `name` | Oui, texte, 255 caractères maximum |
 | `date_naissance` | Oui, date antérieure à aujourd'hui |
 | `lieu_naissance` | Oui, texte, 255 caractères maximum |
-| `telephone` | Oui, unique, 20 caractères maximum |
+| `telephone` | Oui, unique, exactement 10 chiffres (espaces, points, tirets et indicatif `+225` retirés avant contrôle ; enregistré sous la forme `0700000000`) |
 | `email` | Oui, email unique |
 | `type_piece`, `num_piece`, `date_exp_piece` | Oui ; numéro de pièce unique |
 | `matricule` | Oui, unique |

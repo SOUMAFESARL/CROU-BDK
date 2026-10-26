@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
+import { avecFormatTelephone, PROPS_TELEPHONE } from '@/lib/telephone';
 import { cn } from '@/lib/utils';
 import {
     CHAMPS_ETAPE,
@@ -346,8 +347,8 @@ function Formulaire({
                         <Field id="dh-lieu" label="Lieu de naissance" required error={errors.lieu_naissance?.message}>
                             <Input id="dh-lieu" placeholder="Ex. : Bondoukou" invalid={!!errors.lieu_naissance} {...register('lieu_naissance')} />
                         </Field>
-                        <Field id="dh-telephone" label="Téléphone" required error={errors.telephone?.message} hint="Numéro ivoirien, indicatif +225 facultatif.">
-                            <Input id="dh-telephone" type="tel" inputMode="tel" autoComplete="tel" placeholder="Ex. : 07 00 00 00 00" icon={<Phone />} invalid={!!errors.telephone} {...register('telephone')} />
+                        <Field id="dh-telephone" label="Téléphone" required error={errors.telephone?.message} hint="Numéro à 10 chiffres, sans l’indicatif +225.">
+                            <Input id="dh-telephone" {...PROPS_TELEPHONE} icon={<Phone />} invalid={!!errors.telephone} {...avecFormatTelephone(register('telephone'))} />
                         </Field>
                         <Field id="dh-email" label="Adresse e-mail" required error={errors.email?.message} hint="Votre mot de passe y sera envoyé ; elle servira d’identifiant de connexion.">
                             <Input id="dh-email" type="email" autoComplete="email" placeholder="votre.email@exemple.com" icon={<Mail />} invalid={!!errors.email} {...register('email')} />

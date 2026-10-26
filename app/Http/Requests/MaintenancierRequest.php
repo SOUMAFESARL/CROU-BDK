@@ -25,7 +25,7 @@ class MaintenancierRequest extends FormRequest
 
         return [
             'name' => ['required', 'string', 'max:255'],
-            'tel' => ['required', 'string', 'max:20'],
+            'tel' => ['required', \App\Support\Telephone::regle()],
             'email' => [
                 'nullable',
                 'email',
@@ -60,11 +60,7 @@ class MaintenancierRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
-        // Nettoyer le numéro de téléphone
-        if ($this->has('tel')) {
-            $this->merge([
-                'tel' => preg_replace('/[^0-9+]/', '', $this->tel)
-            ]);
-        }
+        // Nettoyer le numéro de téléphone (espaces, indicatif +225)
+        \App\Support\Telephone::normaliserRequete($this, ['tel']);
     }
 }

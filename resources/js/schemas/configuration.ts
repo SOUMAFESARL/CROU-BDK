@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { telephoneFacultatif } from '@/lib/telephone';
 
 /**
  * Schémas de la page Configuration (`ConfigurationRequest` reste la source de vérité).
@@ -45,7 +46,7 @@ export type GeneralValeurs = z.infer<typeof generalSchema>;
 export const profilSchema = z.object({
     address: texte(255, 'L’adresse'),
     country: texte(80, 'Le pays').min(1, 'Choisissez le pays.'),
-    phone: texte(30, 'Le téléphone').refine((v) => v === '' || /^\+?[0-9 ().-]{6,30}$/.test(v), 'Saisissez un numéro de téléphone valide.'),
+    phone: telephoneFacultatif(),
     email: email(150, 'L’e-mail'),
     website: url(200, 'Le site web'),
     brand_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'La couleur doit être au format hexadécimal (#RRGGBB).'),

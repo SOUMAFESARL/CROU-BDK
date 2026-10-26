@@ -11,6 +11,22 @@ class CampaignScoringService
         'geographique'=>['local'=>'Distance < 50 km','proche'=>'50 ≤ distance < 100 km','loin'=>'100 ≤ distance < 200 km','tres_loin'=>'Distance ≥ 200 km'],
         'specifique'=>['pmr'=>'PMR confirmé','autre'=>'Autre situation'],
     ];
+    /** Début (km) de chaque tranche de distance au-delà de « local » ; seuils par défaut des barèmes enregistrés sans seuils. */
+    public const DISTANCE_THRESHOLDS=['proche'=>50,'loin'=>100,'tres_loin'=>200];
+    /** Seuils de distance du barème (par défaut si la version n'en a pas). */
+    public static function distanceThresholds(?CampaignScoring $config): array
+    {
+        $seuils=$config?->distance_thresholds;
+        if (!is_array($seuils)) return self::DISTANCE_THRESHOLDS;
+        $valeurs=[];
+        foreach (self::DISTANCE_THRESHOLDS as $key=>$defaut) $valeurs[$key]=is_numeric($seuils[$key] ?? null) ? (int)$seuils[$key] : $defaut;
+        return $valeurs;
+    }
+    private function distanceKey(float $distance, array $seuils): string
+    {
+        foreach (array_reverse($seuils, true) as $key=>$seuil) if ($distance >= $seuil) return $key;
+        return 'local';
+    }
     public function calculate(Etudiant $student, DemandeEtudiant $request, CampaignScoring $config): array
     {
         $values=[];
@@ -28,7 +44,7 @@ class CampaignScoringService
             } elseif ($group==='geographique') {
                 $value=$student->distance;
                 if (!is_numeric($value) || $value<0) throw new RuntimeException('Distance manquante ou invalide pour le dossier '.$request->getKey().'.');
-                $key=$value>=200?'tres_loin':($value>=100?'loin':($value>=50?'proche':'local'));
+                $key=$this->distanceKey((float)$value, self::distanceThresholds($config));
             } elseif ($group==='specifique') {
                 $key=$student->pmr_confirme ? 'pmr':'autre';
             }

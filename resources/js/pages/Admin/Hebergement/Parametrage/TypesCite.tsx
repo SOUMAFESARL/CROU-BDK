@@ -1,6 +1,5 @@
-import { Hotel, Info } from 'lucide-react';
+import { Hotel } from 'lucide-react';
 import { ICON } from '@/components/layout/app-sidebar';
-import { Note } from '@/components/parametrage-hebergement/shared';
 import { ReferentielPage, type ElementReferentiel } from '@/components/parametrage-hebergement/referentiel-page';
 import { nombre } from '@/lib/text';
 import type { Paginated } from '@/types/global';
@@ -29,14 +28,6 @@ export default function TypesCite({ types, stats, filters, urls }: Props) {
             urls={urls}
             icone={<Hotel {...ICON} />}
             usage={(t) => ({ total: t.cites + t.batiments, libelle: 'cité(s) ou bâtiment(s)' })}
-            note={
-                <Note icone={<Info />}>
-                    <p>
-                        Le nom compte pour l’attribution des chambres : un type dont le nom contient « Homme », « Garçon », « Femme » ou « Fille » réserve la cité
-                        ou le bâtiment à ce sexe. Vérifiez les attributions avant de renommer un type utilisé.
-                    </p>
-                </Note>
-            }
             colonnes={[
                 {
                     key: 'usage',

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { telephoneObligatoire } from '@/lib/telephone';
 
 export const MAX_SITUATION = 500;
 /** Taille maximale d'une pièce jointe, alignée sur la règle serveur (`max:2048`). */
@@ -44,10 +45,7 @@ export const demandeHebergementSchema = (documents: DocumentDemande[]) =>
         name: requis('Le nom et les prénoms sont obligatoires.').max(255, '255 caractères au maximum.'),
         date_naissance: requis('La date de naissance est obligatoire.'),
         lieu_naissance: requis('Le lieu de naissance est obligatoire.').max(255, '255 caractères au maximum.'),
-        telephone: requis('Le numéro de téléphone est obligatoire.').refine(
-            (valeur) => /^(?:\+225)?[0-9]{8,10}$/.test(valeur.replace(/[\s\-().]/g, '')),
-            'Numéro invalide (8 à 10 chiffres, indicatif +225 facultatif).',
-        ),
+        telephone: telephoneObligatoire(),
         email: requis("L'adresse e-mail est obligatoire.").pipe(z.email('Adresse e-mail invalide.')),
         type_piece: requis('Choisissez le type de pièce.'),
         num_piece: requis('Le numéro de la pièce est obligatoire.'),

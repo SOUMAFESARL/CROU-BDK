@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { router } from '@inertiajs/react';
 import { Accessibility, History, Info, Power, Star } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Controller, useForm, type Path, type Resolver } from 'react-hook-form';
@@ -15,11 +16,13 @@ import { Stepper } from '@/components/ui/stepper';
 import { envoyer } from '@/lib/inertia-form';
 import { nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
-import { arrondi, enNombre, scoringSchema, type ScoringValeurs } from '@/schemas/parametrage-hebergement';
+import { arrondi, enNombre, scoringSchema, SEUILS_DISTANCE_DEFAUT, type ScoringValeurs } from '@/schemas/parametrage-hebergement';
 
 type Scoring = {
     weights: Record<string, number>;
     points: Record<string, Record<string, number>>;
+    /** Début (km) des tranches « proche », « loin » et « très loin ». */
+    distance_thresholds: Record<string, number>;
     minimum_score: number;
     pmr_first: boolean;
     active: boolean;
@@ -34,7 +37,7 @@ type Props = {
     history: Version[];
     groups: Record<string, string>;
     fields: Record<string, Record<string, string>>;
-    urls: { index: string; store: string | null };
+    urls: { index: string; parametrage: string; store: string | null };
 };
 
 /** Valeurs d'exemple de l'ancien formulaire, proposées tant qu'aucun barème n'est enregistré. */
@@ -46,15 +49,34 @@ const EXEMPLE: Scoring = {
         geographique: { local: 0, proche: 35, loin: 65, tres_loin: 100 },
         specifique: { pmr: 100, autre: 0 },
     },
+    distance_thresholds: { ...SEUILS_DISTANCE_DEFAUT },
     minimum_score: 0,
     pmr_first: false,
     active: false,
 };
 
 const ETAPES = ['Pondérations', 'Points par critère', 'Seuil et activation', 'Vérification'];
-const CHAMPS = [['weights'], ['points'], ['minimum_score', 'pmr_first', 'active'], []] as unknown as Path<ScoringValeurs>[][];
+const CHAMPS = [['weights'], ['points', 'distance_thresholds'], ['minimum_score', 'pmr_first', 'active'], []] as unknown as Path<ScoringValeurs>[][];
+const CLES_SEUILS = Object.keys(SEUILS_DISTANCE_DEFAUT) as (keyof typeof SEUILS_DISTANCE_DEFAUT)[];
 
 const texte = (n: number | undefined) => (n === undefined || n === null ? '' : String(n));
+
+/** Libellé d'une tranche de distance d'après les seuils saisis (« 50 ≤ distance < 100 km »). */
+function libelleDistance(cle: string, seuils: Record<string, string>) {
+    const km = (k: string) => nombre(enNombre(seuils[k] ?? '') ?? 0, 2);
+    switch (cle) {
+        case 'local':
+            return `Distance < ${km('proche')} km`;
+        case 'proche':
+            return `${km('proche')} ≤ distance < ${km('loin')} km`;
+        case 'loin':
+            return `${km('loin')} ≤ distance < ${km('tres_loin')} km`;
+        case 'tres_loin':
+            return `Distance ≥ ${km('tres_loin')} km`;
+        default:
+            return cle;
+    }
+}
 
 /** Barème de classement par campagne (remplace `parametrage-herb/scoring-campagne/index.blade.php`) ; action `scoring-campagne.store` inchangée. */
 export default function Scoring({ campagnes, campagneId, scoring, history, groups, fields, urls }: Props) {
@@ -71,22 +93,24 @@ export default function Scoring({ campagnes, campagneId, scoring, history, group
                 <>
                     <ChoixCampagne campagnes={campagnes} valeur={campagneId} url={urls.index} />
 
-                    <div className="mb-4 space-y-3">
-                        {!scoring && (
+                    {!scoring && (
+                        <div className="mb-4">
                             <Note icone={<Info />} ton="attention">
                                 <p>Aucun barème enregistré pour cette campagne. Les valeurs proposées sont des exemples : elles ne s’appliquent qu’après enregistrement et activation.</p>
                             </Note>
-                        )}
-                        <Note icone={<Info />}>
-                            <p>
-                                Les critères « échelon de bourse », « orphelin », « parent isolé », « famille nombreuse », « zone rurale », « sportif » et « artiste » ne
-                                sont pas encore collectés dans les dossiers et ne sont pas utilisés.
-                            </p>
-                        </Note>
-                    </div>
+                        </div>
+                    )}
 
                     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-                        <Formulaire key={campagneId ?? 'aucune'} campagneId={campagneId} scoring={scoring ?? EXEMPLE} groups={groups} fields={fields} url={urls.store} />
+                        <Formulaire
+                            key={campagneId ?? 'aucune'}
+                            campagneId={campagneId}
+                            scoring={scoring ?? EXEMPLE}
+                            groups={groups}
+                            fields={fields}
+                            url={urls.store}
+                            urlRetour={urls.parametrage}
+                        />
                         <Historique versions={history} />
                     </div>
                 </>
@@ -101,12 +125,14 @@ function Formulaire({
     groups,
     fields,
     url,
+    urlRetour,
 }: {
     campagneId: string | null;
     scoring: Scoring;
     groups: Record<string, string>;
     fields: Record<string, Record<string, string>>;
     url: string | null;
+    urlRetour: string;
 }) {
     const schema = useMemo(() => scoringSchema(fields), [fields]);
     const valeursInitiales = useMemo<ScoringValeurs>(
@@ -115,6 +141,7 @@ function Formulaire({
             points: Object.fromEntries(
                 Object.entries(fields).map(([g, champs]) => [g, Object.fromEntries(Object.keys(champs).map((k) => [k, texte(scoring.points[g]?.[k] ?? EXEMPLE.points[g]?.[k] ?? 0)]))]),
             ),
+            distance_thresholds: Object.fromEntries(CLES_SEUILS.map((k) => [k, texte(scoring.distance_thresholds?.[k] ?? SEUILS_DISTANCE_DEFAUT[k])])),
             minimum_score: texte(scoring.minimum_score),
             pmr_first: scoring.pmr_first,
             active: scoring.active,
@@ -127,7 +154,6 @@ function Formulaire({
         control,
         trigger,
         watch,
-        reset,
         setError,
         handleSubmit,
         formState: { errors, isSubmitting },
@@ -143,6 +169,7 @@ function Formulaire({
                 campagne_id: campagneId,
                 weights: Object.fromEntries(Object.entries(valeurs.weights).map(([g, n]) => [g, enNombre(n)])),
                 points: Object.fromEntries(Object.entries(valeurs.points).map(([g, champs]) => [g, Object.fromEntries(Object.entries(champs).map(([k, n]) => [k, enNombre(n)]))])),
+                distance_thresholds: Object.fromEntries(Object.entries(valeurs.distance_thresholds).map(([k, n]) => [k, enNombre(n)])),
                 minimum_score: enNombre(valeurs.minimum_score),
                 pmr_first: valeurs.pmr_first ? 1 : 0,
                 active: valeurs.active ? 1 : 0,
@@ -152,7 +179,7 @@ function Formulaire({
                     let fautive = -1;
                     const autres: string[] = [];
                     Object.entries(erreurs).forEach(([cle, message]) => {
-                        const index = cle.startsWith('weights') ? 0 : cle.startsWith('points') ? 1 : ['minimum_score', 'pmr_first', 'active'].includes(cle) ? 2 : -1;
+                        const index = cle.startsWith('weights') ? 0 : cle.startsWith('points') || cle.startsWith('distance_thresholds') ? 1 : ['minimum_score', 'pmr_first', 'active'].includes(cle) ? 2 : -1;
                         if (index < 0) {
                             autres.push(message);
                             return;
@@ -171,6 +198,9 @@ function Formulaire({
     const messageTotal = (errors.weights as { message?: unknown } | undefined)?.message;
     const erreurTotal = typeof messageTotal === 'string' ? messageTotal : null;
     const erreurPoint = (g: string, k: string) => (errors.points as Record<string, Record<string, { message?: string }>> | undefined)?.[g]?.[k]?.message;
+    const erreurSeuil = (k: string) => (errors.distance_thresholds as Record<string, { message?: string }> | undefined)?.[k]?.message;
+    // Libellé affiché d'un critère : les tranches de distance suivent les seuils saisis.
+    const libelle = (g: string, k: string, label: string) => (g === 'geographique' ? libelleDistance(k, v.distance_thresholds) : label);
 
     return (
         <form
@@ -221,10 +251,37 @@ function Formulaire({
                                     <legend className="px-1 text-sm font-medium text-gray-900">
                                         {groups[g]} <span className="font-normal text-muted">· {nombre(enNombre(v.weights[g]) ?? 0, 2)} %</span>
                                     </legend>
+                                    {g === 'geographique' && (
+                                        <div className="space-y-2 rounded-brand bg-surface p-3">
+                                            <p className="text-xs text-muted">Limites des tranches (km), de la plus proche à la plus éloignée.</p>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {CLES_SEUILS.map((k, index) => (
+                                                    <div key={k} className="space-y-1">
+                                                        <label htmlFor={`sc-d-${k}`} className="text-xs font-medium text-gray-800">
+                                                            Limite {index + 1}
+                                                        </label>
+                                                        <Input
+                                                            id={`sc-d-${k}`}
+                                                            inputMode="numeric"
+                                                            placeholder={`Ex. ${SEUILS_DISTANCE_DEFAUT[k]}`}
+                                                            invalid={!!erreurSeuil(k)}
+                                                            trailing={<span className="pr-2 text-xs text-muted">km</span>}
+                                                            {...register(`distance_thresholds.${k}` as Path<ScoringValeurs>)}
+                                                        />
+                                                        {erreurSeuil(k) && (
+                                                            <p role="alert" className="text-xs font-medium text-red-600">
+                                                                {erreurSeuil(k)}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                     {Object.entries(champs).map(([k, label]) => (
                                         <div key={k} className="grid grid-cols-[minmax(0,1fr)_96px] items-start gap-3">
                                             <label htmlFor={`sc-p-${g}-${k}`} className="pt-3 text-sm text-gray-800">
-                                                {label}
+                                                {libelle(g, k, label)}
                                             </label>
                                             <div className="space-y-1">
                                                 <Input
@@ -314,7 +371,7 @@ function Formulaire({
                                                 <ul className="space-y-0.5 text-muted">
                                                     {Object.entries(champs).map(([k, label]) => (
                                                         <li key={k}>
-                                                            {label} : <span className="text-gray-900 tabular-nums">{nombre(enNombre(v.points[g]?.[k] ?? '') ?? 0, 2)}</span>
+                                                            {libelle(g, k, label)} : <span className="text-gray-900 tabular-nums">{nombre(enNombre(v.points[g]?.[k] ?? '') ?? 0, 2)}</span>
                                                         </li>
                                                     ))}
                                                 </ul>
@@ -339,10 +396,7 @@ function Formulaire({
                 derniere={derniere}
                 envoi={isSubmitting}
                 desactive={!url || !campagneId}
-                onAnnuler={() => {
-                    reset(valeursInitiales);
-                    aller(0);
-                }}
+                onAnnuler={() => router.visit(urlRetour)}
                 onPrecedent={() => aller(etape - 1)}
                 libelle="Enregistrer le barème"
             />

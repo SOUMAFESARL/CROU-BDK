@@ -8,6 +8,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { formatTelephone } from '@/lib/telephone';
 import { cn } from '@/lib/utils';
 import type { SharedProps } from '@/types/global';
 
@@ -43,11 +44,6 @@ type UserFormProps = {
 };
 
 const FIELDS = ['genre_id', 'name', 'telephone_principal', 'email', 'role_id', 'password'] as const;
-
-/** Garde 10 chiffres au plus et les affiche par paires : « 0700000000 » → « 07 00 00 00 00 ». */
-export function formatTelephoneCI(value: string) {
-    return (value.replace(/\D/g, '').slice(0, 10).match(/.{1,2}/g) ?? []).join(' ');
-}
 
 const passwordRules = (policy: PasswordPolicy) =>
     z
@@ -105,7 +101,7 @@ export function UserForm({ mode, genres, roles, canAssignRole, telephonePrefixes
         () => ({
             ...DEFAULTS,
             ...initialValues,
-            telephone_principal: formatTelephoneCI(initialValues?.telephone_principal ?? ''),
+            telephone_principal: formatTelephone(initialValues?.telephone_principal),
             password: '',
         }),
         [initialValues],
@@ -214,7 +210,7 @@ export function UserForm({ mode, genres, roles, canAssignRole, telephonePrefixes
                                     name={field.name}
                                     value={field.value}
                                     onBlur={field.onBlur}
-                                    onChange={(event) => field.onChange(formatTelephoneCI(event.target.value))}
+                                    onChange={(event) => field.onChange(formatTelephone(event.target.value))}
                                     type="tel"
                                     inputMode="numeric"
                                     autoComplete="tel-national"

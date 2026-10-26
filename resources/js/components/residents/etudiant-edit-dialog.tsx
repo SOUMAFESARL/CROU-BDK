@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Stepper } from '@/components/ui/stepper';
 import { aujourdhui, Encadre, repartirErreurs } from '@/components/vie-residentielle/shared';
 import { envoyer } from '@/lib/inertia-form';
+import { avecFormatTelephone, formatTelephone, PROPS_TELEPHONE, telephoneFacultatif, telephoneObligatoire } from '@/lib/telephone';
 
 const requis = (message: string) => z.string().trim().min(1, message);
 const optionnel = (max: number) => z.string().trim().max(max, `${max} caractères au maximum.`);
@@ -44,8 +45,8 @@ const schema = z
         numero_piece: optionnel(50),
         date_expiration: z.string(),
         // Coordonnées
-        telephone1: requis('Le téléphone principal est obligatoire.').max(30, '30 caractères au maximum.'),
-        telephone2: optionnel(30),
+        telephone1: telephoneObligatoire('Le téléphone principal est obligatoire.'),
+        telephone2: telephoneFacultatif(),
         email1: email,
         email2: email,
         regions_id: z.string(),
@@ -69,7 +70,7 @@ const schema = z
         maladies_chroniques: z.boolean(),
         autiste: z.boolean(),
         name_tuteur: optionnel(255),
-        telephone_tuteur: optionnel(30),
+        telephone_tuteur: telephoneFacultatif(),
         adresse_tuteur: optionnel(255),
     });
 
@@ -131,7 +132,12 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
     useEffect(() => {
         if (etudiant) {
             const { avec_demande: _, ...valeurs } = etudiant.valeurs;
-            reset(valeurs);
+            reset({
+                ...valeurs,
+                telephone1: formatTelephone(valeurs.telephone1),
+                telephone2: formatTelephone(valeurs.telephone2),
+                telephone_tuteur: formatTelephone(valeurs.telephone_tuteur),
+            });
             setEtape(0);
             setErreurServeur(null);
         }
@@ -165,6 +171,12 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
     const champ = (nom: Champ, label: string, opts: { required?: boolean; type?: string; placeholder?: string; inputMode?: 'decimal' | 'numeric' } = {}) => (
         <Field id={`ed-${nom}`} label={label} required={opts.required} error={errors[nom]?.message}>
             <Input id={`ed-${nom}`} type={opts.type ?? 'text'} inputMode={opts.inputMode} placeholder={opts.placeholder} invalid={!!errors[nom]} className="h-11" {...register(nom)} />
+        </Field>
+    );
+
+    const telephone = (nom: 'telephone1' | 'telephone2' | 'telephone_tuteur', label: string, required = false) => (
+        <Field id={`ed-${nom}`} label={label} required={required} error={errors[nom]?.message}>
+            <Input id={`ed-${nom}`} {...PROPS_TELEPHONE} invalid={!!errors[nom]} className="h-11" {...avecFormatTelephone(register(nom))} />
         </Field>
     );
 
@@ -259,8 +271,8 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
 
                         {etape === 2 && (
                             <Grille>
-                                {champ('telephone1', 'Téléphone principal', { required: true, type: 'tel' })}
-                                {champ('telephone2', 'Téléphone secondaire', { type: 'tel' })}
+                                {telephone('telephone1', 'Téléphone principal', true)}
+                                {telephone('telephone2', 'Téléphone secondaire')}
                                 {champ('email1', 'E-mail principal', { type: 'email' })}
                                 {champ('email2', 'E-mail secondaire', { type: 'email' })}
                                 {liste('regions_id', 'Région d’origine', options.regions, {
@@ -302,7 +314,7 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
                                 <h3 className="pt-2 text-sm font-medium text-gray-900">Tuteur</h3>
                                 <Grille>
                                     <div className="sm:col-span-2">{champ('name_tuteur', 'Nom du tuteur')}</div>
-                                    {champ('telephone_tuteur', 'Téléphone du tuteur', { type: 'tel' })}
+                                    {telephone('telephone_tuteur', 'Téléphone du tuteur')}
                                     {champ('adresse_tuteur', 'Adresse du tuteur')}
                                 </Grille>
                             </>

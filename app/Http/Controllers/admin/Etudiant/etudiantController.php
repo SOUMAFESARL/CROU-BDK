@@ -21,6 +21,7 @@ use App\Models\Ville;
 use App\Models\NiveauEtude;
 use App\Models\Filiere;
 use App\Models\Departement;
+use App\Support\Telephone;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -108,7 +109,8 @@ class etudiantController extends Controller
             'regions_id' => $this->lookupNamedId(Region::class, $request->input('region')),
             'ville_id' => $this->lookupNamedId(Ville::class, $request->input('ville')),
         ]);
-        $identity = $request->validate(['telephone1'=>'nullable|string|max:30','numero_piece'=>'nullable|string|max:100']);
+        Telephone::normaliserRequete($request, ['telephone1', 'telephone2', 'telephone_tuteur']);
+        $identity = $request->validate(['telephone1'=>['nullable', Telephone::regle()],'numero_piece'=>'nullable|string|max:100']);
         $existing = app(\App\Http\Services\StudentIdentityResolver::class)->existingForAdmin($identity);
         $this->ensureSameStudent($existing, $request->only('matricule', 'telephone1'));
         $data = $request->validate([
@@ -118,8 +120,8 @@ class etudiantController extends Controller
             'numero_etudiant' => ['nullable', 'string', 'max:100', Rule::unique('etudiants', 'numero_etudiant')->ignore($existing?->getKey(), 'id_etudiant')],
             'date_naissance' => ['nullable', 'date', 'before:today'],
             'lieu_naissance' => ['nullable', 'string', 'max:255'],
-            'telephone1' => ['required', 'string', 'max:30', Rule::unique('etudiants', 'telephone1')->ignore($existing?->getKey(), 'id_etudiant')],
-            'telephone2' => ['nullable', 'string', 'max:30'],
+            'telephone1' => ['required', Telephone::regle(), Rule::unique('etudiants', 'telephone1')->ignore($existing?->getKey(), 'id_etudiant')],
+            'telephone2' => ['nullable', Telephone::regle()],
             'email1' => ['nullable', 'email', 'max:255', Rule::unique('etudiants', 'email1')->ignore($existing?->getKey(), 'id_etudiant')],
             'email2' => ['nullable', 'email', 'max:255'],
             'nationalite' => ['nullable', 'string', 'max:100'],
@@ -142,7 +144,7 @@ class etudiantController extends Controller
             'pmr_confirme' => ['nullable', 'boolean'],
             'numero_lit' => ['nullable', 'integer', 'min:1'],
             'name_tuteur' => ['nullable', 'string', 'max:255'],
-            'telephone_tuteur' => ['nullable', 'string', 'max:30'],
+            'telephone_tuteur' => ['nullable', Telephone::regle()],
             'adresse_tuteur' => ['nullable', 'string', 'max:255'],
             'boursier' => ['nullable', 'boolean'],
             'type_bourse' => ['nullable', 'string', 'max:100'],
@@ -491,6 +493,12 @@ class etudiantController extends Controller
             $data = $this->normalizeImportRow($row);
             // Ligne d'exemple du modèle laissée en place : ignorée.
             if (str_starts_with(mb_strtoupper(trim((string) ($data['name'] ?? ''))), self::IMPORT_EXAMPLE_PREFIX)) continue;
+            foreach (['telephone1', 'telephone2', 'telephone_tuteur'] as $champ) {
+                if (!array_key_exists($champ, $data)) continue;
+                // Cellule numérique d'Excel : le 0 initial est perdu (« 700000000 »).
+                $telephone = Telephone::normaliser($data[$champ]);
+                $data[$champ] = is_numeric($data[$champ]) && is_string($telephone) && strlen($telephone) === 9 ? '0' . $telephone : $telephone;
+            }
             try {
                 $data = $this->resolveImportReferences($data);
                 $existing = app(\App\Http\Services\StudentIdentityResolver::class)->existingForAdmin($data);
@@ -506,8 +514,8 @@ class etudiantController extends Controller
                 'numero_etudiant' => ['nullable', 'string', 'max:100', Rule::unique('etudiants', 'numero_etudiant')->ignore($existing?->getKey(), 'id_etudiant')],
                 'date_naissance' => ['nullable', 'date', 'before:today'],
                 'lieu_naissance' => ['nullable', 'string', 'max:255'],
-                'telephone1' => ['required', 'string', 'max:30', Rule::unique('etudiants', 'telephone1')->ignore($existing?->getKey(), 'id_etudiant')],
-                'telephone2' => ['nullable', 'string', 'max:30'],
+                'telephone1' => ['required', Telephone::regle(), Rule::unique('etudiants', 'telephone1')->ignore($existing?->getKey(), 'id_etudiant')],
+                'telephone2' => ['nullable', Telephone::regle()],
                 'email1' => ['nullable', 'email', 'max:255', Rule::unique('etudiants', 'email1')->ignore($existing?->getKey(), 'id_etudiant')],
                 'email2' => ['nullable', 'email', 'max:255'],
                 'nationalite' => ['nullable', 'string', 'max:100'],
@@ -530,7 +538,7 @@ class etudiantController extends Controller
             'pmr_confirme' => ['nullable', 'boolean'],
             'numero_lit' => ['nullable', 'integer', 'min:1'],
                 'name_tuteur' => ['nullable', 'string', 'max:255'],
-                'telephone_tuteur' => ['nullable', 'string', 'max:30'],
+                'telephone_tuteur' => ['nullable', Telephone::regle()],
                 'adresse_tuteur' => ['nullable', 'string', 'max:255'],
                 'boursier' => ['nullable', 'boolean'],
                 'type_bourse' => ['nullable', 'string', 'max:100'],
