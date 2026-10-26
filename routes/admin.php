@@ -248,6 +248,7 @@ Route::middleware(['admin'])->group(function () {
             Route::put('/etudiants/{etudiant}', 'updateEtudiant')->name('update_etudiant');
             Route::get('/{id}',  'show')->name('show');
             Route::post('/traiter-demande/{id}',  'submitTraitement')->name('submit-traitement');
+            Route::post('/refus-automatiques/eligibles', 'leverRefusAutomatiques')->name('lever_refus_automatiques');
             Route::post('/derogations/etudiant/{student}', [\App\Http\Controllers\admin\immobilier\campagnes_admission\AdmissionDerogationController::class, 'store'])->name('derogations.store');
             Route::post('/derogations/{derogation}/decision', [\App\Http\Controllers\admin\immobilier\campagnes_admission\AdmissionDerogationController::class, 'decide'])->name('derogations.decide');
 

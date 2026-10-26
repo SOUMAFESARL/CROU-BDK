@@ -98,7 +98,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     public function test_allocation_rechecks_eligibility_atomically(): void
     {
         $dossier=$this->eligibleRequest();$this->confirm();
-        $this->evaluation['eligible']=false;$this->evaluation['regles'][1]['ok']=false;
+        $this->evaluation['eligible']=false;$this->evaluation['regles'][1]=['label'=>'Absence de sanction disciplinaire bloquante','ok'=>false];
         try {$this->allocate();$this->fail('Critères ignorés');}
         catch(ValidationException $e) {
             $this->assertSame('confirme',$dossier->fresh()->etat_dossier);
@@ -140,7 +140,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     public function test_failed_eligibility_keeps_the_request_under_review(): void
     {
         $dossier=$this->dossier();
-        $this->evaluation['eligible']=false;$this->evaluation['regles'][1]['ok']=false;
+        $this->evaluation['eligible']=false;$this->evaluation['regles'][1]=['label'=>'Absence de sanction disciplinaire bloquante','ok'=>false];
         try {$this->workflow->admin($dossier->getKey(),'eligible');$this->fail('Inéligible admis');}
         catch(ValidationException $e) {$this->assertSame('soumis',$dossier->fresh()->etat_dossier);}
         $this->assertDatabaseCount('assignation_chambres',0);
@@ -258,7 +258,7 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
     public function test_final_confirmation_rechecks_eligibility_atomically(): void
     {
         $dossier=$this->eligibleRequest();$assignment=$this->reserver();$this->accept($dossier,$assignment);
-        $this->evaluation['eligible']=false;$this->evaluation['regles'][1]['ok']=false;
+        $this->evaluation['eligible']=false;$this->evaluation['regles'][1]=['label'=>'Absence de sanction disciplinaire bloquante','ok'=>false];
         try {$this->service->confirmerAssignation($assignment->getKey());$this->fail('Critères ignorés');}
         catch(ValidationException $e) {
             $this->assertSame('accepte',$dossier->fresh()->etat_dossier);

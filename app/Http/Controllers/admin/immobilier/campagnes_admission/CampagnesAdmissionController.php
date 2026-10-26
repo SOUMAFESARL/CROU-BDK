@@ -24,6 +24,12 @@ use App\Models\Campagne;
 use App\Services\AdminAccess;
 use App\Services\AdminViewAccess;
 use App\Http\Services\DossierWorkflow;
+use App\Http\Services\DecisionAutomatiqueDossier;
+use App\Http\Services\CampaignScoringService;
+use App\Models\CampaignScoring;
+use App\Models\DemandeEtudiant;
+use Illuminate\Support\Facades\Schema;
+use RuntimeException;
 use App\Models\Etudiant;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -96,12 +102,20 @@ class CampagnesAdmissionController extends Controller
         $repository = app(\App\Repositories\EtudiantRepository::class);
         // Bandeau : campagne au statut « active » (comme la page Campagnes), pas celle de l'année universitaire.
         $campagne = $this->campagneActive();
+        $dossiers = $repository->getAdmissionsPage($etat, 10, $recherche, $etatDossier);
+        // Levée des refus automatiques (barème) : par dossier, ou pour les dossiers cochés dans la liste.
+        $decision = app(DecisionAutomatiqueDossier::class);
+        $peutLever = $access->allows($admin, 'admin.hebergement.campagnes_admission.lever_refus_automatiques');
+        $refusAutomatiques = $peutLever
+            ? $decision->refusAutomatiques(collect($dossiers->items())->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande?->getKey())->all())
+            : [];
 
         return Inertia::render('Admin/Hebergement/Admissions/Index', [
-            'dossiers' => $repository->getAdmissionsPage($etat, 10, $recherche, $etatDossier)->through(fn (Etudiant $etudiant) => [
+            'dossiers' => $dossiers->through(fn (Etudiant $etudiant) => [
                 'id' => (string) $etudiant->id_etudiant,
                 'name' => $etudiant->name,
                 'numero_demande' => $etudiant->derniereDemande?->numero_demande,
+                'demande_id' => $etudiant->derniereDemande ? (string) $etudiant->derniereDemande->getKey() : null,
                 'etat_dossier' => $etudiant->derniereDemande?->etat_dossier,
                 'date' => $etudiant->created_at?->format('Y-m-d H:i'),
                 'personnel' => $personnel ? [
@@ -113,6 +127,7 @@ class CampagnesAdmissionController extends Controller
                 ] : null,
                 'demandes' => $historique ? (int) $etudiant->demandes_count : null,
                 'url' => $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant]),
+                'refus_automatique' => in_array((string) $etudiant->derniereDemande?->getKey(), $refusAutomatiques, true),
             ]),
             'stats' => $repository->getStats(),
             'etat' => $etat,
@@ -127,6 +142,7 @@ class CampagnesAdmissionController extends Controller
             ] : null,
             'urls' => [
                 'campagnes' => $url('admin.hebergement.campagnes_admission.campagnes'),
+                'leverRefus' => $peutLever ? route('admin.hebergement.campagnes_admission.lever_refus_automatiques') : null,
                 'filtres' => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
                     ? collect(self::FILTRES_ADMISSION)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.campagnes_admission.admission', ['etat' => $f])])
                     : null,
@@ -189,6 +205,7 @@ class CampagnesAdmissionController extends Controller
             'eligibilite' => $vues->allows($admin, 'admissions.eligibility')
                 ? $this->criteresEligibilite($etudiant, $this->campagneActive())
                 : null,
+            'bareme' => $vues->allows($admin, 'admissions.eligibility') ? $this->scoreBareme($derniere, $etudiant) : null,
             'documents' => $documents ? collect($etudiant->documents)->map(fn ($document) => [
                 'id' => (string) $document['id_document'],
                 'type' => $document['type_document'],
@@ -333,12 +350,13 @@ class CampagnesAdmissionController extends Controller
             $nombre = $demande->demandes->count();
             $regles[] = $regle('Réadmission', $autorise ? 'Autorisée' : 'Non autorisée', $nombre > 1 ? 'Oui ('.$nombre.' demande(s))' : 'Non', $nombre <= 1 || $autorise ? 'ok' : 'nok');
         }
-        // 11. Documents validés
+        // 11. Documents validés (indicatif, non bloquant) : « rejeté » si une pièce est rejetée, sinon « non vérifié » tant que le seuil n'est pas atteint.
         $total = count($demande->documents);
         $valides = collect($demande->documents)->where('statut', 'valide')->count();
         $pourcentage = $total > 0 ? round($valides / $total * 100) : 0;
         $requis = $campagne?->pourcentage_validate ?? 100;
-        $regles[] = $regle('Documents validés', '≥ '.$requis.' %', $valides.'/'.$total.' ('.$pourcentage.' %)', $pourcentage >= $requis ? 'ok' : 'nok');
+        $etatDocuments = $pourcentage >= $requis ? 'ok' : (collect($demande->documents)->contains('statut', 'rejete') ? 'rejete' : 'nv');
+        $regles[] = $regle('Documents validés', '≥ '.$requis.' %', $valides.'/'.$total.' ('.$pourcentage.' %)', $etatDocuments);
 
         $conformes = collect($regles)->where('etat', 'ok')->count();
 
@@ -350,16 +368,72 @@ class CampagnesAdmissionController extends Controller
         ];
     }
 
+    /**
+     * Score du barème de scoring actif de la campagne du dossier, détaillé par volet et calculé sur les données
+     * actuelles ; rappelle le score retenu lors de la décision automatique s'il a changé depuis (données modifiées).
+     */
+    private function scoreBareme(?DemandeEtudiant $dossier, Etudiant $etudiant): ?array
+    {
+        if (!$dossier || !Schema::hasTable('campaign_scorings')) return null;
+        $config = CampaignScoring::where('campagne_id', $dossier->campagne_id)->latest('id')->first();
+        if (!$config || !$config->active) return null;
+        $decision = $this->decisionAutomatique($dossier);
+        try {
+            $detail = app(CampaignScoringService::class)->detail($etudiant, $dossier, $config);
+        } catch (RuntimeException $e) {
+            // Donnée manquante (moyenne, distance, bourse) : message sans l'identifiant technique du dossier.
+            $detail = ['score' => null, 'minimum' => (float) $config->minimum_score, 'volets' => [],
+                'erreur' => preg_replace('/ pour le dossier .*$/u', '', $e->getMessage()).'.'];
+        }
+
+        return $detail + [
+            'erreur' => null,
+            'score_decision' => $decision && $decision['score'] !== $detail['score'] ? $decision['score'] : null,
+        ];
+    }
+
+    /** Dernière décision prise par le barème (score, minimum) si elle est à l'origine de l'état actuel. */
+    private function decisionAutomatique($dossier): ?array
+    {
+        $transition = $dossier->transitions->sortBy('id')->last();
+        $details = $transition?->details ?? [];
+        if ($transition?->acteur_type !== 'systeme' || ($details[DecisionAutomatiqueDossier::MARQUEUR] ?? false) !== true) return null;
+
+        return ['etat' => $transition->nouvel_etat, 'score' => (float) ($details['score'] ?? 0), 'minimum' => (float) ($details['minimum_score'] ?? 0)];
+    }
+
     /** Campagne au statut « active » la plus récente : référence du bandeau et des critères d'éligibilité. */
     private function campagneActive(): ?Campagne
     {
         return Campagne::where('statut', 'active')->orderByDesc('created_at')->first();
     }
 
+    /**
+     * Lève les refus automatiques (barème de scoring) des dossiers sélectionnés (`demandes[]`) ;
+     * seuls ceux réellement refusés par le barème sont traités.
+     */
+    public function leverRefusAutomatiques(Request $request): RedirectResponse
+    {
+        $data = $request->validate(['demandes' => 'required|array|min:1|max:500', 'demandes.*' => 'string|max:150']);
+        $resultat = app(DecisionAutomatiqueDossier::class)->rendreEligibles($data['demandes']);
+        if ($resultat['eligibles'] === 0 && !$resultat['echecs']) {
+            return back()->with('error', 'Aucun dossier refusé automatiquement à rendre éligible.');
+        }
+        $message = $resultat['eligibles'].' dossier(s) rendu(s) éligible(s).';
+        if ($resultat['echecs']) {
+            $message .= ' '.count($resultat['echecs']).' dossier(s) non traité(s) : '.collect($resultat['echecs'])->unique()->first();
+        }
+
+        return back()->with($resultat['eligibles'] > 0 ? 'success' : 'error', $message);
+    }
+
     /** Suivi du dossier (équivalent admin du partiel `dossier-cycle`) : parcours, actions permises et historique. */
     private function suiviDossier($dossier, $admin): array
     {
+        // La levée d'un refus automatique a son propre bouton (sans motif) ; un refus prononcé par un agent passe par « Soumis ».
+        $refusAutomatique = $dossier->etat_dossier === 'refuse' && app(DecisionAutomatiqueDossier::class)->estRefusAutomatique($dossier->getKey());
         $actions = array_values(array_intersect(DossierWorkflow::NEXT[$dossier->etat_dossier] ?? [], ['soumis', 'incomplet', 'eligible', 'refuse', 'annule']));
+        if ($dossier->etat_dossier === 'refuse') $actions = array_values(array_diff($actions, ['eligible']));
         $peutChanger = app(AdminAccess::class)->allows($admin, 'admin.dossiers.transition');
         $proposition = in_array($dossier->etat_dossier, ['pre_attribue', 'accepte', 'attribue_definitif'], true) ? $dossier->proposition : null;
 
@@ -371,6 +445,8 @@ class CampagnesAdmissionController extends Controller
             ] : null,
             'actions' => $peutChanger ? array_map(fn ($etat) => ['etat' => $etat, 'label' => $etat === 'soumis' ? 'Réexaminer (retour à « Soumis »)' : (DossierWorkflow::LABELS[$etat] ?? $etat)], $actions) : [],
             'transition' => $peutChanger && $actions ? route('admin.dossiers.transition', $dossier) : null,
+            'rendre_eligible' => $peutChanger && $refusAutomatique ? route('admin.dossiers.transition', $dossier) : null,
+            'decision' => $this->decisionAutomatique($dossier),
             'assignation_id' => $dossier->assignation_id,
             'historique' => $admin->hasPermission('hebergement.admissions.history')
                 ? $dossier->transitions->map(fn ($transition) => [

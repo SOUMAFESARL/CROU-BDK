@@ -23,6 +23,15 @@ class StudentRequestsPageTest extends \Tests\Support\DossierTestCase
             $t->string('motif_decision')->nullable(); $t->date('date_demande')->nullable(); $t->date('date_sortie_prevue')->nullable();
             $t->timestamp('date_decision')->nullable(); $t->timestamps();
         });
+        Schema::create('student_contract_approvals', function (Blueprint $t) {
+            $t->string('id')->primary(); $t->string('assignment_id'); $t->string('student_id'); $t->string('student_name')->nullable();
+            $t->longText('document_html')->nullable(); $t->string('document_hash')->nullable(); $t->text('consent_text')->nullable();
+            $t->timestamp('approved_at')->nullable(); $t->timestamps();
+        });
+        Schema::create('housing_entry_appointments', function (Blueprint $t) {
+            $t->id(); $t->string('assignment_id'); $t->string('student_id'); $t->dateTime('starts_at'); $t->dateTime('ends_at');
+            $t->string('location'); $t->string('status')->default('scheduled'); $t->timestamps();
+        });
         Schema::table('campagne', function (Blueprint $t) {
             $t->string('annee_campagne')->nullable(); $t->date('date_echeance_demande')->nullable();
         });
@@ -97,6 +106,23 @@ class StudentRequestsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNull($props['decision']);
         $this->assertStringContainsString('Chambre room', $props['proposition']['chambre']);
         $this->assertSame(['fait', 'fait', 'fait', 'fait', 'fait'], array_column($props['etapes'], 'statut'));
+    }
+
+    public function test_definitive_dossier_message_follows_contract_approval(): void
+    {
+        $this->eligibleRequest();
+        $assignment = $this->allocate();
+        $this->assertStringContainsString('Approuvez votre contrat', $this->props()['dossier']['message']);
+
+        DB::table('student_contract_approvals')->insert(['id' => 'contract', 'assignment_id' => $assignment->getKey(),
+            'student_id' => 'student', 'document_hash' => 'h', 'approved_at' => now()]);
+        $message = $this->props()['dossier']['message'];
+        $this->assertStringContainsString('Votre contrat est approuvé', $message);
+        $this->assertStringNotContainsString('Approuvez votre contrat', $message);
+
+        DB::table('housing_entry_appointments')->insert(['assignment_id' => $assignment->getKey(), 'student_id' => 'student',
+            'starts_at' => '2026-11-03 09:00:00', 'ends_at' => '2026-11-03 09:30:00', 'location' => 'Accueil cité', 'status' => 'scheduled']);
+        $this->assertStringContainsString('03/11/2026 à 09:00 (Accueil cité)', $this->props()['dossier']['message']);
     }
 
     public function test_departure_form_needs_an_active_room_and_no_pending_request(): void

@@ -34,15 +34,13 @@ class ManualEligibilityTest extends \Tests\Support\DossierTestCase
     {
         return app(EtudiantService::class)->ValidateDemandeEtudiant($data,'student');
     }
-    public function test_manual_approval_cannot_override_unvalidated_documents_even_with_a_forged_score(): void
+    public function test_unvalidated_documents_do_not_block_eligibility(): void
     {
         Mail::fake();
         $dossier=$this->dossier();
         $this->evaluation=['eligible'=>false,'regles'=>[['label'=>'Distance','ok'=>true],['label'=>'Documents validés','ok'=>false]]];
-        $result=$this->manual(['decision'=>'eligible','score_calcule'=>100]);
-        $this->assertSame('error',$result['bool']);
-        $this->assertSame('soumis',$dossier->fresh()->etat_dossier);
-        Mail::assertNothingSent();
+        $this->assertSame('success',$this->manual(['decision'=>'eligible'])['bool']);
+        $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
     }
     public function test_campaign_criteria_do_not_block_eligibility_once_documents_are_validated(): void
     {

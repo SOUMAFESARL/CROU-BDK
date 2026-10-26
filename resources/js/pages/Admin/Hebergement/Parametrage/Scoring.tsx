@@ -313,7 +313,7 @@ function Formulaire({
                                 label="Score minimum pour l’attribution automatique (/100)"
                                 required
                                 error={errors.minimum_score?.message}
-                                hint="Sous ce seuil, le dossier reste sans attribution automatique."
+                                hint="À la soumission, un dossier atteignant ce score devient éligible ; en dessous, il est refusé automatiquement (refus que le service Logement peut lever en un clic)."
                             >
                                 <Input id="sc-min" inputMode="decimal" placeholder="Ex. 40" invalid={!!errors.minimum_score} {...register('minimum_score')} />
                             </Field>

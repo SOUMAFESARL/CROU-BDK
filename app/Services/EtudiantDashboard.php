@@ -179,6 +179,8 @@ class EtudiantDashboard
             ])->values()->all(),
             'decision' => $this->decision($demande, $campagne),
             'acceptee' => $statut === 'Acceptée',
+            // L'étudiant a déjà confirmé son intérêt (ou accepté l'offre) : plus de délai de réponse à afficher.
+            'repondue' => in_array($demande?->etat_dossier, ['confirme', 'accepte', 'attribue_definitif', 'cloture'], true),
         ];
     }
 

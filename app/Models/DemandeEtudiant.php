@@ -91,6 +91,10 @@ class DemandeEtudiant extends Model
                 'acteur_id'=>auth('admin')->id() ?? auth('etudiant')->id() ?? $demande->etudiant_id,
                 'motif'=>'Dossier déposé.','created_at'=>now(),
             ]);
+            // Dossier déposé par l'étudiant : décision automatique selon le barème (pas pour une saisie admin).
+            if ($demande->etat_dossier === 'soumis' && !auth('admin')->check()) {
+                \Illuminate\Support\Facades\DB::afterCommit(fn () => app(\App\Http\Services\DecisionAutomatiqueDossier::class)->decider($demande->getKey()));
+            }
         });
         static::updating(function ($demande) {
             if ($demande->isDirty(['etat_dossier','statut_demande','assignation_id'])) {

@@ -25,7 +25,8 @@ class DossierWorkflow
         'confirme'=>['attribue_definitif','soumis','refuse','annule','expire'],
         'pre_attribue'=>['accepte','refuse','eligible','confirme','annule','expire'],
         'accepte'=>['attribue_definitif','eligible','confirme','annule','expire'],
-        'attribue_definitif'=>['cloture'], 'refuse'=>['soumis'], 'annule'=>[], 'expire'=>[], 'cloture'=>[],
+        // Un refus automatique (barème de scoring) peut être levé directement en « Éligible » par l'admin.
+        'attribue_definitif'=>['cloture'], 'refuse'=>['soumis','eligible'], 'annule'=>[], 'expire'=>[], 'cloture'=>[],
     ];
     public function current(string $studentId, string $campaignId): DemandeEtudiant
     {
@@ -42,16 +43,17 @@ class DossierWorkflow
         $evaluation = app(EtudiantRepositoryInterface::class)->verifierEligibilite($student,[
             'success'=>true,'data'=>['campagnes'=>collect([$campaign])],
         ]);
-        // Seuls la validation des documents et l'absence de sanction bloquante conditionnent l'éligibilité ;
+        // Seule l'absence de sanction bloquante conditionne l'éligibilité : la validation des documents et
         // les autres critères de campagne (âge, distance, moyenne…) restent indicatifs pour la décision de l'admin.
-        $bloquantes = collect($evaluation['regles'] ?? [])
-            ->whereIn('label', ['Documents validés', 'Absence de sanction disciplinaire bloquante']);
-        $documentsValides = $bloquantes->contains('label', 'Documents validés')
-            && $bloquantes->every(fn ($regle) => ($regle['ok'] ?? false) === true);
-        if (!$documentsValides) {
+        $regles = collect($evaluation['regles'] ?? []);
+        $sanctionBloquante = $regles->contains(fn ($regle) => ($regle['label'] ?? null) === 'Absence de sanction disciplinaire bloquante'
+            && ($regle['ok'] ?? false) !== true);
+        if ($regles->isEmpty() || $sanctionBloquante) {
             $exception = AdmissionDerogation::where('demande_id',$request->getKey())->where('status','approved')->latest('decided_at')->first();
             if (!$exception || $exception->eligibility != $evaluation) {
-                throw ValidationException::withMessages(['etat_dossier'=>'Le dossier n’est pas éligible : les documents de l’étudiant doivent être validés. Validez-les ou faites valider une dérogation motivée.']);
+                throw ValidationException::withMessages(['etat_dossier'=>$sanctionBloquante
+                    ? 'Le dossier n’est pas éligible : l’étudiant fait l’objet d’une sanction disciplinaire bloquante.'
+                    : 'Le dossier n’est pas éligible : l’éligibilité de l’étudiant n’a pas pu être évaluée.']);
             }
             $evaluation['derogation_id']=$exception->getKey();
         }
@@ -59,7 +61,7 @@ class DossierWorkflow
     }
     public function transition(string $id, string $to, string $kind, ?string $actorId, ?string $reason = null, array $details = []): DemandeEtudiant
     {
-        return DB::transaction(function() use($id,$to,$kind,$actorId,$reason,$details) {
+        $result = DB::transaction(function() use($id,$to,$kind,$actorId,$reason,$details) {
             $initial=DemandeEtudiant::findOrFail($id);
             $student=Etudiant::whereKey($initial->etudiant_id)->lockForUpdate()->firstOrFail();
             $request=DemandeEtudiant::whereKey($id)->lockForUpdate()->firstOrFail();
@@ -84,9 +86,17 @@ class DossierWorkflow
                 // L'admin ne soumet pas à la place de l'étudiant : « Soumis » n'est qu'un retour en réexamen.
                 if ($to==='accepte' || ($to==='soumis' && !in_array($from,['eligible','confirme','refuse'],true))
                     || ($to==='confirme' && $from==='eligible')) abort(403);
+                if ($to==='eligible' && $from==='refuse') {
+                    if (!app(DecisionAutomatiqueDossier::class)->estRefusAutomatique($id)) {
+                        $this->invalid('Seul un refus automatique peut être levé directement : réexaminez d’abord le dossier (retour à « Soumis »).');
+                    }
+                    if (trim((string)$reason)==='') $reason=DecisionAutomatiqueDossier::MOTIF_LEVEE;
+                }
             } elseif ($kind==='systeme') {
-                if (!in_array($to,['soumis','expire','refuse','annule','cloture'],true)
-                    || ($to==='soumis' && !in_array($from,['brouillon','incomplet'],true))) abort(403);
+                // « Éligible » : décision automatique du barème, uniquement sur un dossier soumis.
+                if (!in_array($to,['soumis','eligible','expire','refuse','annule','cloture'],true)
+                    || ($to==='soumis' && !in_array($from,['brouillon','incomplet'],true))
+                    || ($to==='eligible' && $from!=='soumis')) abort(403);
             } else abort(403);
             if (in_array($to,['incomplet','refuse','annule','expire'],true) || ($from==='refuse')) {
                 if (trim((string)$reason)==='') $this->invalid('Le motif de cette transition est obligatoire.');
@@ -173,8 +183,13 @@ class DossierWorkflow
             if ($to==='eligible' && app(IdentifiantsEtudiant::class)->aEnvoyer($student)) {
                 DB::afterCommit(fn () => app(IdentifiantsEtudiant::class)->envoyer($student->fresh()));
             }
+            // Soumission par l'étudiant : éligibilité ou refus automatique selon le barème de la campagne.
+            if ($to==='soumis' && $kind==='etudiant') {
+                DB::afterCommit(fn () => app(DecisionAutomatiqueDossier::class)->decider($id));
+            }
             return $request->fresh();
         },3);
+        return $to==='soumis' && DB::transactionLevel()===0 ? $result->fresh() : $result;
     }
     public function admin(string $id,string $to,?string $reason=null,array $details=[]): DemandeEtudiant
     {

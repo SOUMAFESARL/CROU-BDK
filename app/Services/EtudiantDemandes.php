@@ -8,6 +8,8 @@ use App\Models\Campagne;
 use App\Models\DemandeEtudiant;
 use App\Models\DepartureRequest;
 use App\Models\Etudiant;
+use App\Models\HousingEntryAppointment;
+use App\Models\StudentContractApproval;
 use Carbon\Carbon;
 
 /**
@@ -82,7 +84,7 @@ class EtudiantDemandes
             'credits' => $demande->credit_valider,
             'etat' => $this->etat($etat),
             'etapes' => $this->etapes($etat, $demande),
-            'message' => $this->message($etat),
+            'message' => $this->message($etat, $demande),
             'documents' => ['total' => $documents->count(), 'valides' => $valides],
             'proposition' => $chambre && in_array($etat, ['pre_attribue', 'accepte', 'attribue_definitif'], true) ? [
                 'chambre' => collect(['Chambre '.$chambre->numero_chambre, $chambre->batiment?->name, $chambre->cite?->name])->filter()->implode(' · '),
@@ -148,8 +150,12 @@ class EtudiantDemandes
         ])->all();
     }
 
-    private function message(string $etat): ?string
+    private function message(string $etat, DemandeEtudiant $demande): ?string
     {
+        if ($etat === 'attribue_definitif' && ($entree = $this->messageEntree((string) $demande->etudiant_id))) {
+            return $entree;
+        }
+
         return match ($etat) {
             'brouillon' => 'Votre dossier n’est pas encore soumis. Soumettez-le pour qu’il soit étudié.',
             'soumis' => 'Votre dossier a été reçu. Il sera étudié par le service Logement.',
@@ -166,6 +172,22 @@ class EtudiantDemandes
             'cloture' => 'Ce dossier est clôturé.',
             default => null,
         };
+    }
+
+    /** Attribution définitive dont le contrat est déjà approuvé : on oriente vers le rendez-vous d'entrée (EntryAppointmentService). */
+    private function messageEntree(string $etudiantId): ?string
+    {
+        $contrat = StudentContractApproval::where('student_id', $etudiantId)->whereNotNull('approved_at')
+            ->latest('approved_at')->first();
+        if (! $contrat) return null;
+
+        $rendezVous = HousingEntryAppointment::where('assignment_id', $contrat->assignment_id)
+            ->where('status', 'scheduled')->first();
+
+        return $rendezVous
+            ? 'Votre contrat est approuvé. Votre rendez-vous d’entrée est fixé au '.$rendezVous->starts_at->format('d/m/Y à H:i')
+                .($rendezVous->location ? ' ('.$rendezVous->location.')' : '').'.'
+            : 'Votre contrat est approuvé. Les modalités de votre entrée sont disponibles dans « Mon entrée et notifications ».';
     }
 
     /** Transitions ouvertes à l'étudiant hors proposition (mêmes règles que DossierWorkflow pour l'acteur `etudiant`). */

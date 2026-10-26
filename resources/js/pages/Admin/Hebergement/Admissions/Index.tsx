@@ -1,15 +1,18 @@
 import { Link, router } from '@inertiajs/react';
-import { CalendarClock, CalendarDays, CirclePlay, Eye, FolderOpen, GraduationCap, Info, MapPin, Search, X } from 'lucide-react';
+import { CalendarClock, CalendarDays, CircleCheck, CirclePlay, Eye, FolderOpen, GraduationCap, Info, MapPin, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
+import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { envoyer } from '@/lib/inertia-form';
 import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
@@ -20,11 +23,14 @@ type Dossier = {
     id: string;
     name: string;
     numero_demande: string | null;
+    demande_id: string | null;
     etat_dossier: string | null;
     date: string | null;
     personnel: { telephone: string | null; adresse: string | null; region: string | null; ville: string | null; date_naissance: string | null } | null;
     demandes: number | null;
     url: string | null;
+    /** Refusé par le barème de scoring : peut être rendu éligible en un clic. */
+    refus_automatique: boolean;
 };
 
 type Props = {
@@ -36,7 +42,7 @@ type Props = {
     etatsDossier: { value: string; label: string }[];
     colonnes: { personnel: boolean; historique: boolean };
     campagneActive: { annee: string; echeance: string | null; moyenne_min: number | string | null; distance_min: number | string | null } | null;
-    urls: { campagnes: string | null; filtres: Record<Filtre, string> | null };
+    urls: { campagnes: string | null; leverRefus: string | null; filtres: Record<Filtre, string> | null };
 };
 
 const TITRES: Record<Filtre, string> = {
@@ -51,6 +57,29 @@ const TITRES: Record<Filtre, string> = {
  */
 export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsDossier, colonnes, campagneActive, urls }: Props) {
     const [recherche, setRecherche] = useState(filters.q);
+    /** Refus automatiques cochés (identifiants de demande), à rendre éligibles ensemble. */
+    const [selection, setSelection] = useState<string[]>([]);
+    /** Levée de refus automatiques à confirmer : un dossier, ou la `selection`. */
+    const [aLever, setALever] = useState<Dossier | 'selection' | null>(null);
+    const [levee, setLevee] = useState(false);
+
+    // Lignes cochables : refus prononcés par le barème (un refus d'agent passe par le réexamen).
+    const selectionnables = urls.leverRefus ? dossiers.data.filter((d) => d.refus_automatique && d.demande_id).map((d) => d.demande_id as string) : [];
+    const toutCoche = selectionnables.length > 0 && selectionnables.every((id) => selection.includes(id));
+    const basculer = (id: string, coche: boolean) => setSelection((courante) => (coche ? [...new Set([...courante, id])] : courante.filter((x) => x !== id)));
+
+    // La sélection ne vaut que pour la page affichée (changement de page, de filtre ou levée effectuée).
+    useEffect(() => setSelection([]), [dossiers]);
+
+    const leverRefus = async () => {
+        if (!urls.leverRefus || !aLever) return;
+        const demandes = aLever === 'selection' ? selection : aLever.demande_id ? [aLever.demande_id] : [];
+        if (demandes.length === 0) return;
+        setLevee(true);
+        const ok = await envoyer(urls.leverRefus, { demandes });
+        setLevee(false);
+        if (ok) setALever(null);
+    };
     const premierRendu = useRef(true);
 
     // Recherche et filtre côté serveur (retour en page 1, onglet KPI conservé par l'URL).
@@ -74,6 +103,29 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
     const vide = (valeur: string | null | undefined) => valeur || <span className="text-muted">—</span>;
 
     const colonnesTableau: DataTableColumn<Dossier>[] = [
+        ...(selectionnables.length > 0
+            ? [
+                  {
+                      key: 'selection',
+                      header: (
+                          <Checkbox
+                              aria-label="Sélectionner tous les refus automatiques de la page"
+                              checked={toutCoche ? true : selection.length > 0 ? 'indeterminate' : false}
+                              onCheckedChange={(coche) => setSelection(coche === true ? selectionnables : [])}
+                          />
+                      ),
+                      headClassName: 'w-10',
+                      cell: (d: Dossier) =>
+                          d.refus_automatique && d.demande_id ? (
+                              <Checkbox
+                                  aria-label={`Sélectionner ${d.name}`}
+                                  checked={selection.includes(d.demande_id)}
+                                  onCheckedChange={(coche) => basculer(d.demande_id as string, coche === true)}
+                              />
+                          ) : null,
+                  },
+              ]
+            : []),
         { key: 'num', header: '#', headClassName: 'w-12', className: 'text-muted tabular-nums', cell: (d) => (dossiers.from ?? 1) + dossiers.data.indexOf(d) },
         {
             key: 'etudiant',
@@ -126,12 +178,20 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
             key: 'actions',
             header: <span className="sr-only">Actions</span>,
             className: 'text-right',
-            cell: (d) =>
-                d.url && (
-                    <Link href={d.url} className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'whitespace-nowrap')}>
-                        <Eye className="size-4" aria-hidden /> Suivre le dossier
-                    </Link>
-                ),
+            cell: (d) => (
+                <div className="flex justify-end gap-2">
+                    {d.refus_automatique && d.demande_id && urls.leverRefus && (
+                        <Button variant="secondary" size="sm" className="whitespace-nowrap" onClick={() => setALever(d)}>
+                            <CircleCheck className="size-4" aria-hidden /> Rendre éligible
+                        </Button>
+                    )}
+                    {d.url && (
+                        <Link href={d.url} className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'whitespace-nowrap')}>
+                            <Eye className="size-4" aria-hidden /> Suivre le dossier
+                        </Link>
+                    )}
+                </div>
+            ),
         },
     ];
 
@@ -240,6 +300,11 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
                                     Réinitialiser
                                 </Button>
                             )}
+                            {urls.leverRefus && selection.length > 0 && (
+                                <Button size="sm" className="h-10 sm:ml-auto" onClick={() => setALever('selection')}>
+                                    <CircleCheck className="size-4" aria-hidden /> Rendre éligible la sélection ({nombre(selection.length)})
+                                </Button>
+                            )}
                         </div>
                     }
                     emptyMessage={
@@ -250,6 +315,21 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
                     }
                 />
             </section>
+
+            <ConfirmDialog
+                open={aLever !== null}
+                onOpenChange={(open) => !open && setALever(null)}
+                title={aLever === 'selection' ? 'Rendre éligibles les dossiers sélectionnés ?' : 'Rendre ce dossier éligible ?'}
+                description={
+                    aLever === 'selection'
+                        ? `${nombre(selection.length)} dossier(s) refusé(s) automatiquement (score insuffisant) passeront en « Éligible » ; chaque étudiant devra confirmer son intérêt.`
+                        : `Le refus automatique de ${aLever?.name ?? ''} sera levé : le dossier passe en « Éligible » et l’étudiant devra confirmer son intérêt.`
+                }
+                confirmLabel="Rendre éligible"
+                confirmIcon={<CircleCheck className="size-4" aria-hidden />}
+                processing={levee}
+                onConfirm={leverRefus}
+            />
         </AdminLayout>
     );
 }

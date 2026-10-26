@@ -8,6 +8,7 @@ import {
     ExternalLink,
     FileText,
     FolderOpen,
+    Gauge,
     History,
     Info,
     ListChecks,
@@ -37,7 +38,9 @@ import { envoyer } from '@/lib/inertia-form';
 import { dateFr, initiales } from '@/lib/text';
 import { cn } from '@/lib/utils';
 
-type Regle = { label: string; campagne: string; etudiant: string; etat: 'ok' | 'nok' | 'nd' };
+type Regle = { label: string; campagne: string; etudiant: string; etat: 'ok' | 'nok' | 'nd' | 'nv' | 'rejete' };
+type Volet = { volet: string; poids: number; situation: string; points: number; apport: number };
+type Bareme = { score: number | null; minimum: number; volets: Volet[]; erreur: string | null; score_decision: number | null };
 type Document = { id: string; type: string; url: string; statut: string; valider: string | null; rejeter: string | null };
 type Derogation = {
     id: string;
@@ -55,6 +58,8 @@ type Props = {
     demande: { id: string; numero: string | null; etat: string | null; date: string | null } | null;
     discipline: { label: string; bloquant: boolean } | null;
     eligibilite: { campagne: string | null; regles: Regle[]; conformes: number; score: number } | null;
+    /** Score du barème de scoring actif (seul score comparé au minimum de la décision automatique). */
+    bareme: Bareme | null;
     documents: Document[] | null;
     derogations: { liste: Derogation[]; demander: string | null } | null;
     suivi: {
@@ -62,6 +67,10 @@ type Props = {
         proposition: { chambre: string | null; jusqu_au: string | null } | null;
         actions: { etat: string; label: string }[];
         transition: string | null;
+        /** Levée en un clic d'un refus automatique (barème de scoring). */
+        rendre_eligible: string | null;
+        /** Décision du barème à l'origine de l'état actuel. */
+        decision: { etat: string; score: number; minimum: number } | null;
         assignation_id: string | null;
         historique: { date: string | null; etat: string; auteur: string | null; motif: string | null }[] | null;
     } | null;
@@ -79,6 +88,8 @@ const ETATS_REGLE = {
     ok: { label: 'Conforme', variant: 'success', icone: CircleCheck },
     nok: { label: 'Non conforme', variant: 'danger', icone: CircleX },
     nd: { label: 'Non renseigné', variant: 'warning', icone: TriangleAlert },
+    nv: { label: 'Non vérifié', variant: 'warning', icone: Clock },
+    rejete: { label: 'Rejeté', variant: 'danger', icone: CircleX },
 } as const;
 
 const STATUTS_DOCUMENT: Record<string, { label: string; variant: 'success' | 'danger' | 'warning'; icone: typeof Clock }> = {
@@ -109,7 +120,7 @@ const STATUTS_DEMANDE: Record<string, 'success' | 'warning' | 'danger' | 'neutra
 
 /** Traitement d'un dossier de candidature (remplace `admission/traiter-demande.blade.php`, `derogations.blade.php` et le mode admin de `dossier-cycle`). */
 export default function AdmissionShow(props: Props) {
-    const { etudiant, demande, discipline, eligibilite, documents, derogations, suivi, profil, historique, edition, options, urls } = props;
+    const { etudiant, demande, discipline, eligibilite, bareme, documents, derogations, suivi, profil, historique, edition, options, urls } = props;
     const [enEdition, setEnEdition] = useState(false);
     // Objet stable : la fenêtre réinitialise son formulaire à chaque ouverture (et après rechargement des valeurs).
     const etudiantEdite = useMemo(
@@ -117,8 +128,6 @@ export default function AdmissionShow(props: Props) {
         [enEdition, urls.modifier, edition, etudiant.name],
     );
     const modifiable = !!(urls.modifier && edition && options);
-    // Tant qu'une pièce n'est pas validée, l'étape du dossier ne peut pas être enregistrée.
-    const documentsNonValides = documents?.filter((document) => document.statut !== 'valide').length ?? 0;
 
     return (
         <AdminLayout title="Traiter la demande">
@@ -179,10 +188,11 @@ export default function AdmissionShow(props: Props) {
 
             <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
                 <div className="flex min-w-0 flex-col gap-6">
+                    {bareme && <ScoreBareme {...bareme} />}
                     {eligibilite && <Eligibilite {...eligibilite} />}
                     {documents && <Documents documents={documents} />}
                     {derogations && demande && <Derogations {...derogations} demandeId={demande.id} />}
-                    {suivi && demande && <Suivi suivi={suivi} etat={demande.etat} documentsNonValides={documentsNonValides} />}
+                    {suivi && demande && <Suivi suivi={suivi} etat={demande.etat} />}
                 </div>
 
                 <aside className="flex flex-col gap-6">
@@ -213,6 +223,70 @@ function Carte({ id, icone, teinte, titre, meta, children }: { id?: string; icon
     );
 }
 
+function ScoreBareme({ score, minimum, volets, erreur, score_decision }: Bareme) {
+    const atteint = score !== null && score >= minimum;
+
+    return (
+        <Carte icone={<Gauge size={18} strokeWidth={1.25} />} teinte="bg-soft text-primary" titre="Score d’éligibilité (barème)" meta={`Minimum requis : ${scoreFr(minimum)}/100`}>
+            {score === null ? (
+                <p className="flex items-start gap-2 text-sm text-[#B54708]">
+                    <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden /> Score non calculable : {erreur} Le dossier relève d’une décision manuelle.
+                </p>
+            ) : (
+                <>
+                    <div className="mb-4 flex flex-col gap-1">
+                        <p className="flex flex-wrap items-center gap-3">
+                            <span className={cn('text-2xl font-medium tabular-nums', atteint ? 'text-[#067647]' : 'text-[#B42318]')}>{scoreFr(score)}/100</span>
+                            <Badge variant={atteint ? 'success' : 'danger'}>
+                                {atteint ? <CircleCheck className="size-3.5" aria-hidden /> : <CircleX className="size-3.5" aria-hidden />}
+                                {atteint ? 'Minimum atteint' : 'Inférieur au minimum'}
+                            </Badge>
+                        </p>
+                        <p className="text-sm text-muted">
+                            Seul ce score est comparé au minimum ({scoreFr(minimum)}/100) pour la décision automatique à la soumission. Il est indépendant du taux de critères conformes ci-dessous.
+                        </p>
+                        {score_decision !== null && (
+                            <p className="flex items-start gap-2 text-sm text-muted">
+                                <Info className="mt-0.5 size-4 shrink-0" aria-hidden /> Score retenu lors de la décision automatique : {scoreFr(score_decision)}/100 (les informations du dossier ont été modifiées depuis).
+                            </p>
+                        )}
+                    </div>
+                    <div className="overflow-hidden rounded-brand border">
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="hover:bg-transparent">
+                                    <TableHead>Volet</TableHead>
+                                    <TableHead className="text-right">Poids</TableHead>
+                                    <TableHead>Situation de l’étudiant</TableHead>
+                                    <TableHead className="text-right">Points</TableHead>
+                                    <TableHead className="text-right">Apport</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {volets.map((volet) => (
+                                    <TableRow key={volet.volet}>
+                                        <TableCell className="font-medium text-gray-900">{volet.volet}</TableCell>
+                                        <TableCell className="text-right text-muted tabular-nums">{scoreFr(volet.poids)} %</TableCell>
+                                        <TableCell>{volet.situation}</TableCell>
+                                        <TableCell className="text-right tabular-nums">{scoreFr(volet.points)}/100</TableCell>
+                                        <TableCell className="text-right tabular-nums">{scoreFr(volet.apport)}</TableCell>
+                                    </TableRow>
+                                ))}
+                                <TableRow className="bg-[#F8F8F8] hover:bg-[#F8F8F8]">
+                                    <TableCell colSpan={4} className="font-medium text-gray-900">
+                                        Total
+                                    </TableCell>
+                                    <TableCell className={cn('text-right font-medium tabular-nums', atteint ? 'text-[#067647]' : 'text-[#B42318]')}>{scoreFr(score)}/100</TableCell>
+                                </TableRow>
+                            </TableBody>
+                        </Table>
+                    </div>
+                </>
+            )}
+        </Carte>
+    );
+}
+
 function Eligibilite({ campagne, regles, conformes, score }: NonNullable<Props['eligibilite']>) {
     const couleur = score >= 80 ? '#067647' : score >= 50 ? '#B54708' : '#B42318';
     const circonference = 2 * Math.PI * 26;
@@ -235,7 +309,7 @@ function Eligibilite({ campagne, regles, conformes, score }: NonNullable<Props['
                         />
                     </svg>
                     <span className="absolute inset-0 flex items-center justify-center text-sm font-medium" style={{ color: couleur }}>
-                        {score}%
+                        {conformes}/{regles.length}
                     </span>
                 </div>
                 <div>
@@ -247,7 +321,7 @@ function Eligibilite({ campagne, regles, conformes, score }: NonNullable<Props['
                               : 'Plusieurs critères non conformes — étudiant probablement non éligible.'}
                     </p>
                     <p className="text-sm text-muted">
-                        {conformes} critère(s) conforme(s) sur {regles.length}. Seule la validation des documents est bloquante pour rendre le dossier éligible ; les autres critères sont indicatifs.
+                        {conformes} critère(s) conforme(s) sur {regles.length}. Les critères sont indicatifs : seule une sanction disciplinaire bloquante empêche de rendre le dossier éligible.
                     </p>
                 </div>
             </div>
@@ -265,10 +339,10 @@ function Eligibilite({ campagne, regles, conformes, score }: NonNullable<Props['
                         {regles.map((regle) => {
                             const etat = ETATS_REGLE[regle.etat];
                             return (
-                                <TableRow key={regle.label} className={regle.etat !== 'ok' ? 'bg-red-50/40' : undefined}>
+                                <TableRow key={regle.label} className={regle.etat === 'nok' || regle.etat === 'rejete' ? 'bg-red-50/40' : undefined}>
                                     <TableCell className="font-medium text-gray-900">{regle.label}</TableCell>
                                     <TableCell className="text-muted tabular-nums">{regle.campagne}</TableCell>
-                                    <TableCell className={regle.etat !== 'ok' ? 'text-red-700' : undefined}>{regle.etudiant}</TableCell>
+                                    <TableCell className={regle.etat === 'nok' || regle.etat === 'rejete' ? 'text-red-700' : undefined}>{regle.etudiant}</TableCell>
                                     <TableCell className="text-right">
                                         <Badge variant={etat.variant}>
                                             <etat.icone className="size-3.5" aria-hidden /> {etat.label}
@@ -492,21 +566,21 @@ function ArticleDerogation({ derogation }: { derogation: Derogation }) {
     );
 }
 
+const scoreFr = (valeur: number) => valeur.toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+
 /** Transitions pour lesquelles `DossierWorkflow` exige un motif (ainsi que toute sortie de l'état « refusé »). */
 const ETATS_AVEC_MOTIF = ['incomplet', 'refuse', 'annule', 'expire'];
 
-function Suivi({ suivi, etat, documentsNonValides }: { suivi: NonNullable<Props['suivi']>; etat: string | null; documentsNonValides: number }) {
+function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: string | null }) {
     const [action, setAction] = useState('');
     const [motif, setMotif] = useState('');
     const [erreurs, setErreurs] = useState<{ etat?: string; motif?: string }>({});
     const [enCours, setEnCours] = useState(false);
+    const [confirmerLevee, setConfirmerLevee] = useState(false);
     // « En étude » ne subsiste que sur les dossiers de l'ancien parcours : affiché au niveau « Soumis ».
     const position = etat ? PARCOURS.indexOf(etat === 'en_etude' ? 'soumis' : etat) : -1;
 
-    const bloque = documentsNonValides > 0;
-
     const enregistrer = async () => {
-        if (bloque) return;
         const nouvelles: typeof erreurs = {};
         if (!action) nouvelles.etat = 'Choisissez une action.';
         // Motif exigé par le workflow (le serveur le revérifie).
@@ -525,6 +599,14 @@ function Suivi({ suivi, etat, documentsNonValides }: { suivi: NonNullable<Props[
             setAction('');
             setMotif('');
         }
+    };
+
+    const leverRefus = async () => {
+        if (!suivi.rendre_eligible) return;
+        setEnCours(true);
+        const ok = await envoyer(suivi.rendre_eligible, { etat: 'eligible' });
+        setEnCours(false);
+        if (ok) setConfirmerLevee(false);
     };
 
     return (
@@ -562,7 +644,32 @@ function Suivi({ suivi, etat, documentsNonValides }: { suivi: NonNullable<Props[
                     </p>
                 )}
                 {etat === 'accepte' && <p className="text-muted">La proposition a été acceptée. La validation définitive reste à effectuer par le service Logement.</p>}
+                {suivi.decision && (
+                    <p className="text-muted">
+                        Décision automatique du barème : score <strong className="font-medium text-gray-900">{scoreFr(suivi.decision.score)}/100</strong> pour un minimum de{' '}
+                        {scoreFr(suivi.decision.minimum)}/100.
+                    </p>
+                )}
             </div>
+
+            {suivi.rendre_eligible && (
+                <div className="mt-4 flex flex-col gap-3 rounded-brand border border-[#C6E3A6] bg-soft p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-[#004D00]">Ce dossier a été refusé automatiquement (score insuffisant). Vous pouvez le rendre éligible.</p>
+                    <Button size="sm" className="h-10 shrink-0" disabled={enCours} onClick={() => setConfirmerLevee(true)}>
+                        <CircleCheck className="size-4" aria-hidden /> Rendre éligible
+                    </Button>
+                </div>
+            )}
+            <ConfirmDialog
+                open={confirmerLevee}
+                onOpenChange={setConfirmerLevee}
+                title="Rendre ce dossier éligible ?"
+                description="Le refus automatique sera levé : le dossier passe en « Éligible » et l’étudiant devra confirmer son intérêt."
+                confirmLabel="Rendre éligible"
+                confirmIcon={<CircleCheck className="size-4" aria-hidden />}
+                processing={enCours}
+                onConfirm={leverRefus}
+            />
 
             {suivi.actions.length > 0 && (
                 <div className="mt-4 flex flex-col gap-3 rounded-brand bg-surface p-4">
@@ -594,20 +701,8 @@ function Suivi({ suivi, etat, documentsNonValides }: { suivi: NonNullable<Props[
                     >
                         <Textarea id="transition-motif" rows={2} maxLength={5000} invalid={!!erreurs.motif} value={motif} onChange={(event) => setMotif(event.target.value)} />
                     </Field>
-                    {bloque && (
-                        <p id="transition-bloquee" role="status" className="flex items-start gap-2 rounded-brand border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                            <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-                            <span>
-                                {documentsNonValides === 1 ? '1 document n’est pas encore validé' : `${documentsNonValides} documents ne sont pas encore validés`} : validez toutes les pièces avant
-                                d’enregistrer cette étape.{' '}
-                                <a href="#documents-fournis" className="font-medium underline hover:no-underline">
-                                    Voir les documents fournis
-                                </a>
-                            </span>
-                        </p>
-                    )}
                     <div>
-                        <Button size="sm" className="h-10" disabled={enCours || bloque} aria-describedby={bloque ? 'transition-bloquee' : undefined} onClick={enregistrer}>
+                        <Button size="sm" className="h-10" disabled={enCours} onClick={enregistrer}>
                             {enCours ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
                             Enregistrer cette étape
                         </Button>

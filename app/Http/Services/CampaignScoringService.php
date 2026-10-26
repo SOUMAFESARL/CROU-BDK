@@ -30,8 +30,9 @@ class CampaignScoringService
     public function calculate(Etudiant $student, DemandeEtudiant $request, CampaignScoring $config): array
     {
         $values=[];
+        $categories=[];
         foreach ($config->weights as $group=>$weight) {
-            if ((float)$weight === 0.0) { $values[$group]=0.0; continue; }
+            if ((float)$weight === 0.0) { $values[$group]=0.0; $categories[$group]=null; continue; }
             $key=null;
             if ($group==='social') {
                 $boursier=$request->boursier ?? $student->boursier;
@@ -50,10 +51,44 @@ class CampaignScoringService
             }
             if ($key===null || !isset($config->points[$group][$key])) throw new RuntimeException('Barème de scoring incomplet.');
             $values[$group]=(float)$config->points[$group][$key];
+            $categories[$group]=$key;
         }
         $score=0;
         foreach ($values as $group=>$value) $score+=$value*(float)$config->weights[$group]/100;
         return ['score'=>round($score,2),'priority'=>$config->pmr_first && $student->pmr_confirme?0:1,
-            'minimum_score'=>$config->minimum_score,'scoring_version'=>$config->id,'subscores'=>$values];
+            'minimum_score'=>$config->minimum_score,'scoring_version'=>$config->id,'subscores'=>$values,'categories'=>$categories];
+    }
+    /**
+     * Détail du score par volet (poids, situation de l'étudiant, points, apport au score) pour l'affichage.
+     * @return array{score:float, minimum:float, volets:list<array{volet:string, poids:float, situation:string, points:float, apport:float}>}
+     */
+    public function detail(Etudiant $student, DemandeEtudiant $request, CampaignScoring $config): array
+    {
+        $resultat=$this->calculate($student, $request, $config);
+        $seuils=self::distanceThresholds($config);
+        $mentions=['tb'=>'Très bien','bien'=>'Bien','ab'=>'Assez bien','passable'=>'Passable','insuffisant'=>'Insuffisant'];
+        $tranches=[
+            'local'=>'moins de '.$seuils['proche'].' km',
+            'proche'=>$seuils['proche'].' à '.$seuils['loin'].' km',
+            'loin'=>$seuils['loin'].' à '.$seuils['tres_loin'].' km',
+            'tres_loin'=>$seuils['tres_loin'].' km et plus',
+        ];
+        $nombre=fn ($valeur)=>rtrim(rtrim(number_format((float)$valeur, 2, ',', ''), '0'), ',');
+        $volets=[];
+        foreach ($config->weights as $group=>$weight) {
+            $key=$resultat['categories'][$group] ?? null;
+            $situation=match (true) {
+                $key===null=>'Volet non pris en compte (poids nul)',
+                $group==='social'=>$key==='boursier' ? 'Boursier' : 'Non boursier',
+                $group==='academique'=>'Moyenne '.$nombre($request->moyenne).'/20 → '.($mentions[$key] ?? $key),
+                $group==='geographique'=>$nombre($student->distance).' km → tranche « '.$tranches[$key].' »',
+                $group==='specifique'=>$key==='pmr' ? 'PMR confirmé' : 'Non PMR',
+                default=>$key,
+            };
+            $points=(float)($resultat['subscores'][$group] ?? 0);
+            $volets[]=['volet'=>$group==='specifique' ? 'Situation spécifique (PMR)' : (self::GROUPS[$group] ?? $group),'poids'=>(float)$weight,'situation'=>$situation,
+                'points'=>$points,'apport'=>round($points*(float)$weight/100, 2)];
+        }
+        return ['score'=>(float)$resultat['score'],'minimum'=>(float)$config->minimum_score,'volets'=>$volets];
     }
 }

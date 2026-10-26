@@ -58,6 +58,8 @@ type Demande = {
     documents: { id: string; nom: string; statut: 'valide' | 'rejete' | 'en_attente' }[];
     decision: Proposition | null;
     acceptee: boolean;
+    /** L'étudiant a déjà répondu (confirmé / accepté) : le délai de réponse n'a plus lieu d'être affiché. */
+    repondue: boolean;
 };
 
 type TableauDeBordProps = {
@@ -247,18 +249,44 @@ function VueDemande({ demande, statut, anneeAcademique, aujourdHui }: TableauDeB
                 date={aujourdHui}
             />
 
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className={cn('grid grid-cols-2 gap-3', demande.repondue ? 'lg:grid-cols-3' : 'lg:grid-cols-4')}>
                 <StatCard compact label="Numéro de demande" value={demande.numero ?? '—'} tone="blue" />
                 <StatCard compact label="Soumise le" value={demande.soumiseLe ?? '—'} tone="green" />
-                <StatCard compact
-                    label="Délai de validation"
-                    value={demande.echeance ?? '—'}
-                    tone="amber"
-                    extra={jours === null ? undefined : jours === 0 ? 'Délai expiré' : `${jours} ${jours > 1 ? 'jours restants' : 'jour restant'}`}
-                    highlight={jours !== null && jours <= 7}
-                />
+                {!demande.repondue && (
+                    <StatCard compact
+                        label="Délai de validation"
+                        value={demande.echeance ?? '—'}
+                        tone="amber"
+                        extra={jours === null ? undefined : jours === 0 ? 'Délai expiré' : `${jours} ${jours > 1 ? 'jours restants' : 'jour restant'}`}
+                        highlight={jours !== null && jours <= 7}
+                    />
+                )}
                 <StatCard compact label="Documents validés" value={`${demande.documentsPourcentage} %`} tone="plum" extra={`${demande.documentsValides}/${nbDocuments}`} />
             </div>
+
+            {/* Décision attendue de l'étudiant : placée avant le détail pour être vue en premier. */}
+            {(demande.decision || !demande.repondue) && (
+                <section className="flex flex-col gap-3 rounded-brand border bg-white p-4 md:p-5">
+                    {demande.decision && (
+                        <>
+                            <p className="text-sm text-gray-900">
+                                {demande.decision.type === 'consentement'
+                                    ? 'Votre dossier est éligible. Souhaitez-vous toujours être logé(e) cette année ?'
+                                    : `Une chambre vous est proposée${demande.decision.chambre ? ` : ${demande.decision.chambre}` : ''}.`}
+                            </p>
+                            <ReponseProposition proposition={demande.decision} />
+                        </>
+                    )}
+
+                    {!demande.repondue && (
+                        <Notice icone={Info}>
+                            <strong className="font-medium">Important :</strong> vous devez accepter ou refuser cette demande avant le{' '}
+                            <strong className="font-medium">{demande.echeanceCourte ?? 'une date à préciser'}</strong>. Passé ce délai, votre demande sera
+                            traitée automatiquement.
+                        </Notice>
+                    )}
+                </section>
+            )}
 
             <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
                 <Panneau surtitre="Admission" titre="Détail de la demande">
@@ -295,23 +323,6 @@ function VueDemande({ demande, statut, anneeAcademique, aujourdHui }: TableauDeB
                             })}
                         </ol>
                     </div>
-
-                    {demande.decision && (
-                        <div className="mt-4 flex flex-col gap-3 border-t pt-4">
-                            <p className="text-sm text-gray-900">
-                                {demande.decision.type === 'consentement'
-                                    ? 'Votre dossier est éligible. Souhaitez-vous toujours être logé(e) cette année ?'
-                                    : `Une chambre vous est proposée${demande.decision.chambre ? ` : ${demande.decision.chambre}` : ''}.`}
-                            </p>
-                            <ReponseProposition proposition={demande.decision} />
-                        </div>
-                    )}
-
-                    <Notice icone={Info} className="mt-4">
-                        <strong className="font-medium">Important :</strong> vous devez accepter ou refuser cette demande avant le{' '}
-                        <strong className="font-medium">{demande.echeanceCourte ?? 'une date à préciser'}</strong>. Passé ce délai, votre demande sera traitée
-                        automatiquement.
-                    </Notice>
                 </Panneau>
 
                 <Panneau surtitre="Pièces" titre="Documents fournis" badge={`${demande.documentsValides}/${nbDocuments} validés`}>
