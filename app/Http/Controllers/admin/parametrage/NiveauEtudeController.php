@@ -19,7 +19,7 @@ class NiveauEtudeController extends Controller
     public function index(Request $request)
     {
         $url = $this->urlSiAutorise($request);
-        $query = NiveauEtude::query()->orderBy('name');
+        $query = NiveauEtude::query()->ordonnes();
         $q = mb_substr(trim((string) $request->query('q', '')), 0, 100);
         if ($q !== '') {
             $query->where(fn (Builder $w) => $w->where('name', 'like', '%'.$q.'%')
@@ -28,6 +28,8 @@ class NiveauEtudeController extends Controller
         }
         $demandes = $this->demandesParNiveau();
         $total = NiveauEtude::count();
+        // Rang de chaque niveau dans l'ordre complet (la recherche et la pagination n'en montrent qu'une partie).
+        $rangs = NiveauEtude::query()->ordonnes()->pluck('id_niveau_etude')->flip();
         $utilises = NiveauEtude::pluck('id_niveau_etude')->filter(fn ($id) => ($demandes[$id] ?? 0) > 0)->count();
 
         return Inertia::render('Admin/Parametrage/NiveauxEtude', [
@@ -37,7 +39,11 @@ class NiveauEtudeController extends Controller
                 'abreviation' => $n->abreviation,
                 'description' => $n->description,
                 'demandes' => (int) ($demandes[$n->id_niveau_etude] ?? 0),
+                'rang' => (int) $rangs[$n->id_niveau_etude] + 1,
+                'premier' => $rangs[$n->id_niveau_etude] === 0,
+                'dernier' => $rangs[$n->id_niveau_etude] === $total - 1,
                 'urls' => [
+                    'deplacer' => $url('admin.parametrage.niveau-etude.deplacer', $n->id_niveau_etude),
                     'update' => $url('admin.parametrage.niveau-etude.update', $n->id_niveau_etude),
                     'destroy' => $url('admin.parametrage.niveau-etude.delete', $n->id_niveau_etude),
                 ],
@@ -76,6 +82,33 @@ class NiveauEtudeController extends Controller
             return back()->with('success', 'Niveau d\'étude modifié avec succès.');
         } catch (\Exception $e) {
             return back()->with('error', 'Problème survenu lors de la modification : '.UserFacingErrors::caught($e));
+        }
+    }
+
+    /** Monte ou descend un niveau d'un cran ; cet ordre est repris par les formulaires de demande et l'API. */
+    public function deplacer(Request $request, $id)
+    {
+        $sens = $request->validate(['sens' => ['required', Rule::in(['haut', 'bas'])]], ['sens.*' => 'Sens de déplacement invalide.'])['sens'];
+        $niveau = NiveauEtude::where('id_niveau_etude', $id)->firstOrFail();
+
+        try {
+            DB::transaction(function () use ($niveau, $sens) {
+                $ids = NiveauEtude::query()->ordonnes()->lockForUpdate()->pluck('id_niveau_etude')->values()->all();
+                $i = array_search($niveau->id_niveau_etude, $ids, true);
+                $j = $sens === 'haut' ? $i - 1 : $i + 1;
+                if (! isset($ids[$j])) {
+                    return;
+                }
+                [$ids[$i], $ids[$j]] = [$ids[$j], $ids[$i]];
+                // Renumérotation complète 1..n : corrige au passage les ordres en double ou absents.
+                foreach ($ids as $rang => $cle) {
+                    NiveauEtude::where('id_niveau_etude', $cle)->update(['ordre' => $rang + 1]);
+                }
+            });
+
+            return back();
+        } catch (\Exception $e) {
+            return back()->with('error', 'Problème survenu lors du changement d\'ordre :'.UserFacingErrors::caught($e));
         }
     }
 

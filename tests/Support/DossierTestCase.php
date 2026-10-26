@@ -145,7 +145,7 @@ abstract class DossierTestCase extends TestCase
             $t->string('created_by')->nullable(); $t->string('updated_by')->nullable();
             $t->text('commentaires')->nullable(); $t->timestamp('date_demande')->nullable();
         });
-        Schema::create('niveau_etude', function (Blueprint $t) { $t->string('id_niveau_etude')->primary(); $t->string('name')->nullable(); $t->softDeletes(); });
+        Schema::create('niveau_etude', function (Blueprint $t) { $t->string('id_niveau_etude')->primary(); $t->string('name')->nullable(); $t->unsignedInteger('ordre')->default(0); $t->softDeletes(); });
         Schema::create('admission_derogations', function (Blueprint $t) {
             $t->string('id')->primary(); $t->string('demande_id'); $t->string('status');
             $t->json('eligibility')->nullable(); $t->timestamp('decided_at')->nullable(); $t->string('decided_by')->nullable();

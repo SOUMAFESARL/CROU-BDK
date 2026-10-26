@@ -132,7 +132,7 @@ class  frontedController extends Controller
             'genres' => $options(Genre::all()),
             'typesPiece' => $options(TypePiece::all()),
             'groupesSanguins' => $options(groupeSanguin::all()),
-            'niveaux' => $options(NiveauEtude::all(), 'id_niveau_etude'),
+            'niveaux' => $options(NiveauEtude::ordonnes()->get(), 'id_niveau_etude'),
             'filieres' => $options(Filiere::orderBy('name')->get(), 'id_filiere'),
             'regions' => $options(Region::orderBy('name')->get()),
             // Toutes les villes d'un coup : la liste admin/list/city est réservée aux administrateurs.

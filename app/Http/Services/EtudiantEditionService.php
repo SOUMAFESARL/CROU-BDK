@@ -76,7 +76,7 @@ class EtudiantEditionService
             'villes' => Ville::query()->orderBy('name')->get(['id', 'name', 'region_id'])
                 ->map(fn ($ville) => ['id' => (string) $ville->id, 'name' => (string) $ville->name, 'region_id' => (string) $ville->region_id])
                 ->values(),
-            'niveaux' => $liste(NiveauEtude::query()->orderBy('name')->get(), 'id_niveau_etude'),
+            'niveaux' => $liste(NiveauEtude::query()->ordonnes()->get(), 'id_niveau_etude'),
             'filieres' => $liste(Filiere::query()->orderBy('name')->get(), 'id_filiere'),
         ];
     }

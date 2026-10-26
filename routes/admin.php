@@ -576,6 +576,7 @@ Route::middleware(['admin'])->group(function () {
                 Route::get('/', 'index')->name('index');
                 Route::post('/store', 'store')->name('store');
                 Route::put('/update/{id}', 'update')->name('update');
+                Route::post('/deplacer/{id}', 'deplacer')->name('deplacer');
                 Route::delete('/delete/{id}', 'delete')->name('delete');
             });
             Route::prefix('departement')->name('departement.')->controller(DepartementController::class)->group(function () {

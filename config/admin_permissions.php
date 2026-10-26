@@ -209,6 +209,7 @@ return [
         'admin.parametrage.modules.toggle' => 'parametrage.modules.configure',
         'admin.parametrage.modules.update' => 'parametrage.modules.update',
         'admin.parametrage.niveau-etude.delete' => 'parametrage.referentiels.delete',
+        'admin.parametrage.niveau-etude.deplacer' => 'parametrage.referentiels.update',
         'admin.parametrage.niveau-etude.index' => 'parametrage.referentiels.view',
         'admin.parametrage.niveau-etude.store' => 'parametrage.referentiels.create',
         'admin.parametrage.niveau-etude.update' => 'parametrage.referentiels.update',

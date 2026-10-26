@@ -73,7 +73,7 @@ class ParametrageReferentielsPagesTest extends TestCase
         });
         Schema::create('config_app', function (Blueprint $t) { $t->increments('id'); $t->string('region_id')->nullable(); $t->string('ville_id')->nullable(); $t->timestamps(); });
         Schema::create('niveau_etude', function (Blueprint $t) {
-            $t->string('id_niveau_etude')->primary(); $t->string('name'); $t->string('abreviation')->nullable(); $t->text('description')->nullable();
+            $t->string('id_niveau_etude')->primary(); $t->string('name'); $t->string('abreviation')->nullable(); $t->text('description')->nullable(); $t->unsignedInteger('ordre')->default(0);
             $t->string('created_by')->nullable(); $t->string('updated_by')->nullable(); $t->timestamps();
         });
 
@@ -327,6 +327,33 @@ class ParametrageReferentielsPagesTest extends TestCase
         $this->delete(route(self::BASE.'niveau-etude.delete', 'n-l1'))->assertSessionHas('error');
         $this->delete(route(self::BASE.'niveau-etude.delete', 'n-m1'))->assertSessionHas('success');
         $this->assertSame(3, DB::table('niveau_etude')->count());
+    }
+
+    public function test_niveaux_etude_se_reordonnent_avec_les_fleches(): void
+    {
+        $this->admin();
+        $ordre = fn () => array_column($this->page(route(self::BASE.'niveau-etude.index'))['props']['elements']['data'], 'name');
+        $this->assertSame(['Licence 1', 'Licence 2', 'Master 1'], $ordre());
+
+        $this->post(route(self::BASE.'niveau-etude.deplacer', 'n-m1'), ['sens' => 'haut'])->assertSessionHasNoErrors();
+        $this->assertSame(['Licence 1', 'Master 1', 'Licence 2'], $ordre());
+        $this->post(route(self::BASE.'niveau-etude.deplacer', 'n-l1'), ['sens' => 'bas'])->assertSessionHasNoErrors();
+        $this->assertSame(['Master 1', 'Licence 1', 'Licence 2'], $ordre());
+        $this->assertSame(['n-m1' => 1, 'n-l1' => 2, 'n-l2' => 3], DB::table('niveau_etude')->pluck('ordre', 'id_niveau_etude')->map(fn ($o) => (int) $o)->sortBy(fn ($o) => $o)->all());
+
+        // Sans effet au bord, sens invalide refusé.
+        $this->post(route(self::BASE.'niveau-etude.deplacer', 'n-m1'), ['sens' => 'haut'])->assertSessionHasNoErrors();
+        $this->assertSame(['Master 1', 'Licence 1', 'Licence 2'], $ordre());
+        $this->post(route(self::BASE.'niveau-etude.deplacer', 'n-m1'), ['sens' => 'gauche'])->assertSessionHasErrors('sens');
+
+        $page = $this->page(route(self::BASE.'niveau-etude.index'))['props']['elements']['data'];
+        $this->assertTrue($page[0]['premier']);
+        $this->assertTrue($page[2]['dernier']);
+        $this->assertNotNull($page[0]['urls']['deplacer']);
+
+        // Un nouveau niveau se place en dernier.
+        $this->post(route(self::BASE.'niveau-etude.store'), ['name' => 'Doctorat 1'])->assertSessionHasNoErrors();
+        $this->assertSame('Doctorat 1', $ordre()[3]);
     }
 
     public function test_types_utilisateur_comptent_les_comptes(): void

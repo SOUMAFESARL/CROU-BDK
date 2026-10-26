@@ -65,6 +65,10 @@ type Props<T extends ElementReferentiel> = {
     usage: (element: T) => { total: number; libelle: string };
     /** Conseil affiché quand la suppression est bloquée. */
     conseilSuppression?: string;
+    /** Colonnes ajoutées avant le nom (ordre d'affichage…). */
+    colonnesAvant?: DataTableColumn<T>[];
+    /** Ajout en une seule étape, sans écran de vérification. */
+    ajoutDirect?: boolean;
     /** Colonnes ajoutées entre la description et les actions. */
     colonnes?: DataTableColumn<T>[];
     /** Filtres ajoutés à côté de la recherche ; `filters` (hors `q`) est conservé pendant la recherche. */
@@ -77,7 +81,7 @@ type Props<T extends ElementReferentiel> = {
 
 /** Liste paginée + fenêtre d'ajout / modification en 2 étapes + suppression confirmée, commune aux référentiels simples. */
 export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
-    const { titre, description, singulier, un, feminin = false, elements, stats, filters, urls, usage, colonnes = [], filtres, actions, note, icone } = props;
+    const { titre, description, singulier, un, feminin = false, elements, stats, filters, urls, usage, colonnesAvant = [], colonnes = [], filtres, actions, note, icone } = props;
     const champs = useMemo<ChampReferentiel[]>(
         () =>
             props.champs ?? [
@@ -103,6 +107,7 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
     };
 
     const tableau: DataTableColumn<T>[] = [
+        ...colonnesAvant,
         {
             key: 'name',
             header: 'Nom',
@@ -198,6 +203,7 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
                             url={edition === 'nouveau' ? urls.store : edition.urls.update}
                             un={un}
                             champs={champs}
+                            direct={edition === 'nouveau' && !!props.ajoutDirect}
                             onClose={() => setEdition(null)}
                         />
                     )}
@@ -233,16 +239,19 @@ function Formulaire({
     url,
     un,
     champs,
+    direct = false,
     onClose,
 }: {
     element: ElementReferentiel | null;
     url: string | null;
     un: string;
     champs: ChampReferentiel[];
+    /** Une seule étape (saisie puis enregistrement), sans vérification. */
+    direct?: boolean;
     onClose: () => void;
 }) {
     const schema = useMemo(() => referentielSchema(champs), [champs]);
-    const etapes = useMemo(() => [champs.map((c) => c.cle), []] as const, [champs]);
+    const etapes = useMemo(() => (direct ? [champs.map((c) => c.cle)] : [champs.map((c) => c.cle), []]), [champs, direct]);
     const [erreur, setErreur] = useState<string | null>(null);
     const {
         register,
@@ -287,11 +296,9 @@ function Formulaire({
         >
             <DialogHeader>
                 <DialogTitle>{element ? `Modifier « ${element.name} »` : `Ajouter ${un}`}</DialogTitle>
-                <DialogDescription>
-                    Étape {etape + 1} sur {ETAPES.length}
-                </DialogDescription>
+                <DialogDescription>{direct ? 'Les champs marqués d’un astérisque sont obligatoires.' : `Étape ${etape + 1} sur ${ETAPES.length}`}</DialogDescription>
             </DialogHeader>
-            <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={(index) => void allerA(index)} />
+            {!direct && <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={(index) => void allerA(index)} />}
             <DialogBody className="space-y-4">
                 <ErreurGenerale message={erreur} />
                 {etape === 0 ? (

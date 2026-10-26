@@ -62,6 +62,7 @@ class DemandeHebergementPageTest extends TestCase
         Schema::create('niveau_etude', function (Blueprint $t) {
             $t->string('id_niveau_etude')->primary();
             $t->string('name');
+            $t->unsignedInteger('ordre')->default(0);
             $t->timestamps();
         });
         Schema::create('filiere', function (Blueprint $t) {
