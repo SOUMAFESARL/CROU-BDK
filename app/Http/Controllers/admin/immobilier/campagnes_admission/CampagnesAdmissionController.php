@@ -658,6 +658,8 @@ class CampagnesAdmissionController extends Controller
             'periode_fin' => $date($campagne->periode_fin),
             'date_echeance_demande' => $date($campagne->date_echeance_demande),
             'date_echeance_contrat' => $date($campagne->date_echeance_contrat),
+            // null : chaque dossier est décidé par le barème dès sa réception.
+            'date_validation_auto' => $date($campagne->date_validation_auto),
             'criteres' => [
                 'moyenne_min' => $campagne->moyenne_min,
                 'pourcentage_validate' => $campagne->pourcentage_validate !== null ? (int) $campagne->pourcentage_validate : null,

@@ -113,7 +113,10 @@ const critereSchema = (types: Record<string, SourceCritere['type']>) =>
         });
 
 /** `ScoringCampagneController::store` : chaque valeur entre 0 et 100, pondérations (volets fixes et critères ajoutés) totalisant 100 %. */
-export const scoringSchema = (fields: Record<string, Record<string, string>>, sources: SourceCritere[]) =>
+/** Bornes de la date de validation automatique : après l'ouverture, au plus tard à l'échéance des demandes (`aaaa-mm-jj`). */
+export type BornesValidation = { debut: string | null; echeance: string | null };
+
+export const scoringSchema = (fields: Record<string, Record<string, string>>, sources: SourceCritere[], bornes: BornesValidation = { debut: null, echeance: null }) =>
     z
         .object({
             weights: z.object(Object.fromEntries(Object.keys(fields).map((g) => [g, nombreSaisi('la pondération', { max: 100, entier: false })]))),
@@ -129,6 +132,20 @@ export const scoringSchema = (fields: Record<string, Record<string, string>>, so
             minimum_score: nombreSaisi('le score minimum', { max: 100, entier: false }),
             pmr_first: z.boolean(),
             active: z.boolean(),
+            mode_validation_auto: z.enum(['reception', 'date']),
+            date_validation_auto: z.string(),
+        })
+        .superRefine((v, ctx) => {
+            if (v.mode_validation_auto !== 'date') return;
+            const jour = v.date_validation_auto;
+            const message = !jour
+                ? 'Renseignez la date de la validation automatique.'
+                : bornes.debut && jour <= bornes.debut
+                  ? 'La date doit être postérieure à l’ouverture de la campagne.'
+                  : bornes.echeance && jour > bornes.echeance
+                    ? 'La date doit être au plus tard l’échéance des demandes.'
+                    : null;
+            if (message) ctx.addIssue({ code: 'custom', path: ['date_validation_auto'], message });
         })
         .superRefine((v, ctx) => {
             // Tranches de distance : chaque seuil doit dépasser le précédent.
@@ -172,6 +189,9 @@ export type ScoringValeurs = {
     minimum_score: string;
     pmr_first: boolean;
     active: boolean;
+    /** Décision du barème : dès la réception de chaque dossier, ou en lot à `date_validation_auto`. */
+    mode_validation_auto: 'reception' | 'date';
+    date_validation_auto: string;
 };
 
 export const arrondi = (n: number) => Math.round(n * 100) / 100;

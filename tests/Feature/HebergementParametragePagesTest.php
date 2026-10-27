@@ -79,6 +79,7 @@ class HebergementParametragePagesTest extends TestCase
             }
             $t->string('created_by')->nullable(); $t->string('updated_by')->nullable(); $t->timestamps(); $t->softDeletes();
         });
+        (require database_path('migrations/2026_10_27_000002_add_validation_auto_to_campagne.php'))->up();
         Schema::create('residence_campagne', function (Blueprint $t) { $t->string('id_residence_campagne')->primary(); $t->string('campagne_id'); $t->string('cite_id'); $t->timestamps(); });
         Schema::create('document', function (Blueprint $t) {
             $t->string('id_document')->primary(); $t->string('name'); $t->string('slug'); $t->text('description')->nullable(); $t->integer('delai_validite_mois')->nullable();
@@ -234,6 +235,39 @@ class HebergementParametragePagesTest extends TestCase
         $this->assertSame(route(self::BASE.'scoring-campagne.store'), $page['props']['urls']['store']);
         $this->assertArrayHasKey('academique', $page['props']['fields']);
         $this->assertContains('age', array_column($page['props']['sources'], 'key'));
+    }
+
+    /** Barème valide minimal, avec le moment de la validation automatique demandé. */
+    private function bareme(string $mode, ?string $date = null): array
+    {
+        $points = collect(\App\Http\Services\CampaignScoringService::FIELDS)->map(fn ($champs) => array_fill_keys(array_keys($champs), 50))->all();
+        return ['campagne_id' => 'camp', 'active' => 1, 'pmr_first' => 0, 'minimum_score' => 50,
+            'weights' => ['social' => 25, 'academique' => 25, 'geographique' => 25, 'specifique' => 25], 'points' => $points,
+            'mode_validation_auto' => $mode, 'date_validation_auto' => $date];
+    }
+
+    public function test_scoring_fixe_la_date_de_validation_automatique_de_la_campagne(): void
+    {
+        $this->admin();
+        DB::table('campagne')->update(['periode_debut' => '2026-11-01', 'periode_fin' => '2026-11-30', 'date_echeance_demande' => '2026-12-15']);
+        $page = $this->page(route(self::BASE.'scoring-campagne.index'));
+        $this->assertSame('reception', $page['props']['validation']['mode']);
+
+        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('date', '2026-12-01'))->assertSessionHasNoErrors();
+        $this->assertSame('2026-12-01', substr((string) DB::table('campagne')->value('date_validation_auto'), 0, 10));
+
+        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('reception'))->assertSessionHasNoErrors();
+        $this->assertNull(DB::table('campagne')->value('date_validation_auto'));
+    }
+
+    public function test_scoring_refuse_une_date_de_validation_hors_campagne(): void
+    {
+        $this->admin();
+        DB::table('campagne')->update(['periode_debut' => '2026-11-01', 'periode_fin' => '2026-11-30', 'date_echeance_demande' => '2026-12-15']);
+        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('date', '2026-10-15'))->assertSessionHasErrors('date_validation_auto');
+        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('date', '2026-12-20'))->assertSessionHasErrors('date_validation_auto');
+        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('date'))->assertSessionHasErrors('date_validation_auto');
+        $this->assertSame(0, DB::table('campaign_scorings')->count());
     }
 
     public function test_pages_de_campagne_lisent_les_donnees_reelles(): void

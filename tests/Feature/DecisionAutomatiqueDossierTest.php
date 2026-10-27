@@ -17,6 +17,7 @@ class DecisionAutomatiqueDossierTest extends \Tests\Support\DossierTestCase
         (require database_path('migrations/2026_09_23_000003_create_campaign_scorings.php'))->up();
         (require database_path('migrations/2026_10_26_000001_add_distance_thresholds_to_campaign_scorings.php'))->up();
         (require database_path('migrations/2026_10_27_000001_add_criteria_to_campaign_scorings.php'))->up();
+        (require database_path('migrations/2026_10_27_000002_add_validation_auto_to_campagne.php'))->up();
         Schema::table('demande', function (Blueprint $t) { $t->decimal('moyenne', 5, 2)->nullable(); $t->boolean('boursier')->nullable(); });
         Schema::table('etudiants', function (Blueprint $t) { $t->decimal('distance', 8, 2)->nullable(); $t->boolean('boursier')->nullable(); });
         DB::table('etudiants')->update(['distance' => 300, 'boursier' => true]);
@@ -135,5 +136,43 @@ class DecisionAutomatiqueDossierTest extends \Tests\Support\DossierTestCase
         $this->assertSame('eligible', $premier->fresh()->etat_dossier);
         $this->assertSame('eligible', $second->fresh()->etat_dossier);
         $this->assertSame([], app(DecisionAutomatiqueDossier::class)->refusAutomatiquesEnCours());
+    }
+
+    public function test_validation_differee_laisse_le_dossier_soumis_jusqu_a_la_date(): void
+    {
+        DB::table('campagne')->update(['date_validation_auto' => today()->addDays(3)->toDateString()]);
+        $dossier = $this->depot(15);
+        $this->assertSame('soumis', $dossier->etat_dossier);
+        $this->assertSame(0, app(DecisionAutomatiqueDossier::class)->traiterValidationsDifferees());
+        $this->assertSame('soumis', $dossier->fresh()->etat_dossier);
+    }
+
+    public function test_validation_differee_decide_les_dossiers_en_lot_a_la_date(): void
+    {
+        DB::table('campagne')->update(['date_validation_auto' => today()->addDays(3)->toDateString()]);
+        $eligible = $this->depot(15, 'student');
+        $refuse = $this->depot(5, 'other');
+        $this->travel(3)->days();
+        $this->assertSame(2, app(DecisionAutomatiqueDossier::class)->traiterValidationsDifferees());
+        $this->assertSame('eligible', $eligible->fresh()->etat_dossier);
+        $this->assertSame('refuse', $refuse->fresh()->etat_dossier);
+        $this->assertNotNull(DB::table('campagne')->value('validation_auto_effectuee_at'));
+        // Une seule passe par campagne.
+        $this->assertSame(0, app(DecisionAutomatiqueDossier::class)->traiterValidationsDifferees());
+    }
+
+    public function test_validation_differee_ignore_les_dossiers_saisis_par_un_admin(): void
+    {
+        DB::table('campagne')->update(['date_validation_auto' => today()->addDay()->toDateString()]);
+        $dossier = $this->dossier();
+        $this->travel(1)->days();
+        $this->artisan('dossiers:validation-auto')->assertSuccessful();
+        $this->assertSame('soumis', $dossier->fresh()->etat_dossier);
+    }
+
+    public function test_apres_la_date_les_nouveaux_dossiers_sont_decides_des_reception(): void
+    {
+        DB::table('campagne')->update(['date_validation_auto' => today()->toDateString()]);
+        $this->assertSame('eligible', $this->depot(15)->etat_dossier);
     }
 }

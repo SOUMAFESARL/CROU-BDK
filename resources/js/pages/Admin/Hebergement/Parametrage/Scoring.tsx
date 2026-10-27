@@ -1,14 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { router } from '@inertiajs/react';
-import { Accessibility, History, Info, ListPlus, Plus, Power, Star, Trash2 } from 'lucide-react';
+import { Accessibility, CalendarClock, History, Info, ListPlus, Plus, Power, Star, Trash2, Zap } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm, type Control, type FieldErrors, type Path, type Resolver, type UseFormRegister } from 'react-hook-form';
+import { formatDate } from '@/components/campagnes/types';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { ChoixCampagne, ErreurGenerale, Note, PiedAssistant, useAssistant, Vide, type CampagneOption } from '@/components/parametrage-hebergement/shared';
-import { ToggleCard } from '@/components/parc-immobilier/form/inputs';
+import { ChoiceCard, ToggleCard } from '@/components/parc-immobilier/form/inputs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
@@ -42,12 +44,22 @@ type Scoring = {
     active: boolean;
 };
 
+/** Moment de la validation automatique, porté par la campagne, et dates de la campagne (`aaaa-mm-jj`). */
+type Validation = {
+    mode: 'reception' | 'date';
+    date: string;
+    periode_debut: string | null;
+    periode_fin: string | null;
+    date_echeance_demande: string | null;
+};
+
 type Version = { id: number; date: string | null; active: boolean; minimum_score: number; auteur: string | null };
 
 type Props = {
     campagnes: CampagneOption[];
     campagneId: string | null;
     scoring: Scoring | null;
+    validation: Validation | null;
     history: Version[];
     groups: Record<string, string>;
     fields: Record<string, Record<string, string>>;
@@ -73,6 +85,28 @@ const EXEMPLE: Scoring = {
 
 const ETAPES = ['Pondérations', 'Points par critère', 'Seuil et activation', 'Vérification'];
 const CLES_SEUILS = Object.keys(SEUILS_DISTANCE_DEFAUT) as (keyof typeof SEUILS_DISTANCE_DEFAUT)[];
+
+/** Moment de la décision du barème (éligible / refusé) sur les dossiers déposés par les étudiants. */
+const MODES_VALIDATION = [
+    {
+        value: 'reception',
+        title: 'Dès la réception',
+        description: 'Chaque dossier est décidé automatiquement au moment où l’étudiant le soumet.',
+        icon: <Zap {...ICON} />,
+    },
+    {
+        value: 'date',
+        title: 'À une date fixée',
+        description: 'Les dossiers restent « Soumis » et sont tous décidés ce jour-là.',
+        icon: <CalendarClock {...ICON} />,
+    },
+] as const;
+
+/** `aaaa-mm-jj` + n jours, en UTC (pas de décalage de fuseau). */
+const ajouterJours = (iso: string, jours: number) => {
+    const [annee, mois, jour] = iso.split('-').map(Number);
+    return new Date(Date.UTC(annee, mois - 1, jour + jours)).toISOString().slice(0, 10);
+};
 
 const texte = (n: number | null | undefined) => (n === undefined || n === null ? '' : String(n));
 
@@ -115,7 +149,7 @@ function libelleDistance(cle: string, seuils: Record<string, string>) {
 }
 
 /** Barème de classement par campagne (remplace `parametrage-herb/scoring-campagne/index.blade.php`) ; action `scoring-campagne.store` inchangée. */
-export default function Scoring({ campagnes, campagneId, scoring, history, groups, fields, sources, maxCriteria, urls }: Props) {
+export default function Scoring({ campagnes, campagneId, scoring, validation, history, groups, fields, sources, maxCriteria, urls }: Props) {
     return (
         <AdminLayout title="Scoring">
             <PageHeader
@@ -142,6 +176,7 @@ export default function Scoring({ campagnes, campagneId, scoring, history, group
                             key={campagneId ?? 'aucune'}
                             campagneId={campagneId}
                             scoring={scoring ?? EXEMPLE}
+                            validation={validation}
                             groups={groups}
                             fields={fields}
                             sources={sources}
@@ -160,6 +195,7 @@ export default function Scoring({ campagnes, campagneId, scoring, history, group
 function Formulaire({
     campagneId,
     scoring,
+    validation,
     groups,
     fields,
     sources,
@@ -169,6 +205,7 @@ function Formulaire({
 }: {
     campagneId: string | null;
     scoring: Scoring;
+    validation: Validation | null;
     groups: Record<string, string>;
     fields: Record<string, Record<string, string>>;
     sources: SourceCritere[];
@@ -176,7 +213,8 @@ function Formulaire({
     url: string | null;
     urlRetour: string;
 }) {
-    const schema = useMemo(() => scoringSchema(fields, sources), [fields, sources]);
+    const bornes = useMemo(() => ({ debut: validation?.periode_debut ?? null, echeance: validation?.date_echeance_demande ?? null }), [validation]);
+    const schema = useMemo(() => scoringSchema(fields, sources, bornes), [fields, sources, bornes]);
     const source = (cle: string) => sources.find((s) => s.key === cle);
     const valeursInitiales = useMemo<ScoringValeurs>(
         () => ({
@@ -200,8 +238,10 @@ function Formulaire({
             minimum_score: texte(scoring.minimum_score),
             pmr_first: scoring.pmr_first,
             active: scoring.active,
+            mode_validation_auto: validation?.mode ?? 'reception',
+            date_validation_auto: validation?.date ?? '',
         }),
-        [scoring, groups, fields, sources],
+        [scoring, validation, groups, fields, sources],
     );
     const [erreur, setErreur] = useState<string | null>(null);
     const {
@@ -212,6 +252,7 @@ function Formulaire({
         setValue,
         getValues,
         setError,
+        clearErrors,
         handleSubmit,
         formState: { errors, isSubmitting },
     } = useForm<ScoringValeurs>({ resolver: zodResolver(schema) as unknown as Resolver<ScoringValeurs>, mode: 'onTouched', defaultValues: valeursInitiales });
@@ -221,7 +262,7 @@ function Formulaire({
     const champs = [
         ['weights', ...v.criteria.flatMap((_, i) => [`criteria.${i}.label`, `criteria.${i}.source`, `criteria.${i}.weight`])],
         ['points', 'distance_thresholds', 'criteria'],
-        ['minimum_score', 'pmr_first', 'active'],
+        ['minimum_score', 'pmr_first', 'active', 'mode_validation_auto', 'date_validation_auto'],
         [],
     ] as Path<ScoringValeurs>[][];
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<ScoringValeurs>(champs, trigger, true);
@@ -256,6 +297,8 @@ function Formulaire({
                 minimum_score: enNombre(valeurs.minimum_score),
                 pmr_first: valeurs.pmr_first ? 1 : 0,
                 active: valeurs.active ? 1 : 0,
+                mode_validation_auto: valeurs.mode_validation_auto,
+                date_validation_auto: valeurs.mode_validation_auto === 'date' ? valeurs.date_validation_auto : null,
             },
             {
                 onError: (erreurs) => {
@@ -267,7 +310,7 @@ function Formulaire({
                                 ? 0
                                 : cle.startsWith('points') || cle.startsWith('distance_thresholds') || cle.startsWith('criteria.')
                                   ? 1
-                                  : ['minimum_score', 'pmr_first', 'active'].includes(cle)
+                                  : ['minimum_score', 'pmr_first', 'active', 'mode_validation_auto', 'date_validation_auto'].includes(cle)
                                     ? 2
                                     : -1;
                         if (index < 0) {
@@ -292,6 +335,18 @@ function Formulaire({
     const erreurSeuil = (k: string) => (errors.distance_thresholds as Record<string, { message?: string }> | undefined)?.[k]?.message;
     // Libellé affiché d'un critère : les tranches de distance suivent les seuils saisis.
     const libelle = (g: string, k: string, label: string) => (g === 'geographique' ? libelleDistance(k, v.distance_thresholds) : label);
+
+    /** Passage en « à une date fixée » : date proposée = lendemain de la clôture (sans dépasser l'échéance des demandes). */
+    const choisirMode = (mode: ScoringValeurs['mode_validation_auto']) => {
+        setValue('mode_validation_auto', mode, { shouldDirty: true });
+        clearErrors('date_validation_auto');
+        const fin = validation?.periode_fin;
+        if (mode === 'date' && !getValues('date_validation_auto') && fin) {
+            const lendemain = ajouterJours(fin, 1);
+            const echeance = validation?.date_echeance_demande;
+            setValue('date_validation_auto', echeance && lendemain > echeance ? fin : lendemain, { shouldDirty: true });
+        }
+    };
 
     return (
         <form
@@ -477,7 +532,6 @@ function Formulaire({
                                 label="Score minimum pour l’attribution automatique (/100)"
                                 required
                                 error={errors.minimum_score?.message}
-                                hint="À la soumission, un dossier atteignant ce score devient éligible ; en dessous, il est refusé automatiquement (refus que le service Logement peut lever en un clic)."
                             >
                                 <Input id="sc-min" inputMode="decimal" placeholder="Ex. 40" invalid={!!errors.minimum_score} {...register('minimum_score')} />
                             </Field>
@@ -508,10 +562,52 @@ function Formulaire({
                                 />
                             )}
                         />
-                        <p className="text-xs text-muted">
-                            À priorité et score égaux, le dossier le plus ancien passe en premier. Une donnée manquante pour un critère pondéré bloque le classement et doit
-                            être complétée.
-                        </p>
+                        <div className="space-y-3 border-t pt-4">
+                            <h3 className="text-sm font-medium text-gray-900">Validation automatique des dossiers</h3>
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2" role="radiogroup" aria-label="Validation automatique des dossiers">
+                                {MODES_VALIDATION.map((mode) => (
+                                    <ChoiceCard
+                                        key={mode.value}
+                                        name="mode_validation_auto"
+                                        value={mode.value}
+                                        selected={v.mode_validation_auto === mode.value}
+                                        onSelect={() => choisirMode(mode.value)}
+                                        title={mode.title}
+                                        description={mode.description}
+                                        icon={mode.icon}
+                                    />
+                                ))}
+                            </div>
+                            {v.mode_validation_auto === 'date' && (
+                                <div className="max-w-xs">
+                                    <Field
+                                        id="sc-date-validation"
+                                        label="Date de la validation automatique"
+                                        required
+                                        error={errors.date_validation_auto?.message}
+                                    >
+                                        <Controller
+                                            control={control}
+                                            name="date_validation_auto"
+                                            render={({ field }) => (
+                                                <DatePicker
+                                                    id="sc-date-validation"
+                                                    value={field.value}
+                                                    onChange={(valeur) => {
+                                                        field.onChange(valeur);
+                                                        clearErrors('date_validation_auto');
+                                                    }}
+                                                    min={validation?.periode_debut ? ajouterJours(validation.periode_debut, 1) : undefined}
+                                                    max={validation?.date_echeance_demande || undefined}
+                                                    invalid={!!errors.date_validation_auto}
+                                                    aria-describedby={errors.date_validation_auto ? 'sc-date-validation-error' : undefined}
+                                                />
+                                            )}
+                                        />
+                                    </Field>
+                                </div>
+                            )}
+                        </div>
                     </>
                 )}
 
@@ -581,6 +677,9 @@ function Formulaire({
                             <Badge variant="info">Seuil : {nombre(enNombre(v.minimum_score) ?? 0, 2)} / 100</Badge>
                             <Badge variant={v.pmr_first ? 'warning' : 'neutral'}>{v.pmr_first ? 'Priorité PMR' : 'Sans priorité PMR'}</Badge>
                             <Badge variant={v.active ? 'success' : 'neutral'}>{v.active ? 'Barème activé' : 'Barème désactivé'}</Badge>
+                            <Badge variant="info">
+                                {v.mode_validation_auto === 'date' ? `Validation le ${formatDate(v.date_validation_auto)}` : 'Validation dès la réception'}
+                            </Badge>
                         </div>
                         <p className="text-xs text-muted">Chaque enregistrement crée une nouvelle version. Elle s’applique aux prochains lancements ; les attributions existantes sont conservées.</p>
                         {!url && <p className="text-sm text-muted">Vous pouvez consulter ce barème mais pas le modifier.</p>}

@@ -13,3 +13,5 @@ Artisan::command('inspire', function () {
 \Illuminate\Support\Facades\Schedule::command('annonces:diffuser')->everyMinute()->withoutOverlapping();
 
 \Illuminate\Support\Facades\Schedule::command('hebergement:entrees')->everyMinute()->withoutOverlapping();
+
+\Illuminate\Support\Facades\Schedule::command('dossiers:validation-auto')->everyMinute()->withoutOverlapping();

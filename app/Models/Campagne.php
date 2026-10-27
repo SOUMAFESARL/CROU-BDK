@@ -26,6 +26,8 @@ class Campagne extends Model
         'periode_fin' => 'date',
         'date_echeance_demande' => 'date',
         'date_echeance_contrat' => 'date',
+        'date_validation_auto' => 'date',
+        'validation_auto_effectuee_at' => 'datetime',
         'admission' => 'boolean',
         //'old_bachelier' => 'boolean',
         'readmission' => 'boolean',
@@ -58,6 +60,8 @@ class Campagne extends Model
         'periode_fin',
         'date_echeance_demande',
         'date_echeance_contrat',
+        'date_validation_auto',
+        'validation_auto_effectuee_at',
         'statut',
         'admission',
        // 'old_bachelier',
@@ -172,6 +176,12 @@ class Campagne extends Model
             ->where('statut', 'active')
             ->whereDate('periode_debut', '<=', today())
             ->whereDate('periode_fin', '>=', today());
+    }
+
+    /** Validation automatique différée : la date fixée par l'admin n'est pas encore atteinte. */
+    public function validationAutoEnAttente(): bool
+    {
+        return $this->date_validation_auto !== null && today()->lt($this->date_validation_auto);
     }
 
     /**

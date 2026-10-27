@@ -76,6 +76,7 @@ function Contenu({ campagne }: { campagne: CampagneItem }) {
                             ['Échéance des demandes', formatDate(campagne.date_echeance_demande)],
                             ['Échéance des contrats', formatDate(campagne.date_echeance_contrat)],
                             ['Clôture', formatDate(campagne.periode_fin)],
+                            ['Validation automatique', campagne.date_validation_auto ? `Le ${formatDate(campagne.date_validation_auto)}` : 'Dès la réception'],
                         ]}
                     />
                 </Section>

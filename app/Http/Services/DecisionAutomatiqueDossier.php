@@ -1,7 +1,7 @@
 <?php
 namespace App\Http\Services;
 
-use App\Models\{CampaignScoring,DemandeEtudiant,Etudiant};
+use App\Models\{Campagne,CampaignScoring,DemandeEtudiant,Etudiant};
 use Illuminate\Support\Facades\{DB,Log,Schema};
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -12,6 +12,9 @@ use Throwable;
  * Une donnée du barème non renseignée dans le dossier vaut 0 point pour son volet.
  * Sans barème actif, ou si l'éligibilité est bloquée (sanction…), le dossier reste « Soumis » pour une décision manuelle.
  * Un refus automatique peut être levé par l'admin (passage direct en « Éligible »).
+ * Si la campagne fixe une date de validation automatique (`date_validation_auto`), les dossiers soumis avant
+ * cette date restent « Soumis » et sont décidés en lot ce jour-là (`dossiers:validation-auto`) ; ensuite, chaque
+ * nouveau dossier est de nouveau décidé dès sa réception.
  */
 class DecisionAutomatiqueDossier
 {
@@ -27,6 +30,8 @@ class DecisionAutomatiqueDossier
         try {
             $demande = DemandeEtudiant::find($demandeId);
             if (!$demande || $demande->etat_dossier !== 'soumis' || !Schema::hasTable('campaign_scorings')) return null;
+            // Validation différée : le dossier attend la date fixée par la campagne.
+            if (Campagne::find($demande->campagne_id)?->validationAutoEnAttente()) return null;
             $config = CampaignScoring::where('campagne_id', $demande->campagne_id)->latest('id')->first();
             if (!$config || !$config->active) return null;
             $resultat = $this->scoring->calculate(Etudiant::findOrFail($demande->etudiant_id), $demande, $config);
@@ -49,6 +54,58 @@ class DecisionAutomatiqueDossier
             Log::warning('Décision automatique impossible', ['demande_id' => $demandeId, 'erreur' => $e->getMessage()]);
         }
         return null;
+    }
+
+    /**
+     * Validation différée : décide les dossiers en attente des campagnes dont la date de validation est atteinte
+     * (une seule fois par campagne ; un dossier laissé « Soumis » relève ensuite de l'admin).
+     * @return int nombre de dossiers décidés
+     */
+    public function traiterValidationsDifferees(): int
+    {
+        if (!Schema::hasColumn('campagne', 'date_validation_auto')) return 0;
+        return Campagne::whereNotNull('date_validation_auto')->whereDate('date_validation_auto', '<=', today())
+            ->whereNull('validation_auto_effectuee_at')->get()
+            ->sum(fn (Campagne $campagne) => $this->traiterCampagne($campagne));
+    }
+
+    /**
+     * Fixe le moment de la validation automatique de la campagne (null = dès la réception).
+     * Une nouvelle date relance le lot à cette date ; le retour à « dès la réception » décide aussitôt les dossiers en attente.
+     */
+    public function planifier(Campagne $campagne, ?string $date): void
+    {
+        $ancienne = $campagne->date_validation_auto?->toDateString();
+        if ($ancienne === $date) return;
+        $enAttente = $ancienne !== null && $campagne->validation_auto_effectuee_at === null;
+        $campagne->update(['date_validation_auto' => $date, 'validation_auto_effectuee_at' => null]);
+        if ($date === null && $enAttente) $this->traiterCampagne($campagne->fresh());
+    }
+
+    /** Décide les dossiers « Soumis » par l'étudiant de la campagne, puis la marque comme traitée. */
+    public function traiterCampagne(Campagne $campagne): int
+    {
+        $decides = 0;
+        foreach ($this->soumisParEtudiant($campagne->getKey()) as $demandeId) {
+            if ($this->decider($demandeId) !== null) $decides++;
+        }
+        $campagne->newQuery()->whereKey($campagne->getKey())->update(['validation_auto_effectuee_at' => now()]);
+        return $decides;
+    }
+
+    /**
+     * Dossiers « Soumis » de la campagne dont la dernière entrée en « Soumis » vient de l'étudiant
+     * (ni saisie admin, ni retour en réexamen par un agent : ceux-là sont décidés à la main).
+     */
+    private function soumisParEtudiant(string $campagneId): array
+    {
+        $ids = DemandeEtudiant::where('campagne_id', $campagneId)->where('etat_dossier', 'soumis')->pluck('id_demande')->all();
+        if (!$ids) return [];
+        return DB::table('dossier_transitions')->whereIn('demande_id', $ids)->where('nouvel_etat', 'soumis')
+            ->orderBy('created_at')->orderBy('id')->get(['demande_id', 'acteur_type'])
+            ->keyBy('demande_id')
+            ->filter(fn ($transition) => $transition->acteur_type === 'etudiant')
+            ->keys()->map(fn ($id) => (string) $id)->values()->all();
     }
 
     /** Parmi les dossiers donnés, ceux actuellement refusés par le barème (et non par un agent). */

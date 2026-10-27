@@ -48,6 +48,8 @@ export type CampagneItem = {
     periode_fin: string | null;
     date_echeance_demande: string | null;
     date_echeance_contrat: string | null;
+    /** Date de la validation automatique en lot ; null = chaque dossier est décidé dès sa réception. */
+    date_validation_auto: string | null;
     criteres: {
         moyenne_min: number | null;
         pourcentage_validate: number | null;

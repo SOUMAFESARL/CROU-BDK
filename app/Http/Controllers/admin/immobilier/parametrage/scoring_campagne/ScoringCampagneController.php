@@ -1,7 +1,7 @@
 <?php
 namespace App\Http\Controllers\admin\immobilier\parametrage\scoring_campagne;
 use App\Http\Controllers\Controller;
-use App\Http\Services\CampaignScoringService;
+use App\Http\Services\{CampaignScoringService, DecisionAutomatiqueDossier};
 use App\Models\{Campagne, CampaignScoring, User};
 use App\Services\{AdminAccess, ParametrageHebergement};
 use Illuminate\Http\Request;
@@ -30,6 +30,13 @@ class ScoringCampagneController extends Controller
                 'criteria'=>CampaignScoringService::criteria($scoring),
                 'pmr_first'=>(bool)$scoring->pmr_first,'active'=>(bool)$scoring->active,
             ] : null,
+            // Moment de la décision du barème (porté par la campagne) et bornes de la date fixée.
+            'validation'=>$campagne ? [
+                'mode'=>$campagne->date_validation_auto ? 'date' : 'reception',
+                'date'=>$campagne->date_validation_auto?->toDateString() ?? '',
+                'periode_debut'=>$campagne->periode_debut?->toDateString(),'periode_fin'=>$campagne->periode_fin?->toDateString(),
+                'date_echeance_demande'=>$campagne->date_echeance_demande?->toDateString(),
+            ] : null,
             'history'=>$history->map(fn(CampaignScoring $version)=>[
                 'id'=>$version->id,'date'=>$version->created_at?->format('d/m/Y H:i'),'active'=>(bool)$version->active,
                 'minimum_score'=>(float)$version->minimum_score,'auteur'=>$auteurs[$version->created_by] ?? $version->created_by,
@@ -49,7 +56,9 @@ class ScoringCampagneController extends Controller
     public function store(Request $request) {
         abort_unless(auth('admin')->user()?->hasPermission('hebergement.parametrage.configure'),403);
         $rules=['campagne_id'=>'required|string','active'=>'required|boolean','pmr_first'=>'required|boolean',
-            'minimum_score'=>'required|numeric|between:0,100','weights'=>'required|array','points'=>'required|array'];
+            'minimum_score'=>'required|numeric|between:0,100','weights'=>'required|array','points'=>'required|array',
+            // Validation automatique : dès la réception de chaque dossier, ou en lot à une date fixée.
+            'mode_validation_auto'=>'required|in:reception,date','date_validation_auto'=>'nullable|required_if:mode_validation_auto,date|date'];
         foreach(CampaignScoringService::FIELDS as $group=>$fields) {
             $rules['weights.'.$group]='required|numeric|between:0,100';
             $rules['points.'.$group]='required|array';
@@ -66,6 +75,7 @@ class ScoringCampagneController extends Controller
             'criteria.*.bands.*.points'=>'required|numeric|between:0,100',
             'criteria.*.values'=>'nullable|array|max:200','criteria.*.values.*.value'=>'required|string|max:150','criteria.*.values.*.points'=>'required|numeric|between:0,100'];
         $data=$request->validate($rules,['distance_thresholds.*.between'=>'Le seuil de distance doit être compris entre 1 et 10 000 km.',
+            'date_validation_auto.required_if'=>'Renseignez la date de la validation automatique.',
             'distance_thresholds.*.required_with'=>'Indiquez le seuil de distance.',
             'distance_thresholds.*.integer'=>'Le seuil de distance doit être un nombre entier de kilomètres.',
             'criteria.max'=>'Un barème compte au plus '.CampaignScoringService::MAX_CRITERIA.' critères ajoutés.',
@@ -86,12 +96,21 @@ class ScoringCampagneController extends Controller
         }
         $points=[];
         foreach(CampaignScoringService::FIELDS as $group=>$fields)$points[$group]=array_intersect_key($data['points'][$group],$fields);
+        $date=$data['mode_validation_auto']==='date' ? \Carbon\Carbon::parse($data['date_validation_auto'])->toDateString() : null;
+        $campagne=Campagne::findOrFail($data['campagne_id']);
+        if($date!==null) {
+            $debut=$campagne->periode_debut?->toDateString();
+            $echeance=$campagne->date_echeance_demande?->toDateString();
+            if($debut && $date<=$debut)throw ValidationException::withMessages(['date_validation_auto'=>'La validation automatique doit avoir lieu après l’ouverture de la campagne.']);
+            if($echeance && $date>$echeance)throw ValidationException::withMessages(['date_validation_auto'=>'La validation automatique doit avoir lieu au plus tard à l’échéance des demandes.']);
+        }
         DB::transaction(function()use($data,$weights,$points,$seuils,$criteres){
             $campaign=Campagne::whereKey($data['campagne_id'])->lockForUpdate()->firstOrFail();
             CampaignScoring::create(['campagne_id'=>$campaign->getKey(),'weights'=>$weights,'points'=>$points,'distance_thresholds'=>$seuils,'criteria'=>$criteres ?: null,
                 'minimum_score'=>$data['minimum_score'],'pmr_first'=>$data['pmr_first'],'active'=>$data['active'],
                 'created_by'=>auth('admin')->id()]);
         },3);
+        app(DecisionAutomatiqueDossier::class)->planifier($campagne,$date);
         return redirect()->route('admin.hebergement.parametrage-herb.scoring-campagne.index',['campagne_id'=>$data['campagne_id']])
             ->with('success','Barème enregistré. Il sera utilisé au prochain classement automatique si vous l’avez activé.');
     }
