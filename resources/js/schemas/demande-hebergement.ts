@@ -58,7 +58,7 @@ export const demandeHebergementSchema = (documents: DocumentDemande[]) =>
         niveau: requis('Choisissez votre niveau actuel.'),
         filiere: requis('Choisissez votre filière.'),
         moyenne: nombre(1, 20, 'La moyenne doit être comprise entre 1 et 20.', 'La moyenne est obligatoire.'),
-        credit_valider: nombre(0, 100, 'Le pourcentage doit être compris entre 0 et 100.'),
+        credit_valider: nombre(0, 60, 'Le nombre de crédits doit être compris entre 0 et 60.').refine((valeur) => valeur === '' || Number.isInteger(Number(valeur)), 'Saisissez un nombre entier de crédits.'),
         redoublement: z.boolean(),
         // Situation sociale
         boursier: z.boolean(),

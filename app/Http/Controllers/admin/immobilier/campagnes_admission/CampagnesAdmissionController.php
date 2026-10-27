@@ -303,12 +303,13 @@ class CampagnesAdmissionController extends Controller
                 ? $regle('Moyenne', '≥ '.$campagne->moyenne_min.'/20', 'Non renseignée', 'nd')
                 : $regle('Moyenne', '≥ '.$campagne->moyenne_min.'/20', $moyenne.'/20', $moyenne >= $campagne->moyenne_min ? 'ok' : 'nok');
         }
-        // 3. Crédits validés (hors L1)
+        // 3. Crédits validés (hors L1) : nombre de crédits sur 60, comparé au seuil en % de la campagne
         if ($campagne?->pourcentage_validate !== null && ($niveauActuel->abreviation ?? null) != 'L1') {
             $credits = $derniere?->credit_valider;
+            $pourcentage = $credits === null ? null : DemandeEtudiant::pourcentageCredits($credits);
             $regles[] = $credits === null
                 ? $regle('Crédits validés', '≥ '.$campagne->pourcentage_validate.' %', 'Non renseigné', 'nd')
-                : $regle('Crédits validés', '≥ '.$campagne->pourcentage_validate.' %', $credits.' %', $credits >= $campagne->pourcentage_validate ? 'ok' : 'nok');
+                : $regle('Crédits validés', '≥ '.$campagne->pourcentage_validate.' %', $credits.'/'.DemandeEtudiant::CREDITS_PAR_AN.' crédits ('.round($pourcentage).' %)', $pourcentage >= $campagne->pourcentage_validate ? 'ok' : 'nok');
         }
         // 4. Distance domicile ↔ campus
         if ($campagne?->distance_min !== null) {

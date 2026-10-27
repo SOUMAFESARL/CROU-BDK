@@ -177,7 +177,7 @@ function Formulaire({ campagnes, niveaux, liens }: ReadmissionProps) {
                             <Field id="rd-moyenne" label="Moyenne sur 20" error={errors.moyenne?.message} hint="Moyenne de l’année écoulée.">
                                 <Input id="rd-moyenne" inputMode="decimal" placeholder="Ex. : 12,50" invalid={!!errors.moyenne} {...register('moyenne')} />
                             </Field>
-                            <Field id="rd-credits" label="Crédits validés" error={errors.credit_valider?.message}>
+                            <Field id="rd-credits" label="Crédits validés" error={errors.credit_valider?.message} hint="Crédits de l’année écoulée, sur 60.">
                                 <Input id="rd-credits" inputMode="numeric" placeholder="Ex. : 60" invalid={!!errors.credit_valider} {...register('credit_valider')} />
                             </Field>
                         </div>

@@ -160,7 +160,7 @@ class etudiantController extends Controller
             'niveau_etude_precedent_code' => ['nullable', 'string', 'max:100'],
             'niveau_etude_actuel_code' => ['nullable', 'string', 'max:100'],
             'filiere_code' => ['nullable', 'string', 'max:100'],
-            'credit_valider' => ['nullable', 'numeric'],
+            'credit_valider' => ['nullable', 'numeric', 'min:0', 'max:'.\App\Models\DemandeEtudiant::CREDITS_PAR_AN],
             'periode' => ['nullable', 'string', 'max:100'],
         ], [
             'matricule.unique' => 'Un étudiant possède déjà ce matricule.',
@@ -554,7 +554,7 @@ class etudiantController extends Controller
                 'niveau_etude_precedent_code' => ['nullable', 'string', 'max:100'],
                 'niveau_etude_actuel_code' => ['nullable', 'string', 'max:100'],
                 'filiere_code' => ['nullable', 'string', 'max:100'],
-                'credit_valider' => ['nullable', 'numeric'],
+                'credit_valider' => ['nullable', 'numeric', 'min:0', 'max:'.\App\Models\DemandeEtudiant::CREDITS_PAR_AN],
                 'periode' => ['nullable', 'string', 'max:100'],
             ], [
                 'matricule.unique' => 'Un étudiant possède déjà ce matricule.',

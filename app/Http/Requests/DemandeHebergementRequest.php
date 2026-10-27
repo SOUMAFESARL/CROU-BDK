@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Http\Services\NouvelleDemandeService;
+use App\Models\DemandeEtudiant;
 use App\Models\Etudiant;
 
 /**
@@ -29,6 +30,8 @@ class DemandeHebergementRequest extends EtudiantRequest
     public function rules()
     {
         $rules = parent::rules();
+        // Nombre de crédits validés sur l'année précédente (60 crédits par an), pas un pourcentage.
+        $rules['credit_valider'] = ['nullable', 'integer', 'min:0', 'max:'.DemandeEtudiant::CREDITS_PAR_AN];
         if ($this->compteExistant()) {
             // Identifiants du compte existant : pas de contrôle d'unicité, le compte est réutilisé tel quel.
             foreach (['telephone', 'email', 'num_piece', 'matricule'] as $champ) {
@@ -58,6 +61,9 @@ class DemandeHebergementRequest extends EtudiantRequest
             'telephone.unique' => $existant,
             'num_piece.unique' => $existant,
             'matricule.unique' => $existant,
+            'credit_valider.integer' => 'Le nombre de crédits validés doit être un nombre entier.',
+            'credit_valider.min' => 'Le nombre de crédits validés doit être compris entre 0 et '.DemandeEtudiant::CREDITS_PAR_AN.'.',
+            'credit_valider.max' => 'Le nombre de crédits validés doit être compris entre 0 et '.DemandeEtudiant::CREDITS_PAR_AN.'.',
         ]);
     }
 }

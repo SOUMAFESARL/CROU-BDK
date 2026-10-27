@@ -355,12 +355,14 @@ class EtudiantRepository implements EtudiantRepositoryInterface
             );
         }
 
-        $conforme = $score >= $campagne->pourcentage_validate;
+        // credit_valider est un nombre de crédits sur 60 ; le seuil de la campagne reste un pourcentage.
+        $pourcentage = \App\Models\DemandeEtudiant::pourcentageCredits($score);
+        $conforme = $pourcentage >= $campagne->pourcentage_validate;
 
         return $this->regle(
             label    : 'Crédits validés',
             campagne : '≥ ' . $campagne->pourcentage_validate . ' %',
-            etudiant : $score . ' %',
+            etudiant : $score . '/' . \App\Models\DemandeEtudiant::CREDITS_PAR_AN . ' crédits (' . round($pourcentage) . ' %)',
             ok       : $conforme,
         );
     }

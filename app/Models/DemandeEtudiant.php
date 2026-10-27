@@ -128,6 +128,15 @@ class DemandeEtudiant extends Model
     const STATUT_REJETEE = 'rejetee';
     const STATUT_ANNULEE = 'annulee';
 
+    /** Crédits d'une année universitaire : `credit_valider` est un nombre de crédits (0 à 60), pas un pourcentage. */
+    const CREDITS_PAR_AN = 60;
+
+    /** Part des crédits de l'année validés, en %, comparée au seuil `pourcentage_validate` de la campagne. */
+    public static function pourcentageCredits(int|float|string $credits): float
+    {
+        return round((float) $credits / self::CREDITS_PAR_AN * 100, 2);
+    }
+
     /**
      * Récupère tous les statuts possibles
      *

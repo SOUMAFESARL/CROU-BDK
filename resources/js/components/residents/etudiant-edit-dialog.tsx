@@ -62,7 +62,7 @@ const schema = z
         niveau_etude_actuel_code: z.string(),
         filiere_code: z.string(),
         moyenne: nombre(0, 20, 'La moyenne doit être comprise entre 0 et 20.'),
-        credit_valider: nombre(0, 100, 'Le pourcentage doit être un entier entre 0 et 100.', true),
+        credit_valider: nombre(0, 60, 'Le nombre de crédits doit être un entier entre 0 et 60.', true),
         // Situation et tuteur
         boursier: z.boolean(),
         type_bourse: optionnel(100),
@@ -296,7 +296,7 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
                                     {avecDemande && liste('niveau_etude_actuel_code', 'Niveau actuel', options.niveaux)}
                                     {avecDemande && <div className="sm:col-span-2">{liste('filiere_code', 'Filière', options.filieres)}</div>}
                                     {avecDemande && champ('moyenne', 'Moyenne (sur 20)', { inputMode: 'decimal' })}
-                                    {avecDemande && champ('credit_valider', 'Crédits validés (%)', { inputMode: 'numeric' })}
+                                    {avecDemande && champ('credit_valider', 'Crédits validés (sur 60)', { inputMode: 'numeric' })}
                                 </Grille>
                                 {!avecDemande && <Encadre ton="info">Aucune demande : niveau, filière, moyenne et crédits ne sont pas modifiables.</Encadre>}
                             </>

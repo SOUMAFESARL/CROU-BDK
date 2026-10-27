@@ -479,7 +479,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                     id="pourcentage_validate"
                                     label="Crédits validés minimum"
                                     error={errors.pourcentage_validate?.message}
-                                    hint="Ne s’applique pas aux étudiants de L1."
+                                    hint="En % des 60 crédits de l’année (75 % = 45 crédits). Ne s’applique pas aux étudiants de L1."
                                 >
                                     <Input
                                         id="pourcentage_validate"

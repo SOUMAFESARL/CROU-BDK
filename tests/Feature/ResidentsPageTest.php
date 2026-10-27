@@ -142,7 +142,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
             'regions_id' => 1, 'ville_id' => 10, 'distance' => 120, 'annee_academique_actuel' => '2025-2026',
             'boursier' => true, 'type_bourse' => 'Nationale', 'allergies' => true, 'maladies_chroniques' => false, 'autiste' => false,
             'annee_academique_precedent' => '2024-2025', 'niveau_etude_precedent_code' => 'L1', 'niveau_etude_actuel_code' => 'L2',
-            'filiere_code' => '1', 'moyenne' => '13.5', 'credit_valider' => 90];
+            'filiere_code' => '1', 'moyenne' => '13.5', 'credit_valider' => 45];
         $this->put(route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => 'student']), $donnees)
             ->assertSessionHasNoErrors();
 
@@ -156,7 +156,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('L2', $demande->niveau_etude_actuel_code);
         $this->assertSame('1', (string) $demande->filiere_code);
         $this->assertEquals(13.5, (float) $demande->moyenne);
-        $this->assertSame(90, (int) $demande->credit_valider);
+        $this->assertSame(45, (int) $demande->credit_valider);
         $this->assertSame(1, (int) $demande->boursier);
         // L'état du dossier n'est jamais modifié par ce formulaire.
         $this->assertSame($etatAvant, $demande->etat_dossier);

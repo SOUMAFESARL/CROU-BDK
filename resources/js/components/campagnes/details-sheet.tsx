@@ -84,7 +84,7 @@ function Contenu({ campagne }: { campagne: CampagneItem }) {
                     <Lignes
                         lignes={[
                             ['Moyenne minimale', criteres.moyenne_min !== null ? `${criteres.moyenne_min}/20` : '—'],
-                            ['Crédits validés', criteres.pourcentage_validate !== null ? `${criteres.pourcentage_validate} %` : '—'],
+                            ['Crédits validés', criteres.pourcentage_validate !== null ? `${criteres.pourcentage_validate} % (${Math.ceil((criteres.pourcentage_validate * 60) / 100)}/60 crédits)` : '—'],
                             ['Distance domicile – campus', criteres.distance_min !== null ? `${criteres.distance_min} km` : '—'],
                             ...ages.map(([niveau, age]): [string, string] => [`Âge maximum ${NIVEAUX[niveau]}`, `${age} ans`]),
                         ]}

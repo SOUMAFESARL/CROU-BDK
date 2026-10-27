@@ -637,6 +637,7 @@ function PointsCritere({
                     <p className="text-xs text-muted">
                         {source.label}
                         {source.unite && ` (${source.unite})`} : borne basse incluse, borne haute exclue. Laissez une borne vide pour une tranche ouverte.
+                        {source.key === 'credits' && ' Les crédits sont un nombre sur 60 par année (et non un pourcentage).'}
                     </p>
                     {tranches.fields.map((ligne, j) => {
                         const e = erreurs?.bands?.[j];

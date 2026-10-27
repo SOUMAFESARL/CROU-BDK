@@ -122,7 +122,7 @@ class EtudiantEditionService
             'niveau_etude_actuel_code' => ['nullable', 'string', Rule::exists('niveau_etude', 'id_niveau_etude')],
             'filiere_code' => ['nullable', Rule::exists('filiere', 'id_filiere')],
             'moyenne' => ['nullable', 'numeric', 'min:0', 'max:20'],
-            'credit_valider' => ['nullable', 'integer', 'min:0', 'max:100'],
+            'credit_valider' => ['nullable', 'integer', 'min:0', 'max:'.DemandeEtudiant::CREDITS_PAR_AN],
         ], [
             'matricule.unique' => 'Un autre étudiant possède déjà ce matricule.',
             'numero_etudiant.unique' => 'Un autre étudiant possède déjà ce numéro étudiant.',
@@ -134,7 +134,7 @@ class EtudiantEditionService
             'annee_academique_actuel.regex' => 'Format attendu : 2025-2026.',
             'annee_academique_precedent.regex' => 'Format attendu : 2025-2026.',
             'moyenne.max' => 'La moyenne doit être comprise entre 0 et 20.',
-            'credit_valider.max' => 'Le pourcentage de crédits doit être compris entre 0 et 100.',
+            'credit_valider.max' => 'Le nombre de crédits validés doit être compris entre 0 et '.DemandeEtudiant::CREDITS_PAR_AN.'.',
         ]);
 
         // Seuls les champs envoyés sont modifiés (formulaire complet ou ancien formulaire réduit).

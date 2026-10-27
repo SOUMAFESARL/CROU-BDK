@@ -400,8 +400,8 @@ function Formulaire({
                             <Field id="dh-moyenne" label="Moyenne générale ou note du bac" required error={errors.moyenne?.message} hint="Sur 20.">
                                 <Input id="dh-moyenne" inputMode="decimal" placeholder="Ex. : 12,50" invalid={!!errors.moyenne} {...register('moyenne')} />
                             </Field>
-                            <Field id="dh-credits" label="Crédits validés (%)" error={errors.credit_valider?.message}>
-                                <Input id="dh-credits" inputMode="decimal" placeholder="Ex. : 80" invalid={!!errors.credit_valider} {...register('credit_valider')} />
+                            <Field id="dh-credits" label="Crédits validés" error={errors.credit_valider?.message} hint="Nombre de crédits validés l’année précédente, sur 60.">
+                                <Input id="dh-credits" inputMode="numeric" placeholder="Ex. : 48" invalid={!!errors.credit_valider} {...register('credit_valider')} />
                             </Field>
                         </Grille>
                         <CaseACocher control={control} name="redoublement" id="dh-redoublement" libelle="Je redouble ce niveau" aide="Laissez décoché pour une première inscription à ce niveau." />

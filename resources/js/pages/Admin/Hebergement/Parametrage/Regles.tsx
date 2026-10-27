@@ -68,7 +68,7 @@ export default function ReglesCampagne({ campagnes, campagneId, regles, urls }: 
 
                     <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         <StatCard tone="green" label="Moyenne minimale" value={regles.moyenne_min !== null ? `${nombre(regles.moyenne_min, 2)} / 20` : 'Aucune'} />
-                        <StatCard tone="blue" label="Crédits validés minimum" value={regles.pourcentage_validate !== null ? `${nombre(regles.pourcentage_validate)} %` : 'Aucun'} />
+                        <StatCard tone="blue" label="Crédits validés minimum" value={regles.pourcentage_validate !== null ? `${nombre(regles.pourcentage_validate)} % (${nombre(Math.ceil((regles.pourcentage_validate * 60) / 100))}/60 crédits)` : 'Aucun'} />
                         <StatCard tone="amber" label="Distance minimale du domicile" value={regles.distance_min !== null ? `${nombre(regles.distance_min)} km` : 'Aucune'} />
                         <StatCard tone="plum" label="Pièces demandées" value={nombre(regles.documents.length)} />
                     </div>
