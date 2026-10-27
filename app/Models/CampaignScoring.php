@@ -3,5 +3,5 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 class CampaignScoring extends Model {
     protected $guarded=[];
-    protected $casts=['weights'=>'array','points'=>'array','distance_thresholds'=>'array','minimum_score'=>'float','pmr_first'=>'boolean','active'=>'boolean'];
+    protected $casts=['weights'=>'array','points'=>'array','distance_thresholds'=>'array','criteria'=>'array','minimum_score'=>'float','pmr_first'=>'boolean','active'=>'boolean'];
 }

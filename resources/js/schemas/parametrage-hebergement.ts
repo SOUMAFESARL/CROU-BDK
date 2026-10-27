@@ -69,11 +69,55 @@ export const documentSchema = z.object({
 });
 export type DocumentValeurs = z.infer<typeof documentSchema>;
 
-/** `ScoringCampagneController::store` : chaque valeur entre 0 et 100, pondérations totalisant 100 %. */
-export const scoringSchema = (fields: Record<string, Record<string, string>>) =>
+/** Donnée du formulaire de demande proposée pour un critère ajouté (`CampaignScoringService::sources()`). */
+export type SourceCritere = { key: string; label: string; type: 'nombre' | 'liste'; unite: string | null; options: { value: string; label: string }[] };
+
+const points = () => nombreSaisi('le nombre de points', { max: 100, entier: false });
+const borne = (label: string) => nombreSaisi(label, { requis: false, max: 100000, entier: false });
+
+/**
+ * Critère ajouté par l'admin (`CampaignScoringService::normalizeCriteria`) : tranches bornées et sans chevauchement
+ * pour une donnée « nombre » (borne basse incluse, borne haute exclue), points par valeur pour une donnée « liste ».
+ */
+const critereSchema = (types: Record<string, SourceCritere['type']>) =>
+    z
+        .object({
+            key: z.string(),
+            label: z.string().trim().min(1, 'Renseignez le libellé du critère.').max(100, 'Le libellé ne doit pas dépasser 100 caractères.'),
+            source: z.string().min(1, 'Choisissez la donnée du dossier utilisée.'),
+            weight: nombreSaisi('la pondération', { max: 100, entier: false }),
+            other_points: points(),
+            bands: z.array(z.object({ min: borne('la borne basse'), max: borne('la borne haute'), points: points() })),
+            values: z.array(z.object({ value: z.string(), label: z.string(), points: points() })),
+        })
+        .superRefine((c, ctx) => {
+            if (types[c.source] !== 'nombre') return;
+            if (c.bands.length === 0) {
+                ctx.addIssue({ code: 'custom', path: ['bands'], message: 'Ajoutez au moins une tranche.' });
+                return;
+            }
+            const bornes = c.bands.map((b) => ({ min: enNombre(b.min), max: enNombre(b.max) }));
+            if (bornes.some((b) => (b.min !== null && !Number.isFinite(b.min)) || (b.max !== null && !Number.isFinite(b.max)))) return;
+            bornes.forEach((b, i) => {
+                if (b.min === null && b.max === null) ctx.addIssue({ code: 'custom', path: ['bands', i, 'min'], message: 'Indiquez au moins une borne.' });
+                else if (b.min !== null && b.max !== null && b.max <= b.min) ctx.addIssue({ code: 'custom', path: ['bands', i, 'max'], message: 'Doit dépasser la borne basse.' });
+            });
+            bornes.forEach((a, j) =>
+                bornes.slice(j + 1).forEach((b, d) => {
+                    if ((a.min === null && a.max === null) || (b.min === null && b.max === null)) return;
+                    if ((a.max === null || b.min === null || b.min < a.max) && (b.max === null || a.min === null || a.min < b.max)) {
+                        ctx.addIssue({ code: 'custom', path: ['bands', j + 1 + d, 'min'], message: `Chevauche la tranche n° ${j + 1}.` });
+                    }
+                }),
+            );
+        });
+
+/** `ScoringCampagneController::store` : chaque valeur entre 0 et 100, pondérations (volets fixes et critères ajoutés) totalisant 100 %. */
+export const scoringSchema = (fields: Record<string, Record<string, string>>, sources: SourceCritere[]) =>
     z
         .object({
             weights: z.object(Object.fromEntries(Object.keys(fields).map((g) => [g, nombreSaisi('la pondération', { max: 100, entier: false })]))),
+            criteria: z.array(critereSchema(Object.fromEntries(sources.map((s) => [s.key, s.type])))),
             points: z.object(
                 Object.fromEntries(
                     Object.entries(fields).map(([g, champs]) => [g, z.object(Object.fromEntries(Object.keys(champs).map((k) => [k, nombreSaisi('le nombre de points', { max: 100, entier: false })])))]),
@@ -99,7 +143,7 @@ export const scoringSchema = (fields: Record<string, Record<string, string>>) =>
             }
         })
         .superRefine((v, ctx) => {
-            const valeurs = Object.values(v.weights as Record<string, string>).map(enNombre);
+            const valeurs = [...Object.values(v.weights as Record<string, string>), ...v.criteria.map((c) => c.weight)].map(enNombre);
             if (valeurs.some((n) => n === null || !Number.isFinite(n))) return;
             const total = valeurs.reduce<number>((somme, n) => somme + (n ?? 0), 0);
             if (Math.abs(total - 100) > 0.00001) {
@@ -109,8 +153,20 @@ export const scoringSchema = (fields: Record<string, Record<string, string>>) =>
 /** Début (km) de chaque tranche de distance au-delà de « local » (`CampaignScoringService::DISTANCE_THRESHOLDS`). */
 export const SEUILS_DISTANCE_DEFAUT = { proche: 50, loin: 100, tres_loin: 200 } as const;
 
+export type CritereValeurs = {
+    key: string;
+    label: string;
+    source: string;
+    weight: string;
+    other_points: string;
+    bands: { min: string; max: string; points: string }[];
+    /** Une ligne par valeur possible de la donnée ; `label` sert à l'affichage et n'est pas envoyé. */
+    values: { value: string; label: string; points: string }[];
+};
+
 export type ScoringValeurs = {
     weights: Record<string, string>;
+    criteria: CritereValeurs[];
     points: Record<string, Record<string, string>>;
     distance_thresholds: Record<string, string>;
     minimum_score: string;

@@ -18,6 +18,7 @@ class CandidateRankingTest extends TestCase
         DB::purge('sqlite');
         (require database_path('migrations/2026_09_23_000003_create_campaign_scorings.php'))->up();
         (require database_path('migrations/2026_10_26_000001_add_distance_thresholds_to_campaign_scorings.php'))->up();
+        (require database_path('migrations/2026_10_27_000001_add_criteria_to_campaign_scorings.php'))->up();
         Schema::create('campagne',function(Blueprint $t){$t->string('id_campagne')->primary();$t->softDeletes();});
         DB::table('campagne')->insert(['id_campagne'=>'campaign']);
         $this->campaign=Campagne::find('campaign');
@@ -178,10 +179,60 @@ class CandidateRankingTest extends TestCase
         app(\App\Http\Controllers\admin\immobilier\parametrage\scoring_campagne\ScoringCampagneController::class)
             ->store(\Illuminate\Http\Request::create('/','POST',$data));
     }
-    public function test_missing_academic_data_cannot_be_silently_scored(): void {
-        \App\Models\CampaignScoring::create($this->scoringData());
-        $s=$this->student('a',100);
-        $this->expectException(\RuntimeException::class);
-        app(CandidateRankingService::class)->rank(collect([$s]),$this->campaign);
+    public function test_missing_academic_data_scores_zero_points(): void {
+        $config=new \App\Models\CampaignScoring($this->scoringData());
+        $s=$this->student('a',100); $request=$s->demandes->first();
+        $service=app(\App\Http\Services\CampaignScoringService::class);
+        $resultat=$service->calculate($s,$request,$config);
+        $this->assertSame(0.0,$resultat['score']);
+        $this->assertSame(\App\Http\Services\CampaignScoringService::NON_RENSEIGNE,$resultat['categories']['academique']);
+        $this->assertStringContainsString('non renseigné',$service->detail($s,$request,$config)['volets'][1]['situation']);
+    }
+    private function ageCriterion(float $weight=100): array {
+        return ['label'=>'Tranche d’âge','source'=>'age','weight'=>$weight,'other_points'=>10,
+            'bands'=>[['min'=>null,'max'=>20,'points'=>100],['min'=>20,'max'=>25,'points'=>60]]];
+    }
+    public function test_added_age_criterion_scores_by_band_at_request_date(): void {
+        $data=$this->scoringData(); $data['weights']['academique']=0;
+        $data['criteria']=\App\Http\Services\CampaignScoringService::normalizeCriteria([$this->ageCriterion()]);
+        $config=new \App\Models\CampaignScoring($data);
+        $s=$this->student('a',100); $request=$s->demandes->first(); $request->date_demande='2026-09-01';
+        $service=app(\App\Http\Services\CampaignScoringService::class);
+        foreach (['2007-01-01'=>100.0,'2006-09-01'=>60.0,'2006-09-02'=>100.0,'2001-09-01'=>10.0] as $naissance=>$expected) {
+            $s->date_naissance=$naissance;
+            $this->assertSame($expected,$service->calculate($s,$request,$config)['score'],$naissance);
+        }
+        $volet=$service->detail($s,$request,$config)['volets'][4];
+        $this->assertSame('Tranche d’âge',$volet['volet']);
+        $this->assertStringContainsString('hors tranches',$volet['situation']);
+    }
+    public function test_added_list_criterion_scores_by_value_and_missing_data_scores_zero(): void {
+        $data=$this->scoringData(); $data['weights']=['social'=>0,'academique'=>50,'geographique'=>0,'specifique'=>0];
+        $data['criteria']=\App\Http\Services\CampaignScoringService::normalizeCriteria([['label'=>'Genre','source'=>'genre','weight'=>50,'other_points'=>0,
+            'values'=>[['value'=>'2','points'=>100],['value'=>'1','points'=>20]]]]);
+        $config=new \App\Models\CampaignScoring($data);
+        $s=$this->student('a',100); $request=$s->demandes->first(); $request->moyenne=18;
+        $service=app(\App\Http\Services\CampaignScoringService::class);
+        $s->genre_id=2; $this->assertSame(100.0,$service->calculate($s,$request,$config)['score']);
+        $s->genre_id=1; $this->assertSame(60.0,$service->calculate($s,$request,$config)['score']);
+        $s->genre_id=3; $this->assertSame(50.0,$service->calculate($s,$request,$config)['score']);
+        $s->genre_id=null; $this->assertSame(50.0,$service->calculate($s,$request,$config)['score']);
+        $this->assertStringContainsString('non renseigné',$service->detail($s,$request,$config)['volets'][4]['situation']);
+    }
+    public function test_added_criteria_count_in_the_weight_total_and_bands_cannot_overlap(): void {
+        auth('admin')->setUser(new \App\Models\User(['id_user'=>'admin','role_id'=>1]));
+        $controller=app(\App\Http\Controllers\admin\immobilier\parametrage\scoring_campagne\ScoringCampagneController::class);
+        $data=$this->scoringData(); $data['criteria']=[$this->ageCriterion(20)];
+        try { $controller->store(\Illuminate\Http\Request::create('/','POST',$data)); $this->fail('Total de 120 % accepté.'); }
+        catch (\Illuminate\Validation\ValidationException $e) { $this->assertArrayHasKey('weights',$e->errors()); }
+        $data['weights']['academique']=80;
+        $data['criteria'][0]['bands'][1]['min']=19;
+        try { $controller->store(\Illuminate\Http\Request::create('/','POST',$data)); $this->fail('Tranches qui se chevauchent acceptées.'); }
+        catch (\Illuminate\Validation\ValidationException $e) { $this->assertArrayHasKey('criteria.0.bands.1.min',$e->errors()); }
+        $data['criteria'][0]['bands'][1]['min']=20;
+        $controller->store(\Illuminate\Http\Request::create('/','POST',$data));
+        $critere=\App\Models\CampaignScoring::latest('id')->first()->criteria[0];
+        $this->assertMatchesRegularExpression('/^c_[a-z0-9]{10}$/',$critere['key']);
+        $this->assertSame(['age',20.0],[$critere['source'],(float)$critere['weight']]);
     }
 }

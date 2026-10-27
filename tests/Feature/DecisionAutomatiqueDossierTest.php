@@ -16,6 +16,7 @@ class DecisionAutomatiqueDossierTest extends \Tests\Support\DossierTestCase
         Mail::fake();
         (require database_path('migrations/2026_09_23_000003_create_campaign_scorings.php'))->up();
         (require database_path('migrations/2026_10_26_000001_add_distance_thresholds_to_campaign_scorings.php'))->up();
+        (require database_path('migrations/2026_10_27_000001_add_criteria_to_campaign_scorings.php'))->up();
         Schema::table('demande', function (Blueprint $t) { $t->decimal('moyenne', 5, 2)->nullable(); $t->boolean('boursier')->nullable(); });
         Schema::table('etudiants', function (Blueprint $t) { $t->decimal('distance', 8, 2)->nullable(); $t->boolean('boursier')->nullable(); });
         DB::table('etudiants')->update(['distance' => 300, 'boursier' => true]);
@@ -75,11 +76,15 @@ class DecisionAutomatiqueDossierTest extends \Tests\Support\DossierTestCase
         $this->assertSame('soumis', $this->depot(5)->etat_dossier);
     }
 
-    public function test_donnee_manquante_laisse_le_dossier_soumis(): void
+    public function test_donnee_manquante_compte_zero_point(): void
     {
         DB::table('campaign_scorings')->update(['weights' => json_encode(['social' => 0, 'academique' => 50, 'geographique' => 50, 'specifique' => 0])]);
         DB::table('etudiants')->update(['distance' => null]);
-        $this->assertSame('soumis', $this->depot(15)->etat_dossier);
+        $dossier = $this->depot(15);
+        // Moyenne 15 → 80 pts × 50 % = 40 ; distance non renseignée → 0 pt : 40 < 50.
+        $this->assertSame('refuse', $dossier->etat_dossier);
+        $this->assertEquals(40, $dossier->transitions->last()->details['score']);
+        $this->assertEquals(0, $dossier->transitions->last()->details['subscores']['geographique']);
     }
 
     public function test_sanction_bloquante_laisse_le_dossier_soumis(): void

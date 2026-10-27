@@ -27,6 +27,7 @@ class ScoringCampagneController extends Controller
             'scoring'=>$scoring ? [
                 'weights'=>$scoring->weights,'points'=>$scoring->points,'minimum_score'=>(float)$scoring->minimum_score,
                 'distance_thresholds'=>CampaignScoringService::distanceThresholds($scoring),
+                'criteria'=>CampaignScoringService::criteria($scoring),
                 'pmr_first'=>(bool)$scoring->pmr_first,'active'=>(bool)$scoring->active,
             ] : null,
             'history'=>$history->map(fn(CampaignScoring $version)=>[
@@ -35,6 +36,8 @@ class ScoringCampagneController extends Controller
             ])->values(),
             'groups'=>CampaignScoringService::GROUPS,'fields'=>CampaignScoringService::FIELDS,
             'distanceDefaults'=>CampaignScoringService::DISTANCE_THRESHOLDS,
+            // Données du formulaire de demande sur lesquelles l'admin peut ajouter un critère.
+            'sources'=>CampaignScoringService::sources(),'maxCriteria'=>CampaignScoringService::MAX_CRITERIA,
             'urls'=>[
                 'index'=>route('admin.hebergement.parametrage-herb.scoring-campagne.index'),
                 'parametrage'=>route('admin.hebergement.parametrage-herb.index'),
@@ -55,11 +58,23 @@ class ScoringCampagneController extends Controller
         // Seuils des tranches de distance (km) : facultatifs, les seuils par défaut s'appliquent sinon.
         $rules['distance_thresholds']='nullable|array';
         foreach(array_keys(CampaignScoringService::DISTANCE_THRESHOLDS) as $key) $rules['distance_thresholds.'.$key]='required_with:distance_thresholds|integer|between:1,10000';
+        // Critères ajoutés par l'admin : tranches (donnée « nombre ») ou valeurs (donnée « liste ») notées sur 100.
+        $rules+=['criteria'=>'nullable|array|max:'.CampaignScoringService::MAX_CRITERIA,'criteria.*.key'=>'nullable|string|max:40',
+            'criteria.*.label'=>'required|string|max:100','criteria.*.source'=>'required|in:'.implode(',',array_keys(CampaignScoringService::SOURCES)),
+            'criteria.*.weight'=>'required|numeric|between:0,100','criteria.*.other_points'=>'required|numeric|between:0,100',
+            'criteria.*.bands'=>'nullable|array|max:20','criteria.*.bands.*.min'=>'nullable|numeric|min:0','criteria.*.bands.*.max'=>'nullable|numeric|min:0',
+            'criteria.*.bands.*.points'=>'required|numeric|between:0,100',
+            'criteria.*.values'=>'nullable|array|max:200','criteria.*.values.*.value'=>'required|string|max:150','criteria.*.values.*.points'=>'required|numeric|between:0,100'];
         $data=$request->validate($rules,['distance_thresholds.*.between'=>'Le seuil de distance doit être compris entre 1 et 10 000 km.',
             'distance_thresholds.*.required_with'=>'Indiquez le seuil de distance.',
-            'distance_thresholds.*.integer'=>'Le seuil de distance doit être un nombre entier de kilomètres.']);
+            'distance_thresholds.*.integer'=>'Le seuil de distance doit être un nombre entier de kilomètres.',
+            'criteria.max'=>'Un barème compte au plus '.CampaignScoringService::MAX_CRITERIA.' critères ajoutés.',
+            'criteria.*.label.required'=>'Renseignez le libellé du critère.','criteria.*.source.required'=>'Choisissez la donnée du dossier utilisée par le critère.','criteria.*.source.in'=>'Choisissez la donnée du dossier utilisée par le critère.'],
+            ['criteria.*.weight'=>'pondération','criteria.*.other_points'=>'nombre de points','criteria.*.bands.*.points'=>'nombre de points',
+             'criteria.*.values.*.points'=>'nombre de points','criteria.*.bands.*.min'=>'borne basse','criteria.*.bands.*.max'=>'borne haute']);
         $weights=array_intersect_key($data['weights'],CampaignScoringService::GROUPS);
-        if(abs(array_sum($weights)-100)>0.00001)throw ValidationException::withMessages(['weights'=>'Le total des pondérations doit être égal à 100 %.']);
+        $criteres=CampaignScoringService::normalizeCriteria($data['criteria'] ?? []);
+        if(abs(array_sum($weights)+array_sum(array_column($criteres,'weight'))-100)>0.00001)throw ValidationException::withMessages(['weights'=>'Le total des pondérations doit être égal à 100 %.']);
         $seuils=null;
         if(!empty($data['distance_thresholds'])) {
             $seuils=array_map('intval',array_intersect_key($data['distance_thresholds'],CampaignScoringService::DISTANCE_THRESHOLDS));
@@ -71,9 +86,9 @@ class ScoringCampagneController extends Controller
         }
         $points=[];
         foreach(CampaignScoringService::FIELDS as $group=>$fields)$points[$group]=array_intersect_key($data['points'][$group],$fields);
-        DB::transaction(function()use($data,$weights,$points,$seuils){
+        DB::transaction(function()use($data,$weights,$points,$seuils,$criteres){
             $campaign=Campagne::whereKey($data['campagne_id'])->lockForUpdate()->firstOrFail();
-            CampaignScoring::create(['campagne_id'=>$campaign->getKey(),'weights'=>$weights,'points'=>$points,'distance_thresholds'=>$seuils,
+            CampaignScoring::create(['campagne_id'=>$campaign->getKey(),'weights'=>$weights,'points'=>$points,'distance_thresholds'=>$seuils,'criteria'=>$criteres ?: null,
                 'minimum_score'=>$data['minimum_score'],'pmr_first'=>$data['pmr_first'],'active'=>$data['active'],
                 'created_by'=>auth('admin')->id()]);
         },3);

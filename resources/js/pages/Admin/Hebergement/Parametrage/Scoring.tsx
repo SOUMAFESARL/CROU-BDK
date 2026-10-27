@@ -1,25 +1,39 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { router } from '@inertiajs/react';
-import { Accessibility, History, Info, Power, Star } from 'lucide-react';
+import { Accessibility, History, Info, ListPlus, Plus, Power, Star, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { Controller, useForm, type Path, type Resolver } from 'react-hook-form';
+import { Controller, useFieldArray, useForm, type Control, type FieldErrors, type Path, type Resolver, type UseFormRegister } from 'react-hook-form';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { ChoixCampagne, ErreurGenerale, Note, PiedAssistant, useAssistant, Vide, type CampagneOption } from '@/components/parametrage-hebergement/shared';
 import { ToggleCard } from '@/components/parc-immobilier/form/inputs';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
 import { Progress } from '@/components/ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Stepper } from '@/components/ui/stepper';
 import { envoyer } from '@/lib/inertia-form';
 import { nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
-import { arrondi, enNombre, scoringSchema, SEUILS_DISTANCE_DEFAUT, type ScoringValeurs } from '@/schemas/parametrage-hebergement';
+import { arrondi, enNombre, scoringSchema, SEUILS_DISTANCE_DEFAUT, type CritereValeurs, type ScoringValeurs, type SourceCritere } from '@/schemas/parametrage-hebergement';
+
+/** Critère ajouté par l'admin, tel qu'enregistré (`CampaignScoringService::normalizeCriteria`). */
+type Critere = {
+    key: string;
+    label: string;
+    source: string;
+    weight: number;
+    other_points: number;
+    bands: { min: number | null; max: number | null; points: number }[];
+    values: { value: string; points: number }[];
+};
 
 type Scoring = {
     weights: Record<string, number>;
+    criteria?: Critere[];
     points: Record<string, Record<string, number>>;
     /** Début (km) des tranches « proche », « loin » et « très loin ». */
     distance_thresholds: Record<string, number>;
@@ -37,6 +51,8 @@ type Props = {
     history: Version[];
     groups: Record<string, string>;
     fields: Record<string, Record<string, string>>;
+    sources: SourceCritere[];
+    maxCriteria: number;
     urls: { index: string; parametrage: string; store: string | null };
 };
 
@@ -56,10 +72,30 @@ const EXEMPLE: Scoring = {
 };
 
 const ETAPES = ['Pondérations', 'Points par critère', 'Seuil et activation', 'Vérification'];
-const CHAMPS = [['weights'], ['points', 'distance_thresholds'], ['minimum_score', 'pmr_first', 'active'], []] as unknown as Path<ScoringValeurs>[][];
 const CLES_SEUILS = Object.keys(SEUILS_DISTANCE_DEFAUT) as (keyof typeof SEUILS_DISTANCE_DEFAUT)[];
 
-const texte = (n: number | undefined) => (n === undefined || n === null ? '' : String(n));
+const texte = (n: number | null | undefined) => (n === undefined || n === null ? '' : String(n));
+
+/** Libellé d'une tranche d'un critère ajouté (borne basse incluse, borne haute exclue). */
+function libelleTranche(min: string, max: string, unite: string | null) {
+    const u = !unite || unite === '/20' ? '' : ` ${unite}`;
+    const a = enNombre(min);
+    const b = enNombre(max);
+    if (a === null && b === null) return 'Tranche à définir';
+    if (a === null) return `Moins de ${nombre(b ?? 0, 2)}${u}`;
+    if (b === null) return `${nombre(a, 2)}${u} et plus`;
+    return `De ${nombre(a, 2)} à moins de ${nombre(b, 2)}${u}`;
+}
+
+/** Une ligne de points par valeur possible de la donnée, en gardant les valeurs déjà notées absentes du référentiel. */
+function lignesValeurs(source: SourceCritere | undefined, enregistrees: { value: string; points: number }[] = []) {
+    const points = new Map(enregistrees.map((l) => [l.value, String(l.points)]));
+    const lignes = (source?.options ?? []).map((o) => ({ value: o.value, label: o.label, points: points.get(o.value) ?? '0' }));
+    enregistrees.filter((l) => !lignes.some((o) => o.value === l.value)).forEach((l) => lignes.push({ value: l.value, label: l.value, points: String(l.points) }));
+    return lignes;
+}
+
+const nouveauCritere = (): CritereValeurs => ({ key: '', label: '', source: '', weight: '0', other_points: '0', bands: [], values: [] });
 
 /** Libellé d'une tranche de distance d'après les seuils saisis (« 50 ≤ distance < 100 km »). */
 function libelleDistance(cle: string, seuils: Record<string, string>) {
@@ -79,7 +115,7 @@ function libelleDistance(cle: string, seuils: Record<string, string>) {
 }
 
 /** Barème de classement par campagne (remplace `parametrage-herb/scoring-campagne/index.blade.php`) ; action `scoring-campagne.store` inchangée. */
-export default function Scoring({ campagnes, campagneId, scoring, history, groups, fields, urls }: Props) {
+export default function Scoring({ campagnes, campagneId, scoring, history, groups, fields, sources, maxCriteria, urls }: Props) {
     return (
         <AdminLayout title="Scoring">
             <PageHeader
@@ -108,6 +144,8 @@ export default function Scoring({ campagnes, campagneId, scoring, history, group
                             scoring={scoring ?? EXEMPLE}
                             groups={groups}
                             fields={fields}
+                            sources={sources}
+                            maxCriteria={maxCriteria}
                             url={urls.store}
                             urlRetour={urls.parametrage}
                         />
@@ -124,6 +162,8 @@ function Formulaire({
     scoring,
     groups,
     fields,
+    sources,
+    maxCriteria,
     url,
     urlRetour,
 }: {
@@ -131,10 +171,13 @@ function Formulaire({
     scoring: Scoring;
     groups: Record<string, string>;
     fields: Record<string, Record<string, string>>;
+    sources: SourceCritere[];
+    maxCriteria: number;
     url: string | null;
     urlRetour: string;
 }) {
-    const schema = useMemo(() => scoringSchema(fields), [fields]);
+    const schema = useMemo(() => scoringSchema(fields, sources), [fields, sources]);
+    const source = (cle: string) => sources.find((s) => s.key === cle);
     const valeursInitiales = useMemo<ScoringValeurs>(
         () => ({
             weights: Object.fromEntries(Object.keys(groups).map((g) => [g, texte(scoring.weights[g] ?? EXEMPLE.weights[g])])),
@@ -142,11 +185,23 @@ function Formulaire({
                 Object.entries(fields).map(([g, champs]) => [g, Object.fromEntries(Object.keys(champs).map((k) => [k, texte(scoring.points[g]?.[k] ?? EXEMPLE.points[g]?.[k] ?? 0)]))]),
             ),
             distance_thresholds: Object.fromEntries(CLES_SEUILS.map((k) => [k, texte(scoring.distance_thresholds?.[k] ?? SEUILS_DISTANCE_DEFAUT[k])])),
+            criteria: (scoring.criteria ?? []).map((c) => {
+                const s = sources.find((o) => o.key === c.source);
+                return {
+                    key: c.key,
+                    label: c.label,
+                    source: c.source,
+                    weight: texte(c.weight),
+                    other_points: texte(c.other_points),
+                    bands: c.bands.map((b) => ({ min: texte(b.min), max: texte(b.max), points: texte(b.points) })),
+                    values: s?.type === 'liste' ? lignesValeurs(s, c.values) : [],
+                };
+            }),
             minimum_score: texte(scoring.minimum_score),
             pmr_first: scoring.pmr_first,
             active: scoring.active,
         }),
-        [scoring, groups, fields],
+        [scoring, groups, fields, sources],
     );
     const [erreur, setErreur] = useState<string | null>(null);
     const {
@@ -154,13 +209,32 @@ function Formulaire({
         control,
         trigger,
         watch,
+        setValue,
+        getValues,
         setError,
         handleSubmit,
         formState: { errors, isSubmitting },
     } = useForm<ScoringValeurs>({ resolver: zodResolver(schema) as unknown as Resolver<ScoringValeurs>, mode: 'onTouched', defaultValues: valeursInitiales });
-    const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<ScoringValeurs>(CHAMPS, trigger, true);
+    const criteres = useFieldArray({ control, name: 'criteria', keyName: 'cle' });
     const v = watch();
-    const total = arrondi(Object.values(v.weights).reduce((somme, n) => somme + (enNombre(n) ?? 0), 0));
+    // Étape 1 : libellé, donnée et pondération des critères ajoutés ; leurs tranches et valeurs se vérifient à l'étape 2.
+    const champs = [
+        ['weights', ...v.criteria.flatMap((_, i) => [`criteria.${i}.label`, `criteria.${i}.source`, `criteria.${i}.weight`])],
+        ['points', 'distance_thresholds', 'criteria'],
+        ['minimum_score', 'pmr_first', 'active'],
+        [],
+    ] as Path<ScoringValeurs>[][];
+    const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<ScoringValeurs>(champs, trigger, true);
+    const total = arrondi([...Object.values(v.weights), ...v.criteria.map((c) => c.weight)].reduce((somme, n) => somme + (enNombre(n) ?? 0), 0));
+
+    /** Changement de donnée : tranches à saisir (« nombre ») ou une ligne par valeur possible (« liste »). */
+    const choisirSource = (index: number, cle: string) => {
+        const choisie = source(cle);
+        setValue(`criteria.${index}.source`, cle, { shouldValidate: true });
+        if (!getValues(`criteria.${index}.label`).trim() && choisie) setValue(`criteria.${index}.label`, choisie.label, { shouldValidate: true });
+        setValue(`criteria.${index}.bands`, choisie?.type === 'nombre' ? [{ min: '', max: '', points: '' }] : []);
+        setValue(`criteria.${index}.values`, choisie?.type === 'liste' ? lignesValeurs(choisie) : []);
+    };
 
     const enregistrer = (valeurs: ScoringValeurs) =>
         envoyer<ScoringValeurs>(
@@ -170,6 +244,15 @@ function Formulaire({
                 weights: Object.fromEntries(Object.entries(valeurs.weights).map(([g, n]) => [g, enNombre(n)])),
                 points: Object.fromEntries(Object.entries(valeurs.points).map(([g, champs]) => [g, Object.fromEntries(Object.entries(champs).map(([k, n]) => [k, enNombre(n)]))])),
                 distance_thresholds: Object.fromEntries(Object.entries(valeurs.distance_thresholds).map(([k, n]) => [k, enNombre(n)])),
+                criteria: valeurs.criteria.map((c) => ({
+                    key: c.key || null,
+                    label: c.label.trim(),
+                    source: c.source,
+                    weight: enNombre(c.weight),
+                    other_points: enNombre(c.other_points),
+                    bands: source(c.source)?.type === 'nombre' ? c.bands.map((b) => ({ min: enNombre(b.min), max: enNombre(b.max), points: enNombre(b.points) })) : [],
+                    values: source(c.source)?.type === 'liste' ? c.values.map((l) => ({ value: l.value, points: enNombre(l.points) })) : [],
+                })),
                 minimum_score: enNombre(valeurs.minimum_score),
                 pmr_first: valeurs.pmr_first ? 1 : 0,
                 active: valeurs.active ? 1 : 0,
@@ -179,7 +262,14 @@ function Formulaire({
                     let fautive = -1;
                     const autres: string[] = [];
                     Object.entries(erreurs).forEach(([cle, message]) => {
-                        const index = cle.startsWith('weights') ? 0 : cle.startsWith('points') || cle.startsWith('distance_thresholds') ? 1 : ['minimum_score', 'pmr_first', 'active'].includes(cle) ? 2 : -1;
+                        const index =
+                            cle.startsWith('weights') || cle === 'criteria' || /^criteria\.\d+\.(label|source|weight)$/.test(cle)
+                                ? 0
+                                : cle.startsWith('points') || cle.startsWith('distance_thresholds') || cle.startsWith('criteria.')
+                                  ? 1
+                                  : ['minimum_score', 'pmr_first', 'active'].includes(cle)
+                                    ? 2
+                                    : -1;
                         if (index < 0) {
                             autres.push(message);
                             return;
@@ -198,6 +288,7 @@ function Formulaire({
     const messageTotal = (errors.weights as { message?: unknown } | undefined)?.message;
     const erreurTotal = typeof messageTotal === 'string' ? messageTotal : null;
     const erreurPoint = (g: string, k: string) => (errors.points as Record<string, Record<string, { message?: string }>> | undefined)?.[g]?.[k]?.message;
+    const erreurCritere = (i: number) => errors.criteria?.[i];
     const erreurSeuil = (k: string) => (errors.distance_thresholds as Record<string, { message?: string }> | undefined)?.[k]?.message;
     // Libellé affiché d'un critère : les tranches de distance suivent les seuils saisis.
     const libelle = (g: string, k: string, label: string) => (g === 'geographique' ? libelleDistance(k, v.distance_thresholds) : label);
@@ -227,6 +318,68 @@ function Formulaire({
                                 </Field>
                             ))}
                         </div>
+                        <section className="space-y-3 rounded-brand border p-4" aria-labelledby="sc-ajoutes">
+                            <div>
+                                <h3 id="sc-ajoutes" className="text-sm font-medium text-gray-900">
+                                    Critères ajoutés
+                                </h3>
+                                <p className="text-xs text-muted">
+                                    Notez une autre information du formulaire de demande (âge, crédits validés, genre, niveau d’étude…). Les points se règlent à l’étape suivante.
+                                </p>
+                            </div>
+                            {criteres.fields.length === 0 ? (
+                                <p className="rounded-brand border border-dashed px-4 py-6 text-center text-sm text-muted">Aucun critère ajouté : seuls les quatre volets ci-dessus sont notés.</p>
+                            ) : (
+                                <ul className="space-y-2">
+                                    {criteres.fields.map((ligne, i) => {
+                                        const e = erreurCritere(i);
+                                        return (
+                                            <li key={ligne.cle} className="grid gap-3 rounded-brand bg-surface p-3 md:grid-cols-[minmax(0,1fr)_220px_120px_auto] md:items-start">
+                                                <Field id={`sc-c-label-${i}`} label="Libellé" required error={e?.label?.message}>
+                                                    <Input id={`sc-c-label-${i}`} placeholder="Ex. Tranche d’âge" maxLength={100} invalid={!!e?.label} {...register(`criteria.${i}.label`)} />
+                                                </Field>
+                                                <Field id={`sc-c-source-${i}`} label="Donnée du dossier" required error={e?.source?.message}>
+                                                    <Controller
+                                                        control={control}
+                                                        name={`criteria.${i}.source`}
+                                                        render={({ field }) => (
+                                                            <Select value={field.value || undefined} onValueChange={(cle) => choisirSource(i, cle)}>
+                                                                <SelectTrigger id={`sc-c-source-${i}`} invalid={!!e?.source} onBlur={field.onBlur}>
+                                                                    <SelectValue placeholder="Choisir" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {sources.map((s) => (
+                                                                        <SelectItem key={s.key} value={s.key}>
+                                                                            {s.label}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        )}
+                                                    />
+                                                </Field>
+                                                <Field id={`sc-c-poids-${i}`} label="Pondération (%)" required error={e?.weight?.message}>
+                                                    <Input id={`sc-c-poids-${i}`} inputMode="decimal" placeholder="Ex. 10" invalid={!!e?.weight} {...register(`criteria.${i}.weight`)} />
+                                                </Field>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => criteres.remove(i)}
+                                                    aria-label={`Retirer le critère ${i + 1}`}
+                                                    className="size-11 text-red-700 hover:bg-red-50 hover:text-red-700 md:mt-7"
+                                                >
+                                                    <Trash2 {...ICON} aria-hidden />
+                                                </Button>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
+                            <Button variant="secondary" size="sm" className="h-10" disabled={criteres.fields.length >= maxCriteria} onClick={() => criteres.append(nouveauCritere())}>
+                                <Plus {...ICON} aria-hidden /> Ajouter un critère
+                            </Button>
+                            {criteres.fields.length >= maxCriteria && <p className="text-xs text-muted">{maxCriteria} critères ajoutés au maximum.</p>}
+                        </section>
                         <div className="space-y-1.5 rounded-brand border bg-surface px-4 py-3">
                             <div className="flex items-center justify-between text-sm">
                                 <span className="text-muted">Total des pondérations</span>
@@ -300,6 +453,17 @@ function Formulaire({
                                         </div>
                                     ))}
                                 </fieldset>
+                            ))}
+                            {v.criteria.map((c, i) => (
+                                <PointsCritere
+                                    key={criteres.fields[i]?.cle ?? i}
+                                    index={i}
+                                    critere={c}
+                                    source={source(c.source)}
+                                    control={control}
+                                    register={register}
+                                    erreurs={erreurCritere(i)}
+                                />
                             ))}
                         </div>
                     </>
@@ -378,6 +542,38 @@ function Formulaire({
                                             </td>
                                         </tr>
                                     ))}
+                                    {v.criteria.map((c, i) => {
+                                        const s = source(c.source);
+                                        return (
+                                            <tr key={criteres.fields[i]?.cle ?? i} className="align-top">
+                                                <td className="px-4 py-3 font-medium text-gray-900">
+                                                    {c.label || 'Critère sans libellé'}
+                                                    <span className="block text-xs font-normal text-muted">{s?.label}</span>
+                                                </td>
+                                                <td className="px-4 py-3 tabular-nums">{nombre(enNombre(c.weight) ?? 0, 2)} %</td>
+                                                <td className="px-4 py-3">
+                                                    <ul className="space-y-0.5 text-muted">
+                                                        {s?.type === 'nombre' &&
+                                                            c.bands.map((b, j) => (
+                                                                <li key={j}>
+                                                                    {libelleTranche(b.min, b.max, s.unite)} : <span className="text-gray-900 tabular-nums">{nombre(enNombre(b.points) ?? 0, 2)}</span>
+                                                                </li>
+                                                            ))}
+                                                        {s?.type === 'liste' &&
+                                                            c.values.map((l) => (
+                                                                <li key={l.value}>
+                                                                    {l.label} : <span className="text-gray-900 tabular-nums">{nombre(enNombre(l.points) ?? 0, 2)}</span>
+                                                                </li>
+                                                            ))}
+                                                        <li>
+                                                            {s?.type === 'nombre' ? 'Hors tranches' : 'Autre valeur'} :{' '}
+                                                            <span className="text-gray-900 tabular-nums">{nombre(enNombre(c.other_points) ?? 0, 2)}</span>
+                                                        </li>
+                                                    </ul>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
@@ -401,6 +597,130 @@ function Formulaire({
                 libelle="Enregistrer le barème"
             />
         </form>
+    );
+}
+
+/** Points d'un critère ajouté : tranches (donnée « nombre ») ou une ligne par valeur possible (donnée « liste »). */
+function PointsCritere({
+    index,
+    critere,
+    source,
+    control,
+    register,
+    erreurs,
+}: {
+    index: number;
+    critere: CritereValeurs;
+    source: SourceCritere | undefined;
+    control: Control<ScoringValeurs>;
+    register: UseFormRegister<ScoringValeurs>;
+    erreurs: FieldErrors<CritereValeurs> | undefined;
+}) {
+    const tranches = useFieldArray({ control, name: `criteria.${index}.bands`, keyName: 'cle' });
+    const message = (texte?: string) =>
+        texte && (
+            <p role="alert" className="text-xs font-medium text-red-600">
+                {texte}
+            </p>
+        );
+    const unite = source?.unite && source.unite !== '/20' ? source.unite : null;
+
+    return (
+        <fieldset className="space-y-3 rounded-brand border p-4">
+            <legend className="px-1 text-sm font-medium text-gray-900">
+                {critere.label || 'Critère sans libellé'} <span className="font-normal text-muted">· {nombre(enNombre(critere.weight) ?? 0, 2)} %</span>
+            </legend>
+            {!source ? (
+                <p className="text-sm text-muted">Choisissez d’abord la donnée du dossier à l’étape « Pondérations ».</p>
+            ) : source.type === 'nombre' ? (
+                <>
+                    <p className="text-xs text-muted">
+                        {source.label}
+                        {source.unite && ` (${source.unite})`} : borne basse incluse, borne haute exclue. Laissez une borne vide pour une tranche ouverte.
+                    </p>
+                    {tranches.fields.map((ligne, j) => {
+                        const e = erreurs?.bands?.[j];
+                        return (
+                            <div key={ligne.cle} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_88px_auto] items-start gap-2">
+                                <div className="space-y-1">
+                                    <label htmlFor={`sc-b-min-${index}-${j}`} className="text-xs font-medium text-gray-800">
+                                        De
+                                    </label>
+                                    <Input
+                                        id={`sc-b-min-${index}-${j}`}
+                                        inputMode="decimal"
+                                        placeholder="Min."
+                                        invalid={!!e?.min}
+                                        trailing={unite && <span className="pr-2 text-xs text-muted">{unite}</span>}
+                                        {...register(`criteria.${index}.bands.${j}.min`)}
+                                    />
+                                    {message(e?.min?.message)}
+                                </div>
+                                <div className="space-y-1">
+                                    <label htmlFor={`sc-b-max-${index}-${j}`} className="text-xs font-medium text-gray-800">
+                                        À moins de
+                                    </label>
+                                    <Input
+                                        id={`sc-b-max-${index}-${j}`}
+                                        inputMode="decimal"
+                                        placeholder="Max."
+                                        invalid={!!e?.max}
+                                        trailing={unite && <span className="pr-2 text-xs text-muted">{unite}</span>}
+                                        {...register(`criteria.${index}.bands.${j}.max`)}
+                                    />
+                                    {message(e?.max?.message)}
+                                </div>
+                                <div className="space-y-1">
+                                    <label htmlFor={`sc-b-pts-${index}-${j}`} className="text-xs font-medium text-gray-800">
+                                        Points
+                                    </label>
+                                    <Input id={`sc-b-pts-${index}-${j}`} inputMode="decimal" placeholder="0 à 100" invalid={!!e?.points} {...register(`criteria.${index}.bands.${j}.points`)} />
+                                    {message(e?.points?.message)}
+                                </div>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => tranches.remove(j)}
+                                    aria-label={`Retirer la tranche ${j + 1}`}
+                                    className="mt-5 size-11 text-red-700 hover:bg-red-50 hover:text-red-700"
+                                >
+                                    <Trash2 {...ICON} aria-hidden />
+                                </Button>
+                            </div>
+                        );
+                    })}
+                    {message((erreurs?.bands as { message?: string } | undefined)?.message)}
+                    <Button variant="secondary" size="sm" className="h-9" onClick={() => tranches.append({ min: '', max: '', points: '' })}>
+                        <ListPlus {...ICON} aria-hidden /> Ajouter une tranche
+                    </Button>
+                </>
+            ) : critere.values.length === 0 ? (
+                <p className="text-sm text-muted">Aucune valeur n’est encore enregistrée pour « {source.label} » : seuls les points « Autre valeur » s’appliquent.</p>
+            ) : (
+                critere.values.map((l, j) => (
+                    <div key={l.value} className="grid grid-cols-[minmax(0,1fr)_96px] items-start gap-3">
+                        <label htmlFor={`sc-v-${index}-${j}`} className="pt-3 text-sm text-gray-800">
+                            {l.label}
+                        </label>
+                        <div className="space-y-1">
+                            <Input id={`sc-v-${index}-${j}`} inputMode="decimal" placeholder="0 à 100" invalid={!!erreurs?.values?.[j]?.points} {...register(`criteria.${index}.values.${j}.points`)} />
+                            {message(erreurs?.values?.[j]?.points?.message ?? erreurs?.values?.[j]?.value?.message)}
+                        </div>
+                    </div>
+                ))
+            )}
+            {source && (
+                <div className="grid grid-cols-[minmax(0,1fr)_96px] items-start gap-3 border-t pt-3">
+                    <label htmlFor={`sc-o-${index}`} className="pt-3 text-sm text-gray-800">
+                        {source.type === 'nombre' ? 'Hors tranches' : 'Autre valeur'}
+                    </label>
+                    <div className="space-y-1">
+                        <Input id={`sc-o-${index}`} inputMode="decimal" placeholder="0 à 100" invalid={!!erreurs?.other_points} {...register(`criteria.${index}.other_points`)} />
+                        {message(erreurs?.other_points?.message)}
+                    </div>
+                </div>
+            )}
+        </fieldset>
     );
 }
 

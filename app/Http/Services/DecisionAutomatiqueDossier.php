@@ -9,8 +9,8 @@ use Throwable;
 /**
  * Décision automatique à la soumission d'un dossier, selon le barème de scoring actif de la campagne :
  * score ≥ « Score minimum pour l'attribution automatique » → Éligible ; score inférieur → Refusé.
- * Sans barème actif, ou si le score n'est pas calculable (donnée manquante) ou l'éligibilité bloquée
- * (sanction…), le dossier reste « Soumis » pour une décision manuelle.
+ * Une donnée du barème non renseignée dans le dossier vaut 0 point pour son volet.
+ * Sans barème actif, ou si l'éligibilité est bloquée (sanction…), le dossier reste « Soumis » pour une décision manuelle.
  * Un refus automatique peut être levé par l'admin (passage direct en « Éligible »).
  */
 class DecisionAutomatiqueDossier

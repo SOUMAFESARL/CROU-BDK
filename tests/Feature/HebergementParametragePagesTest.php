@@ -36,6 +36,7 @@ class HebergementParametragePagesTest extends TestCase
             '2026_08_11_000002_create_modules_table.php',
             '2026_09_23_000003_create_campaign_scorings.php',
             '2026_10_26_000001_add_distance_thresholds_to_campaign_scorings.php',
+            '2026_10_27_000001_add_criteria_to_campaign_scorings.php',
             '2026_09_24_000001_create_housing_entry_workflow.php',
         ] as $migration) {
             (require database_path('migrations/'.$migration))->up();
@@ -232,6 +233,7 @@ class HebergementParametragePagesTest extends TestCase
         $this->assertNull($page['props']['scoring']);
         $this->assertSame(route(self::BASE.'scoring-campagne.store'), $page['props']['urls']['store']);
         $this->assertArrayHasKey('academique', $page['props']['fields']);
+        $this->assertContains('age', array_column($page['props']['sources'], 'key'));
     }
 
     public function test_pages_de_campagne_lisent_les_donnees_reelles(): void

@@ -242,9 +242,6 @@ function ScoreBareme({ score, minimum, volets, erreur, score_decision }: Bareme)
                                 {atteint ? 'Minimum atteint' : 'Inférieur au minimum'}
                             </Badge>
                         </p>
-                        <p className="text-sm text-muted">
-                            Seul ce score est comparé au minimum ({scoreFr(minimum)}/100) pour la décision automatique à la soumission. Il est indépendant du taux de critères conformes ci-dessous.
-                        </p>
                         {score_decision !== null && (
                             <p className="flex items-start gap-2 text-sm text-muted">
                                 <Info className="mt-0.5 size-4 shrink-0" aria-hidden /> Score retenu lors de la décision automatique : {scoreFr(score_decision)}/100 (les informations du dossier ont été modifiées depuis).
