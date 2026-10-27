@@ -56,8 +56,13 @@ class EtudiantDemandes
             ])->values()->all(),
             'sortie' => $this->sortie($etudiant),
             'focusSortie' => $focusSortie,
+            // Déjà résident : réadmission ; sinon formulaire public d'une campagne ouverte où il n'a pas encore déposé
+            // (une seule demande par campagne), null sinon.
+            'dejaResident' => $dejaResident = app(\App\Http\Services\NouvelleDemandeService::class)->estDejaResident($etudiant),
             'liens' => [
-                'readmission' => route('etudiants.readmission'),
+                'readmission' => $dejaResident ? route('etudiants.readmission')
+                    : (Campagne::admissionsOuvertes()->whereNotIn('id_campagne', $demandes->pluck('campagne_id')->filter()->all())->exists()
+                        ? route('etudiant.register') : null),
                 'entree' => route('etudiants.housing-entry'),
             ],
         ];

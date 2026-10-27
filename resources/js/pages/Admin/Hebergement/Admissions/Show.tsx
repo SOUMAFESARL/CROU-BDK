@@ -75,7 +75,7 @@ type Props = {
         historique: { date: string | null; etat: string; auteur: string | null; motif: string | null }[] | null;
     } | null;
     profil: Record<string, string | boolean | null> | null;
-    historique: { id: string; numero: string | null; annee: string | null; date: string | null; statut: string | null }[] | null;
+    historique: { id: string; numero: string | null; campagne_id: string | null; annee: string | null; date: string | null; etat: string | null }[] | null;
     /** Valeurs et référentiels du formulaire de modification (`null` sans le droit de modifier). */
     edition: ValeursEtudiant | null;
     options: OptionsEtudiant | null;
@@ -108,14 +108,6 @@ const STATUTS_INSCRIPTION: Record<string, [string, 'success' | 'warning' | 'info
     en_attente: ['En attente', 'warning'],
     demande: ['Nouvelle demande', 'info'],
     annuler: ['Annulé', 'danger'],
-};
-
-const STATUTS_DEMANDE: Record<string, 'success' | 'warning' | 'danger' | 'neutral' | 'info'> = {
-    Acceptée: 'success',
-    En_attente: 'warning',
-    Refusée: 'danger',
-    annuler: 'neutral',
-    demande: 'info',
 };
 
 /** Traitement d'un dossier de candidature (remplace `admission/traiter-demande.blade.php`, `derogations.blade.php` et le mode admin de `dossier-cycle`). */
@@ -816,7 +808,9 @@ function Ligne({ terme, children }: { terme: string; children: ReactNode }) {
     );
 }
 
+/** Toutes les demandes de l'étudiant, toutes campagnes confondues. */
 function Historique({ demandes }: { demandes: NonNullable<Props['historique']> }) {
+    const campagnes = new Set(demandes.map((item) => item.campagne_id).filter(Boolean)).size;
     return (
         <section className="overflow-hidden rounded-brand border bg-white">
             <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
@@ -826,7 +820,9 @@ function Historique({ demandes }: { demandes: NonNullable<Props['historique']> }
                     </span>
                     Historique des demandes
                 </h2>
-                <span className="text-sm text-muted">{demandes.length}</span>
+                <span className="text-sm text-muted">
+                    {demandes.length} demande{demandes.length > 1 ? 's' : ''} · {campagnes} campagne{campagnes > 1 ? 's' : ''}
+                </span>
             </div>
             {demandes.length === 0 ? (
                 <p className="flex flex-col items-center gap-2 py-8 text-sm text-muted">
@@ -838,16 +834,16 @@ function Historique({ demandes }: { demandes: NonNullable<Props['historique']> }
                         <li key={item.id} className="flex items-start justify-between gap-3 px-4 py-3">
                             <div>
                                 <p className="font-medium text-gray-900">
-                                    Demande #{item.numero}
+                                    Demande {item.numero ? `#${item.numero}` : ''}
                                     {index === 0 && (
                                         <Badge variant="info" className="ml-2">
                                             Dernière
                                         </Badge>
                                     )}
                                 </p>
-                                <p className="text-xs text-muted">{[item.annee, dateFr(item.date)].filter(Boolean).join(' · ')}</p>
+                                <p className="text-xs text-muted">{[item.annee ? `Campagne ${item.annee}` : null, dateFr(item.date)].filter(Boolean).join(' · ')}</p>
                             </div>
-                            <Badge variant={STATUTS_DEMANDE[item.statut ?? ''] ?? 'neutral'}>{(item.statut ?? '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())}</Badge>
+                            <EtatDossierBadge etat={item.etat} />
                         </li>
                     ))}
                 </ul>

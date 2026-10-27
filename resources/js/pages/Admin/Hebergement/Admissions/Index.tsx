@@ -171,7 +171,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
               ] satisfies DataTableColumn<Dossier>[])
             : []),
         ...(colonnes.historique
-            ? ([{ key: 'demandes', header: 'Demandes', className: 'text-center tabular-nums', headClassName: 'text-center', cell: (d) => nombre(d.demandes) }] satisfies DataTableColumn<Dossier>[])
+            ? ([{ key: 'demandes', header: 'Demandes (toutes campagnes)', className: 'text-center tabular-nums', headClassName: 'text-center', cell: (d) => nombre(d.demandes) }] satisfies DataTableColumn<Dossier>[])
             : []),
         { key: 'etat', header: 'État du dossier', cell: (d) => <EtatDossierBadge etat={d.etat_dossier} /> },
         {

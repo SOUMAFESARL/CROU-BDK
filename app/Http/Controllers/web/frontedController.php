@@ -204,7 +204,7 @@ class  frontedController extends Controller
     // }
 
 
-  public function postRegister(EtudiantRequest $request)
+  public function postRegister(\App\Http\Requests\DemandeHebergementRequest $request)
 {
     $documents = app()->make(DocumentEtudiantRepositoryInterface::class);
 
@@ -220,7 +220,21 @@ class  frontedController extends Controller
 
         DB::beginTransaction();
 
-        $result = $etudiantService->creerDossier($request);
+        // Compte existant reconnu par ses quatre identifiants : nouvelle demande sur ce compte, sans modifier la fiche
+        // (un étudiant déjà résident est renvoyé vers la réadmission). Sinon, création du compte.
+        $existant = $request->compteExistant();
+        if ($existant) {
+            $existant = \App\Models\Etudiant::whereKey($existant->getKey())->lockForUpdate()->firstOrFail();
+            try {
+                app(\App\Http\Services\NouvelleDemandeService::class)
+                    ->ensureCanApply($existant, Campagne::whereKey($request->id_campagne)->lockForUpdate()->firstOrFail());
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                throw new \DomainException(collect($e->errors())->flatten()->first());
+            }
+            $result = ['success' => true, 'data' => $existant];
+        } else {
+            $result = $etudiantService->creerDossier($request);
+        }
 
         if (!$result['success']) {
             throw new \DomainException($result['message']);
@@ -242,6 +256,10 @@ class  frontedController extends Controller
         }
 
         $documents->enregistrerPieces($pieces, $result['data']['id_etudiant'], $request->id_campagne);
+        if ($existant) {
+            // Fiche créée sans e-mail par l'administration : l'e-mail saisi devient l'identifiant de connexion.
+            $existant->update(['statut_inscription' => 'demande'] + (blank($existant->email1) ? ['email1' => trim((string) $request->email)] : []));
+        }
 
         // --- Vérification automatique de l'éligibilité (documents non bloquants) ---
         $finalisation = $etudiantService->finaliserInscriptionAutomatique(
@@ -255,7 +273,11 @@ class  frontedController extends Controller
 
         DB::commit();
 
-        return back()->with('success', $finalisation['message'].' '.$this->envoyerIdentifiants($result['data'], $finalisation['data']['etat_dossier'] ?? null));
+        $suite = $existant && filled($existant->getRawOriginal('password'))
+            ? 'Connectez-vous à votre espace étudiant avec vos identifiants habituels pour suivre votre demande.'
+            : $this->envoyerIdentifiants($result['data'], $finalisation['data']['etat_dossier'] ?? null);
+
+        return back()->with('success', $finalisation['message'].' '.$suite);
 
     } catch (\Exception $e) {
         DB::rollBack();

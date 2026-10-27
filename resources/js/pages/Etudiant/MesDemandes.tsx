@@ -64,11 +64,19 @@ type MesDemandesProps = {
     autres: { id: string; annee: string | null; reference: string; soumiseLe: string | null; etat: Etat; moyenne: string | number | null; credits: string | number | null }[];
     sortie: Sortie;
     focusSortie: boolean;
-    liens: { readmission: string; entree: string };
+    /** Déjà logé par le CROU : une nouvelle demande passe par la réadmission ; sinon par le formulaire public de la campagne ouverte. */
+    dejaResident: boolean;
+    /** `readmission` : lien de nouvelle demande (null pour un non-résident hors période d'admission). */
+    liens: { readmission: string | null; entree: string };
 };
 
 /** Page « Mes demandes » : onglets « Mon dossier » (suivi + demandes précédentes) et « Sortie de chambre ». */
-export default function MesDemandes({ dossier, autres, sortie, focusSortie, liens }: MesDemandesProps) {
+export default function MesDemandes({ dossier, autres, sortie, focusSortie, dejaResident, liens }: MesDemandesProps) {
+    // Non résident : une demande par campagne ouverte, même avec un dossier en cours sur une autre campagne.
+    const nouvelleDemande =
+        !!dossier &&
+        (['refuse', 'annule', 'expire', 'cloture'].includes(dossier.etat.code) || (!dejaResident && !['accepte', 'attribue_definitif'].includes(dossier.etat.code)));
+
     // « Quitter ma chambre » (focus=departure) ou ?onglet=sortie ouvrent directement l'onglet Sortie.
     const [actif, setActif] = useState<Onglet>(() =>
         focusSortie || (typeof window !== 'undefined' && new URL(window.location.href).searchParams.get('onglet') === 'sortie') ? 'sortie' : 'dossier',
@@ -132,10 +140,12 @@ export default function MesDemandes({ dossier, autres, sortie, focusSortie, lien
                             {dossier ? <SuiviDossier dossier={dossier} /> : (
                                 <>
                                     <Vide icone={Inbox}>Vous n’avez pas de demande d’hébergement.</Vide>
-                                    <a href={liens.readmission} className={cn(buttonVariants({ variant: 'secondary' }), 'mt-4 w-full font-medium sm:w-fit')}>
-                                        <FilePlus {...ICON} />
-                                        Faire une demande de réadmission
-                                    </a>
+                                    {liens.readmission && (
+                                        <a href={liens.readmission} className={cn(buttonVariants({ variant: 'secondary' }), 'mt-4 w-full font-medium sm:w-fit')}>
+                                            <FilePlus {...ICON} />
+                                            {dejaResident ? 'Faire une demande de réadmission' : 'Faire une demande d’hébergement'}
+                                        </a>
+                                    )}
                                 </>
                             )}
                             {dossier && ['attribue_definitif', 'accepte'].includes(dossier.etat.code) && (
@@ -143,9 +153,15 @@ export default function MesDemandes({ dossier, autres, sortie, focusSortie, lien
                                     <Ligne href={liens.entree} icone={KeyRound} ton="vert" titre="Mon entrée dans les lieux" detail="Contrat, rendez-vous d’entrée et notifications" fin={ChevronRight} />
                                 </Liste>
                             )}
-                            {dossier && ['refuse', 'annule', 'expire', 'cloture'].includes(dossier.etat.code) && (
+                            {nouvelleDemande && liens.readmission && (
                                 <Liste className="mt-3">
-                                    <Ligne href={liens.readmission} icone={FilePlus} titre="Faire une nouvelle demande" detail="Réadmission avec votre compte existant" fin={ChevronRight} />
+                                    <Ligne
+                                        href={liens.readmission}
+                                        icone={FilePlus}
+                                        titre="Faire une nouvelle demande"
+                                        detail={dejaResident ? 'Réadmission avec votre compte existant' : 'Formulaire de la campagne ouverte, avec les identifiants de votre compte'}
+                                        fin={ChevronRight}
+                                    />
                                 </Liste>
                             )}
                         </Panneau>

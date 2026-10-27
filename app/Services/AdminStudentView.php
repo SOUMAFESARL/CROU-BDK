@@ -21,7 +21,7 @@ class AdminStudentView
             $query->with('documents');
         }
         if ($access->allows($user, 'admissions.history')) {
-            $query->with(['demandes.niveauEtudiantActuel', 'demandes.niveauEtudiantPrecedent']);
+            $query->with(['demandes.niveauEtudiantActuel', 'demandes.niveauEtudiantPrecedent', 'demandes.campagne']);
         }
         $student = $query->findOrFail($id);
         // Prevent accidental lazy loading from a partial or a JSON serializer.

@@ -50,7 +50,9 @@ class StudentRequestsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNull($props['dossier']);
         $this->assertSame([], $props['autres']);
         $this->assertNull($props['sortie']['formulaire']);
-        $this->assertSame(route('etudiants.readmission'), $props['liens']['readmission']);
+        // Jamais logé : pas de réadmission ; le formulaire public n'est proposé que pendant une période d'admission.
+        $this->assertFalse($props['dejaResident']);
+        $this->assertNull($props['liens']['readmission']);
     }
 
     public function test_submitted_dossier_can_only_be_cancelled_with_a_reason(): void

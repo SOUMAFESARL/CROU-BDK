@@ -44,7 +44,10 @@ class EtudiantMenu
             ],
             'Gestion' => [
                 ['label' => 'Mon entrée et notifications', 'icon' => 'calendar-check', 'href' => route('etudiants.housing-entry'), 'routes' => ['etudiants.housing-entry']],
-                ['label' => 'Réadmission', 'icon' => 'file-plus', 'href' => route('etudiants.readmission'), 'routes' => ['etudiants.readmission*']],
+                // Réservée aux étudiants déjà logés ; les autres redéposent par le formulaire public d'une campagne ouverte.
+                ...(! $request->user('etudiant') || app(\App\Http\Services\NouvelleDemandeService::class)->estDejaResident($request->user('etudiant'))
+                    ? [['label' => 'Réadmission', 'icon' => 'file-plus', 'href' => route('etudiants.readmission'), 'routes' => ['etudiants.readmission*']]]
+                    : []),
                 ['label' => 'Demandes', 'icon' => 'file-pen-line', 'page' => 'demandes', 'href' => $sectionUrl('demandes')],
                 ['label' => 'État des lieux', 'icon' => 'clipboard-check', 'page' => 'etat-lieux', 'href' => $sectionUrl('etat-lieux')],
                 ['label' => 'Paiements', 'icon' => 'credit-card', 'page' => 'paiements', 'href' => $sectionUrl('paiements')],

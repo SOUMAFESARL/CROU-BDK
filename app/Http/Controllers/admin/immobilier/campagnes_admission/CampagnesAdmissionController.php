@@ -258,12 +258,14 @@ class CampagnesAdmissionController extends Controller
                 'numero_piece' => $etudiant->numero_piece,
                 'date_expiration' => $etudiant->date_expiration ? Carbon::parse($etudiant->date_expiration)->toDateString() : null,
             ] : null,
+            // Toutes les demandes de l'étudiant, toutes campagnes confondues.
             'historique' => $historique ? $etudiant->demandes->sortByDesc('created_at')->values()->map(fn ($item) => [
                 'id' => (string) $item->getKey(),
                 'numero' => $item->numero_demande,
-                'annee' => $item->annee_academique_precedent,
+                'campagne_id' => $item->campagne_id ? (string) $item->campagne_id : null,
+                'annee' => $item->campagne?->annee_campagne ?? $item->annee_academique_actuel,
                 'date' => $item->created_at ? Carbon::parse($item->created_at)->toDateString() : null,
-                'statut' => $item->statut_demande,
+                'etat' => $item->etat_dossier,
             ]) : null,
             'edition' => $modifiable ? $edition->valeurs(Etudiant::with('derniereDemande')->findOrFail($etudiant->getKey())) : null,
             'options' => $modifiable ? $edition->options() : null,
