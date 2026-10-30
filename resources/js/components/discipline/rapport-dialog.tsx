@@ -292,7 +292,7 @@ export function RapportDialog({ open, onClose, url, structure }: { open: boolean
                                 </Button>
                             )}
                             {etape < ETAPES.length - 1 ? (
-                                <Button size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
+                                <Button key="suivant" size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (

@@ -415,11 +415,11 @@ export function AnnonceDialog({ open, onClose, annonce, urlStore, audiences, cib
                                 </Button>
                             )}
                             {etape < ETAPES.length - 1 ? (
-                                <Button size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
+                                <Button key="suivant" size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button type="submit" size="sm" className="h-10" disabled={isSubmitting || !url}>
+                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={isSubmitting || !url}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : statut === 'publie' ? <Send className="size-4" aria-hidden /> : <Save className="size-4" aria-hidden />}
                                     {statut === 'publie' ? 'Publier l’annonce' : statut === 'planifie' ? 'Planifier l’annonce' : 'Enregistrer le brouillon'}
                                 </Button>

@@ -228,11 +228,11 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
                                 </Button>
                             )}
                             {!derniere ? (
-                                <Button size="sm" className="h-10" onClick={async () => (await trigger(CHAMPS_ETAPES[0])) && setEtape(1)}>
+                                <Button key="suivant" size="sm" className="h-10" onClick={async () => (await trigger(CHAMPS_ETAPES[0])) && setEtape(1)}>
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={isSubmitting}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
                                     {config?.bouton}
                                 </Button>

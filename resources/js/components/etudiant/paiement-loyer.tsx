@@ -349,12 +349,12 @@ export function PaiementLoyerDialog({
                                 )}
                             </Button>
                             {etape < ETAPES.length - 1 ? (
-                                <Button onClick={() => allerA(etape + 1)} className="font-medium">
+                                <Button key="suivant" onClick={() => allerA(etape + 1)} className="font-medium">
                                     Suivant
                                     <ChevronRight {...ICON} />
                                 </Button>
                             ) : (
-                                <Button type="submit" disabled={isSubmitting} className="font-medium">
+                                <Button key="envoyer" type="submit" disabled={isSubmitting} className="font-medium">
                                     {isSubmitting ? (
                                         <Loader2 {...ICON} className="animate-spin" />
                                     ) : (

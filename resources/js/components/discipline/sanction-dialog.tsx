@@ -360,11 +360,11 @@ export function SanctionDialog({ open, onClose, url, structure }: { open: boolea
                                 </Button>
                             )}
                             {etape < ETAPES.length - 1 ? (
-                                <Button size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
+                                <Button key="suivant" size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={isSubmitting}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Gavel className="size-4" aria-hidden />}
                                     Enregistrer la sanction
                                 </Button>

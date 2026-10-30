@@ -331,11 +331,11 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
                                 </Button>
                             )}
                             {etape < ETAPES.length - 1 ? (
-                                <Button size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
+                                <Button key="suivant" size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
                                     Suivant <ArrowRight {...ICON} aria-hidden />
                                 </Button>
                             ) : (
-                                <Button type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={isSubmitting}>
                                     {isSubmitting ? <Loader2 {...ICON} className="animate-spin" aria-hidden /> : <Save {...ICON} aria-hidden />}
                                     Enregistrer
                                 </Button>

@@ -164,12 +164,12 @@ function FormulaireApprobation({
                     </Button>
                 )}
                 {etape === 0 ? (
-                    <Button onClick={() => allerA(1)} className="font-medium">
+                    <Button key="suivant" onClick={() => allerA(1)} className="font-medium">
                         Continuer
                         <ChevronRight {...ICON} />
                     </Button>
                 ) : (
-                    <Button type="submit" disabled={isSubmitting} className="font-medium">
+                    <Button key="envoyer" type="submit" disabled={isSubmitting} className="font-medium">
                         {isSubmitting ? <Loader2 {...ICON} className="animate-spin" /> : <ShieldCheck {...ICON} />}
                         Approuver mon contrat
                     </Button>

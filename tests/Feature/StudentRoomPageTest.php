@@ -75,10 +75,10 @@ class StudentRoomPageTest extends TestCase
         (require database_path('migrations/2026_09_28_000002_create_equipement_affectations.php'))->up();
         Schema::create('ordres_travail', function (Blueprint $t) {
             $t->string('id_ordres_travail')->primary();
-            foreach (['numero_ot', 'etudiant_id', 'chambre_id', 'titre', 'description', 'categorie', 'priorite', 'statut', 'assigne_a', 'periode_disponibilite', 'solution_apportee'] as $colonne) {
+            foreach (['numero_ot', 'etudiant_id', 'cite_id', 'batiment_id', 'chambre_id', 'type_intervention', 'titre', 'description', 'categorie', 'priorite', 'statut', 'assigne_a', 'periode_disponibilite', 'solution_apportee'] as $colonne) {
                 $t->string($colonne)->nullable();
             }
-            foreach (['date_disponibilite', 'date_debut_intervention', 'date_resolution'] as $colonne) {
+            foreach (['date_disponibilite', 'date_debut_intervention', 'date_fin_intervention', 'date_resolution'] as $colonne) {
                 $t->timestamp($colonne)->nullable();
             }
             $t->integer('taux_satisfaction')->nullable();
@@ -252,5 +252,40 @@ class StudentRoomPageTest extends TestCase
         // Sans chambre confirmée : pas d'équipement proposé, le formulaire reste disponible.
         $this->assertNull($page['chambre']);
         $this->assertSame([], $page['equipements']);
+    }
+
+    public function test_maintenance_lists_admin_work_orders_targeting_room_building_or_cite(): void
+    {
+        $this->assigner('student');
+        DB::table('chambre')->insert(['id_chambre' => 'other-room', 'numero_chambre' => 'A13', 'batiment_id' => 'building', 'cite_id' => 'cite']);
+        $admin = ['etudiant_id' => null, 'cite_id' => 'cite'];
+        $this->ordre('chambre', $admin + ['batiment_id' => 'building', 'chambre_id' => 'room', 'titre' => 'Peinture', 'created_at' => now()->subHour()]);
+        $this->ordre('batiment', $admin + ['batiment_id' => 'building', 'type_intervention' => 'preventive', 'created_at' => now()->subHours(2),
+            'date_debut_intervention' => now()->addDay(), 'date_fin_intervention' => now()->addDays(3)]);
+        $this->ordre('cite', $admin + ['created_at' => now()->subHours(3)]);
+        // Hors cible : autre chambre, autre bâtiment, autre cité, demande d'un étudiant, ordre clôturé avant l'arrivée.
+        $this->ordre('autre-chambre', $admin + ['batiment_id' => 'building', 'chambre_id' => 'other-room']);
+        $this->ordre('autre-batiment', $admin + ['batiment_id' => 'building-b']);
+        $this->ordre('autre-cite', ['etudiant_id' => null, 'cite_id' => 'cite-b']);
+        $this->ordre('etudiant', ['cite_id' => 'cite', 'batiment_id' => 'building', 'chambre_id' => 'room']);
+        $this->ordre('ancien', $admin + ['statut' => 'termine', 'created_at' => now()->subYear()]);
+
+        $props = $this->maintenance(['onglet' => 'administration']);
+
+        $this->assertSame('administration', $props['onglet']);
+        $this->assertSame(['chambre', 'batiment', 'cite'], array_column($props['ordresAdministration'], 'id'));
+        $this->assertSame(['Ma chambre', 'Tout le bâtiment (Bâtiment A)', 'Toute la cité (Cité Bondoukou)'], array_column($props['ordresAdministration'], 'portee'));
+        $this->assertSame('Préventive', $props['ordresAdministration'][1]['nature']);
+        $this->assertStringStartsWith('Du ', $props['ordresAdministration'][1]['intervention']);
+        $this->assertSame(3, $props['administrationEnCours']);
+        // Les demandes de l'étudiant ne reprennent pas les ordres de l'administration.
+        $this->assertSame(['etudiant'], array_column($props['demandes'], 'id'));
+        // Un colocataire de la chambre reçoit les mêmes ordres ; sans chambre, aucun.
+        $this->assigner('mate');
+        $colocataire = app(EtudiantMaintenance::class)->props(Etudiant::findOrFail('mate'), Request::create('/etudiant/dashboard', 'GET'));
+        $this->assertSame(['chambre', 'batiment', 'cite'], array_column($colocataire['ordresAdministration'], 'id'));
+        DB::table('assignation_chambres')->delete();
+        $this->assertSame([], $this->maintenance()['ordresAdministration']);
+        $this->assertSame('demandes', $this->maintenance()['onglet']);
     }
 }

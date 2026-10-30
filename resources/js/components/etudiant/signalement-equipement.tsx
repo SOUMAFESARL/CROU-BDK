@@ -551,8 +551,11 @@ export function SignalementEquipement({
                                 </>
                             )}
                         </Button>
+                        {/* Clés distinctes : sans elles React réutilise le même <button> et le passe en
+                            type="submit" pendant le clic sur « Suivant », ce qui soumet le formulaire. */}
                         {etape < ETAPES.length - 1 ? (
                             <Button
+                                key="suivant"
                                 onClick={() => allerA(etape + 1)}
                                 className="font-medium"
                             >
@@ -561,6 +564,7 @@ export function SignalementEquipement({
                             </Button>
                         ) : (
                             <Button
+                                key="envoyer"
                                 type="submit"
                                 disabled={isSubmitting}
                                 className="font-medium"

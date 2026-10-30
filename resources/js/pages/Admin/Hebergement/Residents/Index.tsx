@@ -192,6 +192,7 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                 ringActive={!vueResidents}
                 className="xl:grid-cols-2"
                 items={[
+                    { key: 'residents', label: 'Résidents', value: nombre(stats.residents), tone: 'green', href: urls.filtres?.residents, extra: 'Déjà logés' },
                     {
                         key: 'en_verification',
                         label: 'En vérification',
@@ -200,7 +201,6 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                         href: urls.filtres?.en_verification,
                         extra: campagneActive ? `Campagne ${campagneActive.annee}` : undefined,
                     },
-                    { key: 'residents', label: 'Résidents', value: nombre(stats.residents), tone: 'green', href: urls.filtres?.residents, extra: 'Déjà logés' },
                 ]}
             />
 

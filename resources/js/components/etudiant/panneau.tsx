@@ -12,12 +12,14 @@ type PanneauProps = {
     titre: string;
     /** Pastille à droite du titre (compteur…). */
     badge?: ReactNode;
+    /** Action à droite de l'en-tête (bouton…). */
+    action?: ReactNode;
     id?: string;
     className?: string;
     children: ReactNode;
 };
 
-export function Panneau({ surtitre, titre, badge, id, className, children }: PanneauProps) {
+export function Panneau({ surtitre, titre, badge, action, id, className, children }: PanneauProps) {
     const titreId = id ? `${id}-titre` : undefined;
 
     return (
@@ -29,8 +31,13 @@ export function Panneau({ surtitre, titre, badge, id, className, children }: Pan
                         {titre}
                     </h2>
                 </div>
-                {badge !== undefined && (
-                    <span className="shrink-0 rounded-brand bg-surface px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-muted tabular-nums">{badge}</span>
+                {(badge !== undefined || action) && (
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                        {badge !== undefined && (
+                            <span className="shrink-0 rounded-brand bg-surface px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-muted tabular-nums">{badge}</span>
+                        )}
+                        {action}
+                    </div>
                 )}
             </div>
             {children}
