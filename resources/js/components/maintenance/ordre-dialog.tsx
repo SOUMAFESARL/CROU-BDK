@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { libelleSpecialite, PRIORITES, TYPES_INTERVENTION, type Maintenancier } from '@/components/maintenance/shared';
 import { Button } from '@/components/ui/button';
 import { Combobox } from '@/components/ui/combobox';
+import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -274,10 +275,30 @@ export function OrdreDialog({ open, onClose, url, structure, categories, mainten
                                         <p className="text-xs text-muted">{[libelleSpecialite(technicien.specialite), technicien.tel, technicien.email].filter(Boolean).join(' · ')}</p>
                                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                             <Field id="ot-date_debut_intervention" label="Début prévu" required error={errors.date_debut_intervention?.message}>
-                                                <Input id="ot-date_debut_intervention" type="datetime-local" invalid={!!errors.date_debut_intervention} {...register('date_debut_intervention')} />
+                                                <Controller
+                                                    control={control}
+                                                    name="date_debut_intervention"
+                                                    render={({ field }) => (
+                                                        <DateTimePicker id="ot-date_debut_intervention" value={field.value} onChange={field.onChange} onBlur={field.onBlur} invalid={!!errors.date_debut_intervention} />
+                                                    )}
+                                                />
                                             </Field>
                                             <Field id="ot-date_fin_intervention" label="Fin prévue" error={errors.date_fin_intervention?.message}>
-                                                <Input id="ot-date_fin_intervention" type="datetime-local" invalid={!!errors.date_fin_intervention} {...register('date_fin_intervention')} />
+                                                <Controller
+                                                    control={control}
+                                                    name="date_fin_intervention"
+                                                    render={({ field }) => (
+                                                        <DateTimePicker
+                                                            id="ot-date_fin_intervention"
+                                                            value={field.value}
+                                                            onChange={field.onChange}
+                                                            onBlur={field.onBlur}
+                                                            min={getValues('date_debut_intervention') || undefined}
+                                                            heureParDefaut="17:00"
+                                                            invalid={!!errors.date_fin_intervention}
+                                                        />
+                                                    )}
+                                                />
                                             </Field>
                                         </div>
                                     </>
@@ -322,11 +343,11 @@ export function OrdreDialog({ open, onClose, url, structure, categories, mainten
                                 </Button>
                             )}
                             {etape < ETAPES.length - 1 ? (
-                                <Button size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
+                                <Button key="suivant" size="sm" className="h-10" onClick={() => allerA(etape + 1)}>
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                                <Button key="creer" type="submit" size="sm" className="h-10" disabled={isSubmitting}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Wrench className="size-4" aria-hidden />}
                                     Créer l’ordre de travail
                                 </Button>

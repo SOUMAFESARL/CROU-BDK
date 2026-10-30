@@ -545,13 +545,14 @@ function Formulaire({
                         Précédent
                     </Button>
                 )}
+                {/* Clés distinctes : sans elles, React transforme le bouton « Suivant » cliqué en bouton d'envoi pendant le clic, ce qui soumettait le formulaire à l'arrivée sur l'étape Documents. */}
                 {derniere ? (
-                    <Button type="submit" variant="accent" disabled={isSubmitting} className="font-medium">
+                    <Button key="envoyer" type="submit" variant="accent" disabled={isSubmitting} className="font-medium">
                         {isSubmitting ? <Loader2 {...ICON} className="animate-spin" /> : brouillon ? <Save {...ICON} /> : <Send {...ICON} />}
                         {brouillon ? 'Enregistrer le brouillon' : 'Soumettre ma demande'}
                     </Button>
                 ) : (
-                    <Button variant="accent" onClick={() => allerA(etape + 1)} className="font-medium">
+                    <Button key="suivant" variant="accent" onClick={() => allerA(etape + 1)} className="font-medium">
                         Suivant
                         <ChevronRight {...ICON} />
                     </Button>

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { libelleSpecialite, RESULTATS, type Maintenancier } from '@/components/maintenance/shared';
 import { Button } from '@/components/ui/button';
 import { Combobox } from '@/components/ui/combobox';
+import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -48,11 +49,11 @@ function PiedAssistant({
                     </Button>
                 )}
                 {etape < total - 1 ? (
-                    <Button size="sm" className="h-10" onClick={onSuivant}>
+                    <Button key="suivant" size="sm" className="h-10" onClick={onSuivant}>
                         Suivant <ArrowRight className="size-4" aria-hidden />
                     </Button>
                 ) : (
-                    <Button type="submit" size="sm" className="h-10" disabled={enCours}>
+                    <Button key="valider" type="submit" size="sm" className="h-10" disabled={enCours}>
                         {enCours ? <Loader2 className="size-4 animate-spin" aria-hidden /> : icone}
                         {libelle}
                     </Button>
@@ -95,7 +96,7 @@ export function AssignerDialog({ open, onClose, url, maintenanciers }: { open: b
         mode: 'onTouched',
         defaultValues: { assigne_a: '', date_debut_intervention: '', date_fin_intervention: '', instructions: '', notification_envoyee: true },
     });
-    const [assigne, notifier] = useWatch({ control, name: ['assigne_a', 'notification_envoyee'] });
+    const [assigne, notifier, debut] = useWatch({ control, name: ['assigne_a', 'notification_envoyee', 'date_debut_intervention'] });
     const technicien = maintenanciers.find((m) => m.id === assigne);
 
     useEffect(() => {
@@ -161,10 +162,30 @@ export function AssignerDialog({ open, onClose, url, maintenanciers }: { open: b
                             <>
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                     <Field id="as-date_debut_intervention" label="Début prévu" required error={errors.date_debut_intervention?.message}>
-                                        <Input id="as-date_debut_intervention" type="datetime-local" invalid={!!errors.date_debut_intervention} {...register('date_debut_intervention')} />
+                                        <Controller
+                                            control={control}
+                                            name="date_debut_intervention"
+                                            render={({ field }) => (
+                                                <DateTimePicker id="as-date_debut_intervention" value={field.value} onChange={field.onChange} onBlur={field.onBlur} invalid={!!errors.date_debut_intervention} />
+                                            )}
+                                        />
                                     </Field>
                                     <Field id="as-date_fin_intervention" label="Fin prévue" error={errors.date_fin_intervention?.message}>
-                                        <Input id="as-date_fin_intervention" type="datetime-local" invalid={!!errors.date_fin_intervention} {...register('date_fin_intervention')} />
+                                        <Controller
+                                            control={control}
+                                            name="date_fin_intervention"
+                                            render={({ field }) => (
+                                                <DateTimePicker
+                                                    id="as-date_fin_intervention"
+                                                    value={field.value}
+                                                    onChange={field.onChange}
+                                                    onBlur={field.onBlur}
+                                                    min={debut || undefined}
+                                                    heureParDefaut="17:00"
+                                                    invalid={!!errors.date_fin_intervention}
+                                                />
+                                            )}
+                                        />
                                     </Field>
                                 </div>
                                 <Field id="as-instructions" label="Instructions" error={errors.instructions?.message}>
@@ -267,7 +288,13 @@ export function InterventionDialog({ open, onClose, url, ordreId }: { open: bool
                             <>
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                     <Field id="in-date_intervention" label="Date et heure" required error={errors.date_intervention?.message}>
-                                        <Input id="in-date_intervention" type="datetime-local" max={maintenantLocal()} invalid={!!errors.date_intervention} {...register('date_intervention')} />
+                                        <Controller
+                                            control={control}
+                                            name="date_intervention"
+                                            render={({ field }) => (
+                                                <DateTimePicker id="in-date_intervention" value={field.value} onChange={field.onChange} onBlur={field.onBlur} max={maintenantLocal()} invalid={!!errors.date_intervention} />
+                                            )}
+                                        />
                                     </Field>
                                     <Field id="in-duree" label="Durée (minutes)" required error={errors.duree?.message}>
                                         <Input id="in-duree" type="number" min={1} step={1} inputMode="numeric" placeholder="Ex. 45" invalid={!!errors.duree} {...register('duree')} />

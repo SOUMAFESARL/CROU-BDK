@@ -252,7 +252,7 @@ class AllocationChambreController extends Controller
             $assignation = $this->service->allocateChambre($etudiant, $campagne, $chambre, $chambre ? ($validated['numero_lit'] ?? null) : null);
 
             if ($assignation) {
-                return back()->with('success',
+                return redirect()->route('admin.hebergement.residents_contrat.admission', ['etat' => 'residents'])->with('success',
                     "Chambre {$assignation->chambre->numero_chambre} assignée avec succès à {$etudiant->name}");
             }
 
