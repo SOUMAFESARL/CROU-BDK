@@ -1,6 +1,7 @@
 <?php
 namespace App\Http\Services;
 
+use App\Jobs\EnvoyerIdentifiantsEtudiant;
 use App\Models\{AdmissionDerogation,AssignationChambre,Campagne,DemandeEtudiant,Etudiant};
 use App\Repositories\Interfaces\EtudiantRepositoryInterface;
 use Illuminate\Support\Facades\{Auth,DB};
@@ -179,9 +180,10 @@ class DossierWorkflow
                     'cloture'=>'archivee',default=>'demande',
                 }]);
             }
-            // Le mot de passe de l'espace étudiant n'est créé et envoyé qu'au premier passage en « Éligible ».
+            // Le mot de passe de l'espace étudiant n'est créé et envoyé qu'au premier passage en « Éligible »,
+            // en file d'attente pour ne pas suspendre la requête à la disponibilité du serveur SMTP.
             if ($to==='eligible' && app(IdentifiantsEtudiant::class)->aEnvoyer($student)) {
-                DB::afterCommit(fn () => app(IdentifiantsEtudiant::class)->envoyer($student->fresh()));
+                EnvoyerIdentifiantsEtudiant::dispatch($student->getKey())->afterCommit();
             }
             // Soumission par l'étudiant : éligibilité ou refus automatique selon le barème de la campagne.
             if ($to==='soumis' && $kind==='etudiant') {

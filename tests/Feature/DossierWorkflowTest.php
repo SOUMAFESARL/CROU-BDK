@@ -95,6 +95,19 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->workflow->transition($dossier->getKey(),'confirme','etudiant','student');
         $this->assertFalse(\App\Services\EtudiantMenu::confirmationAttendue(Etudiant::findOrFail('student')));
     }
+    public function test_student_menu_is_limited_to_the_dashboard_until_a_room_is_assigned(): void
+    {
+        $this->eligibleRequest();$this->confirm();
+        $this->actingAs(Etudiant::findOrFail('student'),'etudiant');
+        $libelles=function(){
+            $requete=\Illuminate\Http\Request::create('/etudiant/dashboard');
+            $requete->setUserResolver(fn($guard=null)=>auth($guard)->user());
+            return collect(app(\App\Services\EtudiantMenu::class)->groupes($requete))->flatMap(fn($groupe)=>array_column($groupe['items'],'label'))->all();
+        };
+        $this->assertSame(['Tableau de bord'],$libelles());
+        $this->allocate();
+        $this->assertContains('Ma chambre',$libelles());
+    }
     public function test_allocation_rechecks_eligibility_atomically(): void
     {
         $dossier=$this->eligibleRequest();$this->confirm();
