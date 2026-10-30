@@ -566,6 +566,8 @@ function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: stri
     const [erreurs, setErreurs] = useState<{ etat?: string; motif?: string }>({});
     const [enCours, setEnCours] = useState(false);
     const [confirmerLevee, setConfirmerLevee] = useState(false);
+    const [motifLevee, setMotifLevee] = useState('');
+    const [erreurLevee, setErreurLevee] = useState<string | null>(null);
     // « En étude » ne subsiste que sur les dossiers de l'ancien parcours : affiché au niveau « Soumis ».
     const position = etat ? PARCOURS.indexOf(etat === 'en_etude' ? 'soumis' : etat) : -1;
 
@@ -592,10 +594,22 @@ function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: stri
 
     const leverRefus = async () => {
         if (!suivi.rendre_eligible) return;
+        // Dérogation au barème : motif obligatoire (le serveur le revérifie).
+        if (motifLevee.trim() === '') {
+            setErreurLevee('Le motif de la dérogation est obligatoire.');
+            return;
+        }
         setEnCours(true);
-        const ok = await envoyer(suivi.rendre_eligible, { etat: 'eligible' });
+        const ok = await envoyer(
+            suivi.rendre_eligible,
+            { etat: 'eligible', motif: motifLevee.trim() },
+            { onError: (retour) => setErreurLevee(retour.motif ?? Object.values(retour)[0] ?? null) },
+        );
         setEnCours(false);
-        if (ok) setConfirmerLevee(false);
+        if (ok) {
+            setConfirmerLevee(false);
+            setMotifLevee('');
+        }
     };
 
     return (
@@ -651,14 +665,31 @@ function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: stri
             )}
             <ConfirmDialog
                 open={confirmerLevee}
-                onOpenChange={setConfirmerLevee}
+                onOpenChange={(ouvert) => {
+                    setConfirmerLevee(ouvert);
+                    if (!ouvert) setErreurLevee(null);
+                }}
                 title="Rendre ce dossier éligible ?"
                 description="Le refus automatique sera levé : le dossier passe en « Éligible » et l’étudiant devra confirmer son intérêt."
                 confirmLabel="Rendre éligible"
                 confirmIcon={<CircleCheck className="size-4" aria-hidden />}
                 processing={enCours}
                 onConfirm={leverRefus}
-            />
+            >
+                <Field id="levee-motif" label="Motif de la dérogation" required error={erreurLevee ?? undefined} hint="2 000 caractères maximum.">
+                    <Textarea
+                        id="levee-motif"
+                        rows={3}
+                        maxLength={2000}
+                        invalid={!!erreurLevee}
+                        value={motifLevee}
+                        onChange={(event) => {
+                            setMotifLevee(event.target.value);
+                            setErreurLevee(null);
+                        }}
+                    />
+                </Field>
+            </ConfirmDialog>
 
             {suivi.actions.length > 0 && (
                 <div className="mt-4 flex flex-col gap-3 rounded-brand bg-surface p-4">

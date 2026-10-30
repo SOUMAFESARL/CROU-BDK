@@ -85,14 +85,17 @@ class DemandeEtudiant extends Model
             $demande->assignation_id = null;
         });
         static::created(function ($demande) {
+            // Saisie admin = dépôt fait depuis l'espace admin ; une session admin ouverte dans le même navigateur
+            // ne change pas l'auteur d'un dépôt fait par le formulaire public ou l'espace étudiant.
+            $saisieAdmin = auth('admin')->check() && (request()->routeIs('admin.*') || request()->is('admin/*'));
             \Illuminate\Support\Facades\DB::table('dossier_transitions')->insert([
                 'demande_id'=>$demande->getKey(),'ancien_etat'=>null,'nouvel_etat'=>$demande->etat_dossier,
-                'acteur_type'=>auth('admin')->check()?'admin':'etudiant',
-                'acteur_id'=>auth('admin')->id() ?? auth('etudiant')->id() ?? $demande->etudiant_id,
+                'acteur_type'=>$saisieAdmin?'admin':'etudiant',
+                'acteur_id'=>($saisieAdmin ? auth('admin')->id() : null) ?? auth('etudiant')->id() ?? $demande->etudiant_id,
                 'motif'=>'Dossier déposé.','created_at'=>now(),
             ]);
             // Dossier déposé par l'étudiant : décision automatique selon le barème (pas pour une saisie admin).
-            if ($demande->etat_dossier === 'soumis' && !auth('admin')->check()) {
+            if ($demande->etat_dossier === 'soumis' && !$saisieAdmin) {
                 \Illuminate\Support\Facades\DB::afterCommit(fn () => app(\App\Http\Services\DecisionAutomatiqueDossier::class)->decider($demande->getKey()));
             }
         });

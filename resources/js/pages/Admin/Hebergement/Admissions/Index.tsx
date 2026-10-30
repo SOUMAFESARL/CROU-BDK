@@ -8,10 +8,12 @@ import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
 import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -62,6 +64,8 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
     /** Levée de refus automatiques à confirmer : un dossier, ou la `selection`. */
     const [aLever, setALever] = useState<Dossier | 'selection' | null>(null);
     const [levee, setLevee] = useState(false);
+    const [motifLevee, setMotifLevee] = useState('');
+    const [erreurLevee, setErreurLevee] = useState<string | null>(null);
 
     // Lignes cochables : refus prononcés par le barème (un refus d'agent passe par le réexamen).
     const selectionnables = urls.leverRefus ? dossiers.data.filter((d) => d.refus_automatique && d.demande_id).map((d) => d.demande_id as string) : [];
@@ -75,10 +79,22 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
         if (!urls.leverRefus || !aLever) return;
         const demandes = aLever === 'selection' ? selection : aLever.demande_id ? [aLever.demande_id] : [];
         if (demandes.length === 0) return;
+        // Dérogation au barème : motif obligatoire (le serveur le revérifie).
+        if (motifLevee.trim() === '') {
+            setErreurLevee('Le motif de la dérogation est obligatoire.');
+            return;
+        }
         setLevee(true);
-        const ok = await envoyer(urls.leverRefus, { demandes });
+        const ok = await envoyer(
+            urls.leverRefus,
+            { demandes, motif: motifLevee.trim() },
+            { onError: (retour) => setErreurLevee(retour.motif ?? Object.values(retour)[0] ?? null) },
+        );
         setLevee(false);
-        if (ok) setALever(null);
+        if (ok) {
+            setALever(null);
+            setMotifLevee('');
+        }
     };
     const premierRendu = useRef(true);
 
@@ -318,7 +334,11 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
 
             <ConfirmDialog
                 open={aLever !== null}
-                onOpenChange={(open) => !open && setALever(null)}
+                onOpenChange={(open) => {
+                    if (open) return;
+                    setALever(null);
+                    setErreurLevee(null);
+                }}
                 title={aLever === 'selection' ? 'Rendre éligibles les dossiers sélectionnés ?' : 'Rendre ce dossier éligible ?'}
                 description={
                     aLever === 'selection'
@@ -329,7 +349,21 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
                 confirmIcon={<CircleCheck className="size-4" aria-hidden />}
                 processing={levee}
                 onConfirm={leverRefus}
-            />
+            >
+                <Field id="levee-motif" label="Motif de la dérogation" required error={erreurLevee ?? undefined} hint="2 000 caractères maximum.">
+                    <Textarea
+                        id="levee-motif"
+                        rows={3}
+                        maxLength={2000}
+                        invalid={!!erreurLevee}
+                        value={motifLevee}
+                        onChange={(event) => {
+                            setMotifLevee(event.target.value);
+                            setErreurLevee(null);
+                        }}
+                    />
+                </Field>
+            </ConfirmDialog>
         </AdminLayout>
     );
 }

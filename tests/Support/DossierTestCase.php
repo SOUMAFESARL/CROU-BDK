@@ -164,9 +164,16 @@ abstract class DossierTestCase extends TestCase
     }
     protected function dossier(string $student='student', bool $draft=false): \App\Models\DemandeEtudiant
     {
-        $dossier=new \App\Models\DemandeEtudiant(['etudiant_id'=>$student,'campagne_id'=>'campaign','statut_demande'=>'En_attente']);
-        $dossier->workflowDraft=$draft;
-        $dossier->save();
+        // Saisie faite depuis l'espace admin (c'est la route, pas la seule session admin, qui en fait une saisie admin).
+        $requete=$this->app['request'];
+        $this->app->instance('request',\Illuminate\Http\Request::create('/admin/etudiants','POST'));
+        try {
+            $dossier=new \App\Models\DemandeEtudiant(['etudiant_id'=>$student,'campagne_id'=>'campaign','statut_demande'=>'En_attente']);
+            $dossier->workflowDraft=$draft;
+            $dossier->save();
+        } finally {
+            $this->app->instance('request',$requete);
+        }
         return $dossier->fresh();
     }
     protected function eligibleRequest(): \App\Models\DemandeEtudiant

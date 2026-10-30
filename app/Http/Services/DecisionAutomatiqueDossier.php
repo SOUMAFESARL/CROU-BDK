@@ -11,7 +11,7 @@ use Throwable;
  * score ≥ « Score minimum pour l'attribution automatique » → Éligible ; score inférieur → Refusé.
  * Une donnée du barème non renseignée dans le dossier vaut 0 point pour son volet.
  * Sans barème actif, ou si l'éligibilité est bloquée (sanction…), le dossier reste « Soumis » pour une décision manuelle.
- * Un refus automatique peut être levé par l'admin (passage direct en « Éligible »).
+ * Un refus automatique peut être levé par l'admin (passage direct en « Éligible »), avec un motif de dérogation obligatoire.
  * Si la campagne fixe une date de validation automatique (`date_validation_auto`), les dossiers soumis avant
  * cette date restent « Soumis » et sont décidés en lot ce jour-là (`dossiers:validation-auto`) ; ensuite, chaque
  * nouveau dossier est de nouveau décidé dès sa réception.
@@ -20,7 +20,8 @@ class DecisionAutomatiqueDossier
 {
     /** Clé posée dans `dossier_transitions.details` des décisions prises par le barème. */
     public const MARQUEUR = 'decision_automatique';
-    public const MOTIF_LEVEE = 'Refus automatique levé : dossier rendu éligible par le service Logement.';
+    /** Préfixe du motif de dérogation saisi par l'admin lors de la levée d'un refus automatique. */
+    public const PREFIXE_LEVEE = 'Refus automatique levé par dérogation : ';
 
     public function __construct(private DossierWorkflow $workflow, private CampaignScoringService $scoring) {}
 
@@ -139,17 +140,21 @@ class DecisionAutomatiqueDossier
     }
 
     /**
-     * Lève les refus automatiques donnés (tous ceux des campagnes actives si la liste est vide).
+     * Lève les refus automatiques donnés (tous ceux des campagnes actives si la liste est vide),
+     * avec le motif de dérogation saisi par l'admin (obligatoire).
      * @return array{eligibles:int, echecs:array<string,string>}
      */
-    public function rendreEligibles(array $demandeIds = []): array
+    public function rendreEligibles(string $motif, array $demandeIds = []): array
     {
+        if (trim($motif) === '') {
+            throw ValidationException::withMessages(['motif' => 'Le motif de la dérogation est obligatoire.']);
+        }
         $ids = $demandeIds ? $this->refusAutomatiques($demandeIds) : $this->refusAutomatiquesEnCours();
         $eligibles = 0;
         $echecs = [];
         foreach ($ids as $id) {
             try {
-                $this->workflow->admin($id, 'eligible', self::MOTIF_LEVEE);
+                $this->workflow->admin($id, 'eligible', $motif);
                 $eligibles++;
             } catch (ValidationException $e) {
                 $echecs[$id] = (string) collect($e->errors())->flatten()->first();

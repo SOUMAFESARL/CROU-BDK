@@ -91,7 +91,9 @@ class DossierWorkflow
                     if (!app(DecisionAutomatiqueDossier::class)->estRefusAutomatique($id)) {
                         $this->invalid('Seul un refus automatique peut être levé directement : réexaminez d’abord le dossier (retour à « Soumis »).');
                     }
-                    if (trim((string)$reason)==='') $reason=DecisionAutomatiqueDossier::MOTIF_LEVEE;
+                    // Dérogation au barème : le motif est obligatoire et conservé dans l'historique.
+                    if (trim((string)$reason)==='') throw ValidationException::withMessages(['motif'=>'Le motif de la dérogation est obligatoire.']);
+                    $reason=DecisionAutomatiqueDossier::PREFIXE_LEVEE.trim((string)$reason);
                 }
             } elseif ($kind==='systeme') {
                 // « Éligible » : décision automatique du barème, uniquement sur un dossier soumis.

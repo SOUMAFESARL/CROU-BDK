@@ -99,6 +99,16 @@ class DecisionAutomatiqueDossierTest extends \Tests\Support\DossierTestCase
         $this->assertSame('soumis', $this->dossier()->etat_dossier);
     }
 
+    public function test_depot_public_avec_une_session_admin_ouverte_est_decide_automatiquement(): void
+    {
+        // Admin connecté dans le même navigateur, mais dépôt fait hors de l'espace admin.
+        $this->admin();
+        $dossier = new DemandeEtudiant(['etudiant_id' => 'student', 'campagne_id' => 'campaign', 'statut_demande' => 'En_attente', 'moyenne' => 5]);
+        $dossier->save();
+        $this->assertSame('refuse', $dossier->fresh()->etat_dossier);
+        $this->assertSame('etudiant', DB::table('dossier_transitions')->where('demande_id', $dossier->getKey())->whereNull('ancien_etat')->value('acteur_type'));
+    }
+
     public function test_soumission_d_un_brouillon_declenche_la_decision(): void
     {
         $dossier = $this->dossier('student', true);
@@ -112,10 +122,25 @@ class DecisionAutomatiqueDossierTest extends \Tests\Support\DossierTestCase
     {
         $dossier = $this->depot(5);
         $this->admin();
-        $this->workflow->admin($dossier->getKey(), 'eligible');
+        $this->workflow->admin($dossier->getKey(), 'eligible', 'Situation sociale particulière.');
         $dossier->refresh();
         $this->assertSame('eligible', $dossier->etat_dossier);
-        $this->assertSame(DecisionAutomatiqueDossier::MOTIF_LEVEE, $dossier->transitions->last()->motif);
+        $this->assertSame(DecisionAutomatiqueDossier::PREFIXE_LEVEE.'Situation sociale particulière.', $dossier->transitions->last()->motif);
+    }
+
+    public function test_la_levee_d_un_refus_automatique_exige_un_motif_de_derogation(): void
+    {
+        $dossier = $this->depot(5);
+        $this->admin();
+        try {
+            $this->workflow->admin($dossier->getKey(), 'eligible', '  ');
+            $this->fail('Le motif de la dérogation aurait dû être exigé.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('motif', $e->errors());
+        }
+        $this->assertSame('refuse', $dossier->fresh()->etat_dossier);
+        $this->expectException(ValidationException::class);
+        app(DecisionAutomatiqueDossier::class)->rendreEligibles('');
     }
 
     public function test_un_refus_prononce_par_un_agent_ne_peut_pas_etre_leve_directement(): void
@@ -131,7 +156,7 @@ class DecisionAutomatiqueDossierTest extends \Tests\Support\DossierTestCase
         $premier = $this->depot(5, 'student');
         $second = $this->depot(6, 'other');
         $this->admin();
-        $resultat = app(DecisionAutomatiqueDossier::class)->rendreEligibles();
+        $resultat = app(DecisionAutomatiqueDossier::class)->rendreEligibles('Capacité d’accueil suffisante.');
         $this->assertSame(2, $resultat['eligibles']);
         $this->assertSame('eligible', $premier->fresh()->etat_dossier);
         $this->assertSame('eligible', $second->fresh()->etat_dossier);

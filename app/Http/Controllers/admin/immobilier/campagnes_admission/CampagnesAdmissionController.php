@@ -412,13 +412,16 @@ class CampagnesAdmissionController extends Controller
     }
 
     /**
-     * Lève les refus automatiques (barème de scoring) des dossiers sélectionnés (`demandes[]`) ;
-     * seuls ceux réellement refusés par le barème sont traités.
+     * Lève les refus automatiques (barème de scoring) des dossiers sélectionnés (`demandes[]`) avec un motif
+     * de dérogation obligatoire ; seuls ceux réellement refusés par le barème sont traités.
      */
     public function leverRefusAutomatiques(Request $request): RedirectResponse
     {
-        $data = $request->validate(['demandes' => 'required|array|min:1|max:500', 'demandes.*' => 'string|max:150']);
-        $resultat = app(DecisionAutomatiqueDossier::class)->rendreEligibles($data['demandes']);
+        $data = $request->validate(
+            ['demandes' => 'required|array|min:1|max:500', 'demandes.*' => 'string|max:150', 'motif' => 'required|string|max:2000'],
+            ['motif.required' => 'Le motif de la dérogation est obligatoire.', 'motif.max' => 'Le motif de la dérogation ne doit pas dépasser 2 000 caractères.'],
+        );
+        $resultat = app(DecisionAutomatiqueDossier::class)->rendreEligibles($data['motif'], $data['demandes']);
         if ($resultat['eligibles'] === 0 && !$resultat['echecs']) {
             return back()->with('error', 'Aucun dossier refusé automatiquement à rendre éligible.');
         }
@@ -433,7 +436,7 @@ class CampagnesAdmissionController extends Controller
     /** Suivi du dossier (équivalent admin du partiel `dossier-cycle`) : parcours, actions permises et historique. */
     private function suiviDossier($dossier, $admin): array
     {
-        // La levée d'un refus automatique a son propre bouton (sans motif) ; un refus prononcé par un agent passe par « Soumis ».
+        // La levée d'un refus automatique a son propre bouton (motif de dérogation obligatoire) ; un refus prononcé par un agent passe par « Soumis ».
         $refusAutomatique = $dossier->etat_dossier === 'refuse' && app(DecisionAutomatiqueDossier::class)->estRefusAutomatique($dossier->getKey());
         $actions = array_values(array_intersect(DossierWorkflow::NEXT[$dossier->etat_dossier] ?? [], ['soumis', 'incomplet', 'eligible', 'refuse', 'annule']));
         if ($dossier->etat_dossier === 'refuse') $actions = array_values(array_diff($actions, ['eligible']));
