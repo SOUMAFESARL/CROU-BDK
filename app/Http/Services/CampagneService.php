@@ -19,6 +19,13 @@ class CampagneService
 {
     protected  $campagneRepository;
 
+    /** Public et critères : renseignés plus tard dans le paramétrage de la campagne (NULL = non paramétré). */
+    public const CHAMPS_PARAMETRAGE = [
+        'admission', 'readmission', 'internationnaux', 'redoublement', 'pmr', 'is_participate', 'is_discipline',
+        'moyenne_min', 'pourcentage_validate', 'distance_min',
+        'age_L1_max', 'age_L2_max', 'age_L3_max', 'age_M1_max', 'age_M2_max', 'age_D1_max', 'age_D2_max', 'age_D3_max',
+    ];
+
     public function __construct(CampagneRepository $campagneRepository)
     {
         $this->campagneRepository = $campagneRepository;
@@ -38,8 +45,7 @@ class CampagneService
             // Validation des âges
             $this->validateAges($data);
 
-            // Préparation des données booléennes
-            $data = $this->prepareBooleanData($data);
+            $data = $this->prepareBooleanData($data) + array_fill_keys(self::CHAMPS_PARAMETRAGE, null);
 
             // Création de la campagne
             $campagne = $this->campagneRepository->create($data);
@@ -112,8 +118,6 @@ class CampagneService
         foreach ($booleanFields as $field) {
             if (isset($data[$field])) {
                 $data[$field] = filter_var($data[$field], FILTER_VALIDATE_BOOLEAN);
-            } else {
-                $data[$field] = false;
             }
         }
 

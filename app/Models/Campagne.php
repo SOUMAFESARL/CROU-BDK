@@ -52,6 +52,7 @@ class Campagne extends Model
 
     protected $fillable = [
         'id_campagne',
+        'libelle',
         'description',
         'annee_campagne',
         'annee_debut',

@@ -21,7 +21,7 @@ class CampagnesPageTest extends TestCase
 
         Schema::create('campagne', function (Blueprint $t) {
             $t->string('id_campagne')->primary();
-            foreach (['description', 'annee_campagne', 'created_by', 'updated_by', 'deleted_by'] as $column) {
+            foreach (['libelle', 'description', 'annee_campagne', 'created_by', 'updated_by', 'deleted_by'] as $column) {
                 $t->string($column)->nullable();
             }
             $t->string('statut')->default('planifier'); // comme le schéma MySQL
@@ -30,7 +30,7 @@ class CampagnesPageTest extends TestCase
                 $t->date($column)->nullable();
             }
             foreach (['admission', 'readmission', 'pmr', 'internationnaux', 'redoublement', 'is_participate', 'is_discipline'] as $column) {
-                $t->boolean($column)->default(false);
+                $t->boolean($column)->nullable()->default(false);
             }
             $t->float('moyenne_min')->nullable(); $t->float('distance_min')->nullable(); $t->integer('pourcentage_validate')->nullable();
             foreach (['L1', 'L2', 'L3', 'M1', 'M2', 'D1', 'D2', 'D3'] as $niveau) {
@@ -86,12 +86,12 @@ class CampagnesPageTest extends TestCase
         ]);
         DB::table('campagne')->insert([
             [
-                'id_campagne' => 'k1', 'annee_campagne' => '2025-2026', 'description' => 'Campagne principale', 'statut' => 'active',
+                'id_campagne' => 'k1', 'libelle' => 'Campagne principale 2025', 'annee_campagne' => '2025-2026', 'description' => 'Campagne principale', 'statut' => 'active',
                 'periode_debut' => '2025-09-01', 'periode_fin' => '2025-10-31', 'date_echeance_demande' => '2025-11-15', 'date_echeance_contrat' => '2025-11-30',
                 'admission' => true, 'readmission' => true, 'moyenne_min' => 10.5, 'age_L1_max' => 22, 'age_L2_max' => 23, 'created_at' => now(),
             ],
             [
-                'id_campagne' => 'k2', 'annee_campagne' => '2026-2027', 'description' => null, 'statut' => 'planifier',
+                'id_campagne' => 'k2', 'libelle' => null, 'annee_campagne' => '2026-2027', 'description' => null, 'statut' => 'planifier',
                 'periode_debut' => '2026-09-01', 'periode_fin' => '2026-10-31', 'date_echeance_demande' => null, 'date_echeance_contrat' => null,
                 'admission' => false, 'readmission' => true, 'moyenne_min' => null, 'age_L1_max' => null, 'age_L2_max' => null, 'created_at' => now()->subDay(),
             ],
@@ -114,6 +114,8 @@ class CampagnesPageTest extends TestCase
 
         $k1 = $props['campagnes']['data'][0];
         $this->assertSame('2025-09-01', $k1['periode_debut']);
+        $this->assertSame('Campagne principale 2025', $k1['libelle']);
+        $this->assertNull($props['campagnes']['data'][1]['libelle']);
         $this->assertSame([['name' => 'Cité A', 'places' => 5]], $k1['residences']);
         $this->assertSame(['Certificat de scolarité'], $k1['documents']);
         $this->assertSame(['L1' => 22, 'L2' => 23], $k1['criteres']['ages']);
@@ -154,21 +156,36 @@ class CampagnesPageTest extends TestCase
 
         $campagne = DB::table('campagne')->where('annee_campagne', '2030-2031')->first();
         $this->assertNotNull($campagne);
-        $this->assertSame(1, (int) $campagne->readmission);
-        $this->assertSame(0, (int) $campagne->pmr);
+        $this->assertSame('Campagne de test', $campagne->libelle);
+        // Public et critères : non paramétrés à la création.
+        foreach (['admission', 'readmission', 'internationnaux', 'pmr', 'redoublement', 'is_discipline', 'moyenne_min', 'age_L1_max', 'date_echeance_demande', 'date_echeance_contrat'] as $champ) {
+            $this->assertNull($campagne->{$champ}, $champ);
+        }
         $this->assertSame(['cA'], DB::table('residence_campagne')->where('campagne_id', $campagne->id_campagne)->pluck('cite_id')->all());
         $this->assertSame(['d1'], DB::table('document_campagne')->where('id_campagne', $campagne->id_campagne)->pluck('document_id')->all());
     }
 
-    public function test_un_age_sans_le_niveau_precedent_est_refuse(): void
+    public function test_le_libelle_est_obligatoire(): void
     {
-        // Règle serveur reprise par le formulaire React : les âges se suivent à partir de la Licence 1.
         $this->withoutMiddleware();
 
         $this->from(route('admin.hebergement.campagnes_admission.create_campagne'))
-            ->post(route('admin.hebergement.campagnes_admission.post_campagnes'), $this->donnees(['age_L1_max' => '', 'age_L2_max' => 24]))
-            ->assertSessionHasErrors('age_L2_max');
+            ->post(route('admin.hebergement.campagnes_admission.post_campagnes'), $this->donnees(['libelle' => '']))
+            ->assertSessionHasErrors('libelle');
+        $this->from(route('admin.hebergement.campagnes_admission.edit_campagne', 'k2'))
+            ->put(route('admin.hebergement.campagnes_admission.update_campagne', 'k2'), $this->donnees(['libelle' => str_repeat('a', 151)]))
+            ->assertSessionHasErrors('libelle');
         $this->assertSame(0, DB::table('campagne')->where('annee_campagne', '2030-2031')->count());
+    }
+
+    public function test_la_description_est_facultative(): void
+    {
+        $this->withoutMiddleware();
+
+        $this->post(route('admin.hebergement.campagnes_admission.post_campagnes'), $this->donnees(['description' => '']))
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success');
+        $this->assertEmpty(DB::table('campagne')->where('annee_campagne', '2030-2031')->value('description'));
     }
 
     public function test_la_liste_propose_modifier_et_supprimer(): void
@@ -188,12 +205,11 @@ class CampagnesPageTest extends TestCase
         $this->assertSame('Admin/Hebergement/Campagnes/Edit', $page['component']);
         $campagne = $page['props']['campagne'];
         $this->assertSame('2025-2026', $campagne['annee_campagne']);
+        $this->assertSame('Campagne principale 2025', $campagne['libelle']);
         $this->assertSame('2025-09-01', $campagne['periode_debut']);
-        $this->assertSame('10.5', $campagne['moyenne_min']);
-        $this->assertSame('22', $campagne['age_L1_max']);
-        $this->assertSame('', $campagne['age_L3_max']);
-        $this->assertTrue($campagne['admission']);
-        $this->assertFalse($campagne['pmr']);
+        $this->assertArrayNotHasKey('date_echeance_demande', $campagne);
+        $this->assertArrayNotHasKey('moyenne_min', $campagne);
+        $this->assertArrayNotHasKey('admission', $campagne);
         $this->assertSame(['cA'], $campagne['residences']);
         $this->assertSame(['d1'], $campagne['documents']);
         // La cité liée reste proposée même fermée depuis, pour ne pas la retirer à l'insu de l'utilisateur.
@@ -209,8 +225,8 @@ class CampagnesPageTest extends TestCase
         DB::table('document')->insert(['id_document' => 'd3', 'name' => 'Extrait de naissance', 'statut' => 1]);
 
         $this->put(route('admin.hebergement.campagnes_admission.update_campagne', 'k1'), $this->donnees([
+            'libelle' => 'Campagne modifiée',
             'description' => 'Campagne principale modifiée',
-            'pmr' => true,
             'residences' => ['cB'],
             'documents' => ['d1', 'd3'],
         ]))
@@ -219,9 +235,14 @@ class CampagnesPageTest extends TestCase
 
         $campagne = DB::table('campagne')->where('id_campagne', 'k1')->first();
         $this->assertSame('Campagne principale modifiée', $campagne->description);
+        $this->assertSame('Campagne modifiée', $campagne->libelle);
         $this->assertSame('2030-2031', $campagne->annee_campagne);
         $this->assertSame(2030, (int) $campagne->annee_debut);
-        $this->assertSame(1, (int) $campagne->pmr);
+        // Public, critères et échéances ne passent plus par ce formulaire : valeurs conservées.
+        $this->assertSame(1, (int) $campagne->admission);
+        $this->assertSame(1, (int) $campagne->readmission);
+        $this->assertSame(10.5, (float) $campagne->moyenne_min);
+        $this->assertSame('2025-11-15', $campagne->date_echeance_demande);
         $this->assertSame('planifier', $campagne->statut); // dates futures : statut recalculé
         $this->assertSame(['cB'], DB::table('residence_campagne')->where('campagne_id', 'k1')->pluck('cite_id')->all());
         $this->assertEqualsCanonicalizing(['d1', 'd3'], DB::table('document_campagne')->where('id_campagne', 'k1')->pluck('document_id')->all());
@@ -268,24 +289,11 @@ class CampagnesPageTest extends TestCase
     private function donnees(array $surcharge = []): array
     {
         return array_merge([
+            'libelle' => 'Campagne de test',
             'annee_campagne' => '2030-2031',
             'description' => 'Campagne de test complète',
             'periode_debut' => '2030-09-01',
             'periode_fin' => '2030-10-01',
-            'date_echeance_demande' => '2030-10-15',
-            'date_echeance_contrat' => '2030-10-30',
-            'moyenne_min' => '10.5',
-            'pourcentage_validate' => '',
-            'distance_min' => '',
-            'age_L1_max' => 22,
-            'age_L2_max' => 23,
-            'admission' => true,
-            'readmission' => true,
-            'internationnaux' => false,
-            'redoublement' => false,
-            'pmr' => false,
-            'is_participate' => false,
-            'is_discipline' => false,
             'residences' => ['cA'],
             'documents' => ['d1'],
         ], $surcharge);

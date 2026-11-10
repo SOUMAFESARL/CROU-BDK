@@ -42,6 +42,8 @@ export const STATUTS_CAMPAGNE: Record<StatutCampagne, { label: string; variant: 
 export type CampagneItem = {
     id: string;
     annee: string;
+    /** Vide pour les campagnes créées avant l'ajout du libellé. */
+    libelle: string | null;
     description: string | null;
     statut: StatutCampagne | string | null;
     periode_debut: string | null;
@@ -84,21 +86,16 @@ export type CreateCampagneProps = {
     urls: { hebergement: string; index: string; submit: string | null };
 };
 
-/** Valeurs saisies dans l'assistant (nombres en texte, dates `aaaa-mm-jj`, identifiants des cités et documents). */
+/** Valeurs saisies dans l'assistant (dates `aaaa-mm-jj`, identifiants des cités et documents). */
 export type CampagneFormValues = {
+    libelle: string;
     annee_campagne: string;
     description: string;
     periode_debut: string;
     periode_fin: string;
-    date_echeance_demande: string;
-    date_echeance_contrat: string;
-    moyenne_min: string;
-    pourcentage_validate: string;
-    distance_min: string;
     residences: string[];
     documents: string[];
-} & Record<`age_${Niveau}_max`, string> &
-    Record<Condition, boolean>;
+};
 
 export type EditCampagneProps = CreateCampagneProps & {
     campagne: CampagneFormValues & { id: string };
@@ -119,6 +116,8 @@ export const dureeJours = (debut: string | null, fin: string | null) => {
     const jours = Math.round((Date.parse(fin.slice(0, 10)) - Date.parse(debut.slice(0, 10))) / 86_400_000);
     return Number.isFinite(jours) ? jours + 1 : null;
 };
+
+export const nomCampagne = (campagne: Pick<CampagneItem, 'libelle' | 'annee'>) => campagne.libelle || `Campagne ${campagne.annee}`;
 
 export const typeCampagne = (conditions: CampagneItem['conditions']) =>
     conditions.admission && conditions.readmission ? 'Admission et réadmission' : conditions.admission ? 'Admission' : conditions.readmission ? 'Réadmission' : '—';

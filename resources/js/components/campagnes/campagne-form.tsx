@@ -1,13 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { router, usePage } from '@inertiajs/react';
-import { Building, CalendarDays, ClipboardCheck, Info, ListChecks, Users } from 'lucide-react';
+import { Building, CalendarDays, ClipboardCheck, Info } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { CONDITIONS, formatDate, NIVEAUX, TYPES_ADMISSION, type CampagneFormValues, type CreateCampagneProps, type Niveau } from '@/components/campagnes/types';
+import { formatDate, type CampagneFormValues, type CreateCampagneProps } from '@/components/campagnes/types';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { RecapSection, ToggleCard } from '@/components/parc-immobilier/form/inputs';
-import { decimalFacultatif, entierFacultatif } from '@/components/parc-immobilier/form/types';
 import { FormAlert, SectionTitle, useWizard, Wizard, type WizardStep } from '@/components/parc-immobilier/form/wizard';
 import { Badge } from '@/components/ui/badge';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -17,15 +16,9 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type { SharedProps } from '@/types/global';
 
-const CODES_NIVEAUX = Object.keys(NIVEAUX) as Niveau[];
-type ChampAge = `age_${Niveau}_max`;
-const champAge = (niveau: Niveau) => `age_${niveau}_max` as ChampAge;
-
 const DATES = [
     { name: 'periode_debut', label: 'Ouverture de la campagne', hint: 'Les étudiants peuvent postuler à partir de cette date', article: 'la date d’ouverture' },
     { name: 'periode_fin', label: 'Clôture de la campagne', hint: 'Date limite de dépôt des candidatures', article: 'la date de clôture' },
-    { name: 'date_echeance_demande', label: 'Échéance des demandes', hint: 'Date limite d’analyse des demandes', article: 'l’échéance des demandes' },
-    { name: 'date_echeance_contrat', label: 'Échéance des contrats', hint: 'Date limite de signature des contrats', article: 'l’échéance des contrats' },
 ] as const;
 
 type ChampDate = (typeof DATES)[number]['name'];
@@ -34,34 +27,15 @@ const date = (article: string) => z.string().min(1, `Renseignez ${article}.`);
 
 /** Règles par champ (mêmes bornes que `CampagneRequest`) ; les règles entre champs sont dans `reglesCroisees`. */
 const schema = z.object({
+    libelle: z.string().trim().min(1, 'Renseignez le libellé de la campagne.').max(150, '150 caractères au maximum.'),
     annee_campagne: z
         .string()
         .trim()
         .regex(/^\d{4}-\d{4}$/, 'L’année universitaire doit respecter le format AAAA-AAAA (ex. 2025-2026).')
         .refine((v) => Number(v.slice(5)) === Number(v.slice(0, 4)) + 1, 'L’année universitaire doit couvrir deux années consécutives.'),
-    description: z.string().trim().min(10, 'La description doit contenir au moins 10 caractères.').max(1000, '1 000 caractères au maximum.'),
+    description: z.string().trim().max(1000, '1 000 caractères au maximum.'),
     periode_debut: date(DATES[0].article),
     periode_fin: date(DATES[1].article),
-    date_echeance_demande: date(DATES[2].article),
-    date_echeance_contrat: date(DATES[3].article),
-    moyenne_min: decimalFacultatif('La moyenne minimale').refine((v) => v === '' || Number(v.replace(',', '.')) <= 20, 'La moyenne minimale doit être comprise entre 0 et 20.'),
-    pourcentage_validate: entierFacultatif('Le pourcentage de crédits validés', 0, 100),
-    distance_min: decimalFacultatif('La distance'),
-    age_L1_max: entierFacultatif('L’âge maximum', 0, 40),
-    age_L2_max: entierFacultatif('L’âge maximum', 0, 40),
-    age_L3_max: entierFacultatif('L’âge maximum', 0, 40),
-    age_M1_max: entierFacultatif('L’âge maximum', 0, 40),
-    age_M2_max: entierFacultatif('L’âge maximum', 0, 40),
-    age_D1_max: entierFacultatif('L’âge maximum', 0, 40),
-    age_D2_max: entierFacultatif('L’âge maximum', 0, 40),
-    age_D3_max: entierFacultatif('L’âge maximum', 0, 40),
-    admission: z.boolean(),
-    readmission: z.boolean(),
-    internationnaux: z.boolean(),
-    redoublement: z.boolean(),
-    pmr: z.boolean(),
-    is_participate: z.boolean(),
-    is_discipline: z.boolean(),
     residences: z.array(z.string()).min(1, 'Sélectionnez au moins une résidence.'),
     documents: z.array(z.string()),
 });
@@ -71,29 +45,13 @@ type FormOutput = z.output<typeof schema>;
 type Champ = keyof FormInput;
 
 const STEPS: (WizardStep & { fields: Champ[] })[] = [
-    { label: 'Informations', description: 'Année universitaire et présentation', icon: Info, fields: ['annee_campagne', 'description'] },
-    { label: 'Calendrier', description: 'Ouverture, clôture et échéances', icon: CalendarDays, fields: DATES.map((d) => d.name) },
-    {
-        label: 'Critères',
-        description: 'Moyenne, crédits, distance, âges',
-        icon: ListChecks,
-        fields: ['moyenne_min', 'pourcentage_validate', 'distance_min', ...CODES_NIVEAUX.map(champAge)],
-    },
-    {
-        label: 'Public',
-        description: 'Types d’admission et conditions',
-        icon: Users,
-        fields: [...TYPES_ADMISSION.map((t) => t.name), ...CONDITIONS.map((c) => c.name)],
-    },
+    { label: 'Informations', description: 'Année universitaire et présentation', icon: Info, fields: ['annee_campagne', 'libelle', 'description'] },
+    { label: 'Calendrier', description: 'Ouverture et clôture', icon: CalendarDays, fields: DATES.map((d) => d.name) },
     { label: 'Résidences', description: 'Cités ouvertes et documents requis', icon: Building, fields: ['residences', 'documents'] },
     { label: 'Vérification', description: 'Relire avant d’enregistrer', icon: ClipboardCheck, fields: [] },
 ];
 
-/**
- * Règles qui comparent plusieurs champs (dates successives, âges croissants, type d'admission).
- * Les âges reprennent `gt:age_<niveau précédent>_max` de `CampagneRequest`, qui refuse aussi un âge
- * dont le niveau précédent est vide : les âges se renseignent donc à partir de la Licence 1, sans trou.
- */
+/** Règles qui comparent plusieurs champs (dates successives). */
 function reglesCroisees(values: FormInput): Partial<Record<Champ, string>> {
     const erreurs: Partial<Record<Champ, string>> = {};
 
@@ -108,69 +66,34 @@ function reglesCroisees(values: FormInput): Partial<Record<Champ, string>> {
         }
     });
 
-    CODES_NIVEAUX.forEach((niveau, index) => {
-        if (index === 0) return;
-        const valeur = values[champAge(niveau)].trim();
-        if (valeur === '') return;
-        const precedent = CODES_NIVEAUX[index - 1];
-        const avant = values[champAge(precedent)].trim();
-        if (avant === '') {
-            erreurs[champAge(niveau)] = `Renseignez d’abord l’âge maximum en ${NIVEAUX[precedent]}.`;
-        } else if (Number(valeur) <= Number(avant)) {
-            erreurs[champAge(niveau)] = `Doit être supérieur à celui de ${NIVEAUX[precedent]} (${avant} ans).`;
-        }
-    });
-
-    if (!values.admission && !values.readmission) {
-        erreurs.admission = 'Choisissez au moins un type : admission ou réadmission.';
-    }
-
     return erreurs;
 }
 
 /** Champs obligatoires : on peut avancer sans eux, mais l'enregistrement reste grisé tant qu'il en manque un. */
 const OBLIGATOIRES: { champ: Champ; label: string }[] = [
     { champ: 'annee_campagne', label: 'Année universitaire' },
-    { champ: 'description', label: 'Description' },
+    { champ: 'libelle', label: 'Libellé' },
     ...DATES.map((item) => ({ champ: item.name as Champ, label: item.label })),
-    { champ: 'admission', label: 'Type d’admission (admission ou réadmission)' },
     { champ: 'residences', label: 'Résidences concernées' },
 ];
 
-/** Champ non renseigné (texte vide, liste vide ; pour les types d'admission : ni admission ni réadmission). */
+/** Champ non renseigné (texte vide, liste vide). */
 function estVide(champ: Champ, values: FormInput): boolean {
-    if (champ === 'admission' || champ === 'readmission') return !values.admission && !values.readmission;
     const valeur = values[champ];
     if (typeof valeur === 'string') return valeur.trim() === '';
     if (Array.isArray(valeur)) return valeur.length === 0;
     return false;
 }
 
+/** Année universitaire proposée par défaut : année en cours - année suivante (2026 → 2026-2027). */
+const ANNEE_EN_COURS = new Date().getFullYear();
+
 const VALEURS_INITIALES: CampagneFormValues = {
-    annee_campagne: '',
+    annee_campagne: `${ANNEE_EN_COURS}-${ANNEE_EN_COURS + 1}`,
+    libelle: '',
     description: '',
     periode_debut: '',
     periode_fin: '',
-    date_echeance_demande: '',
-    date_echeance_contrat: '',
-    moyenne_min: '',
-    pourcentage_validate: '',
-    distance_min: '',
-    age_L1_max: '',
-    age_L2_max: '',
-    age_L3_max: '',
-    age_M1_max: '',
-    age_M2_max: '',
-    age_D1_max: '',
-    age_D2_max: '',
-    age_D3_max: '',
-    admission: false,
-    readmission: false,
-    internationnaux: false,
-    redoublement: false,
-    pmr: false,
-    is_participate: false,
-    is_discipline: false,
     residences: [],
     documents: [],
 };
@@ -275,11 +198,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
         if (!urls.submit) return;
         router[campagne ? 'put' : 'post'](
             urls.submit,
-            {
-                ...values,
-                moyenne_min: values.moyenne_min.replace(',', '.'),
-                distance_min: values.distance_min.replace(',', '.'),
-            },
+            values,
             {
                 // Erreurs : la saisie est conservée. Succès : retour à la liste des campagnes.
                 preserveState: 'errors',
@@ -320,7 +239,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
     const placesSelectionnees = selection.reduce((total, residence) => total + residence.places, 0);
     const describedBy = (champ: Champ) => (errors[champ] ? `${champ}-error` : undefined);
     const unknownError = serverErrors.error ?? serverErrors.campagne;
-    const titre = campagne ? `Modifier la campagne ${campagne.annee_campagne}` : 'Nouvelle campagne';
+    const titre = campagne ? `Modifier la campagne ${campagne.libelle || campagne.annee_campagne}` : 'Nouvelle campagne';
     const breadcrumbs = [
         { label: 'Accueil' },
         { label: 'Gestion Hébergement', href: urls.hebergement },
@@ -336,8 +255,6 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
     };
 
     const nomsDocuments = documents.filter((document) => values.documents.includes(document.id)).map((document) => document.name);
-    const oui = (valeur: boolean) => (valeur ? 'Oui' : 'Non');
-    const unite = (valeur: string, suffixe: string) => (valeur.trim() === '' ? null : `${valeur.trim()} ${suffixe}`);
 
     return (
         <AdminLayout title={titre} breadcrumbs={breadcrumbs}>
@@ -373,8 +290,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                     {!urls.submit && <FormAlert>Vous n’avez pas le droit de {campagne ? 'modifier' : 'créer'} une campagne.</FormAlert>}
                     {campagne && dossiers > 0 && (
                         <p role="status" className="rounded-brand border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                            {dossiers} dossier(s) sont déjà rattachés à cette campagne. Les nouveaux critères s’appliqueront aux prochaines études de
-                            dossiers ; les décisions déjà prises ne sont pas recalculées.
+                            {dossiers} dossier(s) sont déjà rattachés à cette campagne ; les décisions déjà prises ne sont pas recalculées.
                         </p>
                     )}
 
@@ -398,7 +314,6 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                                 value={field.value}
                                                 onBlur={field.onBlur}
                                                 onChange={(event) => field.onChange(formaterAnnee(event.target.value, field.value))}
-                                                autoFocus
                                                 inputMode="numeric"
                                                 autoComplete="off"
                                                 maxLength={9}
@@ -411,7 +326,19 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                     />
                                 </Field>
                             </div>
-                            <Field id="description" label="Description" required error={errors.description?.message} hint="Entre 10 et 1 000 caractères.">
+                            <Field id="libelle" label="Libellé" required error={errors.libelle?.message} hint="150 caractères au maximum.">
+                                <Input
+                                    id="libelle"
+                                    autoFocus
+                                    autoComplete="off"
+                                    maxLength={150}
+                                    placeholder="Ex : Campagne d’admission et de réadmission 2025-2026"
+                                    invalid={!!errors.libelle}
+                                    aria-describedby={describedBy('libelle')}
+                                    {...register('libelle')}
+                                />
+                            </Field>
+                            <Field id="description" label="Description" error={errors.description?.message}>
                                 <textarea
                                     id="description"
                                     rows={4}
@@ -460,121 +387,6 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                     )}
 
                     {wizard.current === 2 && (
-                        <>
-                            <SectionTitle hint="Laisser vide un critère qui ne s’applique pas.">Critères académiques</SectionTitle>
-                            <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-3">
-                                <Field id="moyenne_min" label="Moyenne minimale" error={errors.moyenne_min?.message}>
-                                    <Input
-                                        id="moyenne_min"
-                                        inputMode="decimal"
-                                        placeholder="Ex : 10"
-                                        trailing={<Unite>/ 20</Unite>}
-                                        className="tabular-nums"
-                                        invalid={!!errors.moyenne_min}
-                                        aria-describedby={describedBy('moyenne_min')}
-                                        {...register('moyenne_min')}
-                                    />
-                                </Field>
-                                <Field
-                                    id="pourcentage_validate"
-                                    label="Crédits validés minimum"
-                                    error={errors.pourcentage_validate?.message}
-                                    hint="En % des 60 crédits de l’année (75 % = 45 crédits). Ne s’applique pas aux étudiants de L1."
-                                >
-                                    <Input
-                                        id="pourcentage_validate"
-                                        inputMode="numeric"
-                                        placeholder="Ex : 75"
-                                        trailing={<Unite>%</Unite>}
-                                        className="tabular-nums"
-                                        invalid={!!errors.pourcentage_validate}
-                                        aria-describedby={describedBy('pourcentage_validate')}
-                                        {...register('pourcentage_validate')}
-                                    />
-                                </Field>
-                                <Field id="distance_min" label="Distance domicile – campus" error={errors.distance_min?.message} hint="Distance minimale exigée.">
-                                    <Input
-                                        id="distance_min"
-                                        inputMode="decimal"
-                                        placeholder="Ex : 25"
-                                        trailing={<Unite>km</Unite>}
-                                        className="tabular-nums"
-                                        invalid={!!errors.distance_min}
-                                        aria-describedby={describedBy('distance_min')}
-                                        {...register('distance_min')}
-                                    />
-                                </Field>
-                            </div>
-                            <Separator />
-                            <SectionTitle hint="De 0 à 40 ans, en partant de la Licence 1 ; chaque niveau doit dépasser le précédent.">Âge maximum par niveau</SectionTitle>
-                            <div className="grid grid-cols-2 gap-x-6 gap-y-5 md:grid-cols-4">
-                                {CODES_NIVEAUX.map((niveau) => {
-                                    const champ = champAge(niveau);
-                                    return (
-                                        <Field key={niveau} id={champ} label={NIVEAUX[niveau]} error={errors[champ]?.message}>
-                                            <Input
-                                                id={champ}
-                                                inputMode="numeric"
-                                                maxLength={2}
-                                                trailing={<Unite>ans</Unite>}
-                                                className="tabular-nums"
-                                                invalid={!!errors[champ]}
-                                                aria-describedby={describedBy(champ)}
-                                                {...register(champ)}
-                                            />
-                                        </Field>
-                                    );
-                                })}
-                            </div>
-                        </>
-                    )}
-
-                    {wizard.current === 3 && (
-                        <>
-                            <SectionTitle hint="Au moins un type : admission ou réadmission.">Types d’admission</SectionTitle>
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                                {TYPES_ADMISSION.map((type) => (
-                                    <Controller
-                                        key={type.name}
-                                        control={control}
-                                        name={type.name}
-                                        render={({ field }) => (
-                                            <ToggleCard
-                                                checked={field.value}
-                                                onChange={(coche) => {
-                                                    field.onChange(coche);
-                                                    clearErrors('admission');
-                                                }}
-                                                label={type.label}
-                                                description={type.description}
-                                            />
-                                        )}
-                                    />
-                                ))}
-                            </div>
-                            {errors.admission && (
-                                <p id="admission-error" role="alert" className="text-xs font-medium text-red-600">
-                                    {errors.admission.message}
-                                </p>
-                            )}
-                            <Separator />
-                            <SectionTitle>Conditions</SectionTitle>
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                {CONDITIONS.map((condition) => (
-                                    <Controller
-                                        key={condition.name}
-                                        control={control}
-                                        name={condition.name}
-                                        render={({ field }) => (
-                                            <ToggleCard checked={field.value} onChange={field.onChange} label={condition.label} description={condition.description} />
-                                        )}
-                                    />
-                                ))}
-                            </div>
-                        </>
-                    )}
-
-                    {wizard.current === 4 && (
                         <>
                             <SectionTitle hint="Cités ouvertes et places actuellement libres.">
                                 Résidences concernées <span className="text-red-600">*</span>
@@ -650,7 +462,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                         </>
                     )}
 
-                    {wizard.current === 5 && (
+                    {wizard.current === 3 && (
                         <div className="space-y-4">
                             {manquants.length > 0 && (
                                 <div role="status" className="rounded-brand border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -672,33 +484,14 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                 onEdit={() => wizard.goTo(0)}
                                 rows={[
                                     ['Année universitaire', values.annee_campagne],
+                                    ['Libellé', values.libelle],
                                     ['Description', values.description],
                                 ]}
                             />
                             <RecapSection title="Calendrier" onEdit={() => wizard.goTo(1)} rows={DATES.map((item) => [item.label, formatDate(values[item.name])])} />
                             <RecapSection
-                                title="Critères"
-                                onEdit={() => wizard.goTo(2)}
-                                rows={[
-                                    ['Moyenne minimale', unite(values.moyenne_min, '/ 20')],
-                                    ['Crédits validés minimum', unite(values.pourcentage_validate, '%')],
-                                    ['Distance domicile – campus', unite(values.distance_min, 'km')],
-                                    [
-                                        'Âges maximum',
-                                        CODES_NIVEAUX.filter((niveau) => values[champAge(niveau)].trim() !== '')
-                                            .map((niveau) => `${niveau} : ${values[champAge(niveau)]} ans`)
-                                            .join(' · '),
-                                    ],
-                                ]}
-                            />
-                            <RecapSection
-                                title="Public et conditions"
-                                onEdit={() => wizard.goTo(3)}
-                                rows={[...TYPES_ADMISSION, ...CONDITIONS].map((item): [string, string] => [item.label, oui(values[item.name])])}
-                            />
-                            <RecapSection
                                 title="Résidences et documents"
-                                onEdit={() => wizard.goTo(4)}
+                                onEdit={() => wizard.goTo(2)}
                                 rows={[
                                     [
                                         `Résidences (${placesSelectionnees} place(s) libre(s))`,
@@ -721,8 +514,4 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
             </form>
         </AdminLayout>
     );
-}
-
-function Unite({ children }: { children: string }) {
-    return <span className="pointer-events-none px-2.5 text-xs text-muted">{children}</span>;
 }

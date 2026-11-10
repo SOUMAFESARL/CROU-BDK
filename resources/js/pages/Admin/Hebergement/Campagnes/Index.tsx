@@ -2,7 +2,7 @@
 import { ClipboardList, Eye, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { CampagneDetailsSheet, StatutCampagneBadge } from '@/components/campagnes/details-sheet';
-import { formatDate, typeCampagne, type CampagneItem, type CampagnesProps, type FiltreCampagne } from '@/components/campagnes/types';
+import { formatDate, nomCampagne, typeCampagne, type CampagneItem, type CampagnesProps, type FiltreCampagne } from '@/components/campagnes/types';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
@@ -34,7 +34,8 @@ export default function CampagnesIndex({ campagnes, stats, etat, urls }: Campagn
             header: 'Campagne',
             cell: (campagne) => (
                 <div className="min-w-44">
-                    <p className="font-medium whitespace-nowrap text-gray-900">Campagne {campagne.annee}</p>
+                    <p className="font-medium whitespace-nowrap text-gray-900">{nomCampagne(campagne)}</p>
+                    {campagne.libelle && <p className="text-xs text-muted tabular-nums">Année {campagne.annee}</p>}
                     {campagne.description && <p className="line-clamp-1 max-w-72 text-xs text-muted">{campagne.description}</p>}
                 </div>
             ),
@@ -163,7 +164,7 @@ export default function CampagnesIndex({ campagnes, stats, etat, urls }: Campagn
                 description={
                     suppression && (
                         <>
-                            La campagne {suppression.annee} ne sera plus proposée aux étudiants. Une campagne pour laquelle des demandes ont déjà été déposées
+                            La campagne « {nomCampagne(suppression)} » ne sera plus proposée aux étudiants. Une campagne pour laquelle des demandes ont déjà été déposées
                             ne peut pas être supprimée.
                         </>
                     )

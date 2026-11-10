@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
-import { CONDITIONS, dureeJours, formatDate, NIVEAUX, STATUTS_CAMPAGNE, TYPES_ADMISSION, typeCampagne, type CampagneItem, type Niveau, type StatutCampagne } from './types';
+import { CONDITIONS, dureeJours, formatDate, NIVEAUX, nomCampagne, STATUTS_CAMPAGNE, TYPES_ADMISSION, typeCampagne, type CampagneItem, type Niveau, type StatutCampagne } from './types';
 
 type DetailsSheetProps = {
     campagne: CampagneItem | null;
@@ -42,7 +42,8 @@ function Contenu({ campagne }: { campagne: CampagneItem }) {
                 </span>
                 <div className="min-w-0 flex-1">
                     <SheetDescription className="text-xs text-muted">Détail de la campagne</SheetDescription>
-                    <SheetTitle className="truncate text-lg font-medium text-gray-900">Campagne {campagne.annee}</SheetTitle>
+                    <SheetTitle className="truncate text-lg font-medium text-gray-900">{nomCampagne(campagne)}</SheetTitle>
+                    {campagne.libelle && <p className="text-xs text-muted tabular-nums">Année universitaire {campagne.annee}</p>}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                         <StatutCampagneBadge statut={campagne.statut} />
                         <Badge variant="success">{typeCampagne(campagne.conditions)}</Badge>

@@ -8,6 +8,16 @@ Le rôle d'identifiant **1** conserve tous les droits. Le nom d'un rôle ne donn
 
 La migration `2026_09_29_000001_complete_admin_permissions.php` complète les actions existantes et ajoute les modules manquants. Elle préserve les affectations existantes et n'accorde les nouvelles permissions qu'au rôle 1. Sa méthode de retour conserve volontairement les permissions pour ne pas supprimer des affectations personnalisées.
 
+La migration `2026_11_10_000002_add_eligibilite_permissions.php` crée le socle des droits du paramétrage des campagnes (lot L1 de `docs/notes/plan-integration-campagne-criteres.pdf`), accordé au seul rôle 1 :
+
+| Module | Permission | Usage |
+| --- | --- | --- |
+| `hebergement.eligibilite.quotas` | `.view`, `.configure` | Consulter / saisir les places et quotas par cité |
+| `hebergement.eligibilite.regles` | `.view`, `.configure` | Consulter / paramétrer les règles d’éligibilité |
+| `hebergement.eligibilite` | `.generate` | Générer la liste provisoire et la simulation à blanc |
+
+Les routes correspondantes seront déclarées dans `config/admin_permissions.php` avec les écrans de paramétrage.
+
 Attribuer les droits nécessaires dans **Paramètres → Rôles et permissions**. Créer un utilisateur exige `utilisateurs.create` et `parametrage.roles.assign`. Modifier son rôle exige aussi `parametrage.roles.assign`. Seul le rôle 1 peut affecter le rôle 1 ou modifier un compte qui le possède.
 
 Validation ciblée :

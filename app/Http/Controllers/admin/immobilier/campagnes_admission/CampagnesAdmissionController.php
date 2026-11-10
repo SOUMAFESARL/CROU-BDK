@@ -561,23 +561,15 @@ class CampagnesAdmissionController extends Controller
         $citeIds = $campagne->residences->pluck('cite_id')->map(fn ($cite) => (string) $cite)->unique()->values()->all();
         $documentIds = $campagne->documentCampagnes->pluck('document_id')->map(fn ($document) => (string) $document)->unique()->values()->all();
         $date = fn ($valeur) => $valeur ? Carbon::parse($valeur)->toDateString() : '';
-        $texte = fn ($valeur) => $valeur === null ? '' : (string) $valeur;
 
         return Inertia::render('Admin/Hebergement/Campagnes/Edit', $this->optionsFormulaire($citeIds, $documentIds) + [
             'campagne' => [
                 'id' => (string) $campagne->id_campagne,
                 'annee_campagne' => (string) $campagne->annee_campagne,
+                'libelle' => (string) $campagne->libelle,
                 'description' => (string) $campagne->description,
                 'periode_debut' => $date($campagne->periode_debut),
                 'periode_fin' => $date($campagne->periode_fin),
-                'date_echeance_demande' => $date($campagne->date_echeance_demande),
-                'date_echeance_contrat' => $date($campagne->date_echeance_contrat),
-                'moyenne_min' => $texte($campagne->moyenne_min),
-                'pourcentage_validate' => $texte($campagne->pourcentage_validate),
-                'distance_min' => $texte($campagne->distance_min),
-                ...collect(self::NIVEAUX)->mapWithKeys(fn ($niveau) => ['age_'.$niveau.'_max' => $texte($campagne->{'age_'.$niveau.'_max'})])->all(),
-                ...collect(['admission', 'readmission', 'internationnaux', 'redoublement', 'pmr', 'is_participate', 'is_discipline'])
-                    ->mapWithKeys(fn ($champ) => [$champ => (bool) $campagne->{$champ}])->all(),
                 'residences' => $citeIds,
                 'documents' => $documentIds,
             ],
@@ -655,6 +647,7 @@ class CampagnesAdmissionController extends Controller
         return [
             'id' => (string) $campagne->id_campagne,
             'annee' => $campagne->annee_campagne,
+            'libelle' => $campagne->libelle,
             'description' => $campagne->description,
             'statut' => $campagne->statut,
             'periode_debut' => $date($campagne->periode_debut),
