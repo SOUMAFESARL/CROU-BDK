@@ -31,12 +31,11 @@ class ParametrageHebergement
         ],
         [
             'titre' => 'Campagnes & admissions',
-            'description' => 'Capacités, résidences ouvertes, critères et barème de classement des campagnes.',
+            'description' => 'Capacités, résidences ouvertes et critères d’admission et de réadmission des campagnes.',
             'modules' => [
                 ['label' => 'Capacités et quotas', 'icon' => 'pie', 'route' => 'admin.hebergement.parametrage-herb.quotas-campagne.index', 'description' => 'Places et demandes par campagne'],
                 ['label' => 'Bâtiments par campagne', 'icon' => 'building', 'route' => 'admin.hebergement.parametrage-herb.batiments-campagne.index', 'description' => 'Résidences ouvertes'],
-                ['label' => 'Règles d’éligibilité', 'icon' => 'check', 'route' => 'admin.hebergement.parametrage-herb.regles-campagne.index', 'description' => 'Critères des campagnes'],
-                ['label' => 'Scoring', 'icon' => 'star', 'route' => 'admin.hebergement.parametrage-herb.scoring-campagne.index', 'description' => 'Barème de classement'],
+                ['label' => 'Critères de la campagne', 'icon' => 'check', 'route' => 'admin.hebergement.parametrage-herb.criteres-campagne.index', 'description' => 'Admission et réadmission : places, conditions et classement'],
             ],
         ],
         [
@@ -96,7 +95,7 @@ class ParametrageHebergement
         ])->values()->all();
     }
 
-    /** Critères et conditions d'une campagne (page « Règles d'éligibilité »). */
+    /** Contexte d'une campagne affiché avec ses critères (page « Critères de la campagne »). */
     public function regles(Campagne $campagne): array
     {
         $campagne->loadMissing('documentCampagnes.documents', 'residences.cites');
@@ -105,8 +104,6 @@ class ParametrageHebergement
         return [
             'periode_debut' => $date($campagne->periode_debut),
             'periode_fin' => $date($campagne->periode_fin),
-            'date_echeance_demande' => $date($campagne->date_echeance_demande),
-            'date_echeance_contrat' => $date($campagne->date_echeance_contrat),
             'moyenne_min' => $campagne->moyenne_min,
             'pourcentage_validate' => $campagne->pourcentage_validate !== null ? (int) $campagne->pourcentage_validate : null,
             'distance_min' => $campagne->distance_min,

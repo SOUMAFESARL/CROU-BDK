@@ -1,6 +1,7 @@
 import { Link, router } from '@inertiajs/react';
-import { CalendarClock, CalendarDays, CircleCheck, CirclePlay, Eye, FolderOpen, GraduationCap, Info, MapPin, Search, X } from 'lucide-react';
+import { CalendarClock, CircleCheck, CirclePlay, Eye, FolderOpen, GraduationCap, Info, MapPin, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { OngletsCampagnesAdmissions } from '@/components/campagnes/onglets-campagnes-admissions';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
@@ -213,20 +214,9 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
 
     return (
         <AdminLayout title="Admissions">
-            <PageHeader
-                title="Admissions"
-                description="Suivez les demandes de logement et traitez chaque dossier de candidature."
-                actions={
-                    urls.campagnes && (
-                        <Link
-                            href={urls.campagnes}
-                            className={cn(buttonVariants({ variant: 'primary' }), 'h-10 px-4 font-medium shadow-sm')}
-                        >
-                            <CalendarDays {...ICON} aria-hidden /> Campagnes
-                        </Link>
-                    )
-                }
-            />
+            <PageHeader title="Admissions" description="Suivez les demandes de logement et traitez chaque dossier de candidature." />
+
+            <OngletsCampagnesAdmissions actif="admissions" urls={{ campagnes: urls.campagnes, admissions: urls.filtres?.nouvelles_demandes ?? null }} />
 
             {/* Bandeau de la campagne active */}
             <div className={cn('mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-brand border px-4 py-3 text-sm', campagneActive ? 'border-[#C6E3A6] bg-soft text-[#004D00]' : 'bg-white text-muted')}>

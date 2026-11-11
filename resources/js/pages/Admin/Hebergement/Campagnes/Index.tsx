@@ -1,16 +1,20 @@
  import { Link, router } from '@inertiajs/react';
-import { ClipboardList, Eye, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { CalendarDays, CircleDot, Eye, Pencil, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import type { Volet } from '@/components/campagnes/criteres';
 import { CampagneDetailsSheet, StatutCampagneBadge } from '@/components/campagnes/details-sheet';
-import { formatDate, nomCampagne, typeCampagne, type CampagneItem, type CampagnesProps, type FiltreCampagne } from '@/components/campagnes/types';
+import { OngletsCampagnesAdmissions } from '@/components/campagnes/onglets-campagnes-admissions';
+import { nomCampagne, STATUTS_CAMPAGNE, typeCampagne, type CampagneItem, type CampagnesProps, type FiltreCampagne, type StatutCampagne } from '@/components/campagnes/types';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { PageHeader } from '@/components/ui/page-header';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatCard, type KpiTone } from '@/components/ui/stat-card';
 import { cn } from '@/lib/utils';
 
@@ -22,11 +26,36 @@ const FILTRES: { filtre: FiltreCampagne; label: string; titre: string; stat: key
 ];
 
 /** Liste des campagnes d'admission et de réadmission (remplace la vue Blade `campagnes.blade.php`). */
-export default function CampagnesIndex({ campagnes, stats, etat, urls }: CampagnesProps) {
+export default function CampagnesIndex({ campagnes, stats, etat, filters, annees, urls }: CampagnesProps) {
     const [details, setDetails] = useState<CampagneItem | null>(null);
     const [suppression, setSuppression] = useState<CampagneItem | null>(null);
     const [traitement, setTraitement] = useState(false);
     const filtre = FILTRES.find((item) => item.filtre === etat) ?? FILTRES[0];
+    const [recherche, setRecherche] = useState(filters.q);
+    const premierRendu = useRef(true);
+
+    // Recherche et année universitaire côté serveur (retour en page 1, statut conservé par le segment de l'URL).
+    const appliquer = (valeurs: { q: string; annee: string }, chemin = window.location.pathname) => {
+        const parametres: Record<string, string> = {};
+        if (valeurs.q.trim() !== '') parametres.q = valeurs.q.trim();
+        if (valeurs.annee !== '') parametres.annee = valeurs.annee;
+        router.get(chemin, parametres, { preserveState: true, preserveScroll: true, replace: true });
+    };
+    // Les URL des statuts portent déjà la recherche et l'année : on ne garde que leur chemin.
+    const cheminStatut = (statut: FiltreCampagne) => urls.filtres[statut].split('?')[0];
+
+    // Recherche lancée 350 ms après la dernière frappe.
+    useEffect(() => {
+        if (premierRendu.current) {
+            premierRendu.current = false;
+            return;
+        }
+        if (recherche.trim() === filters.q) return;
+        const minuteur = window.setTimeout(() => appliquer({ q: recherche, annee: filters.annee }), 350);
+        return () => window.clearTimeout(minuteur);
+    }, [recherche]);
+
+    const filtreActif = filters.q !== '' || filters.annee !== '' || filtre.filtre !== 'tous';
 
     const colonnes: DataTableColumn<CampagneItem>[] = [
         {
@@ -40,28 +69,17 @@ export default function CampagnesIndex({ campagnes, stats, etat, urls }: Campagn
                 </div>
             ),
         },
-        {
-            key: 'periode',
-            header: 'Période',
-            className: 'whitespace-nowrap tabular-nums',
-            cell: (campagne) => (
-                <>
-                    {formatDate(campagne.periode_debut)} <span className="text-muted">→</span> {formatDate(campagne.periode_fin)}
-                </>
-            ),
-        },
         { key: 'type', header: 'Type', cell: (campagne) => <Badge variant="success">{typeCampagne(campagne.conditions)}</Badge> },
         { key: 'statut', header: 'Statut', cell: (campagne) => <StatutCampagneBadge statut={campagne.statut} /> },
         {
-            key: 'documents',
-            header: 'Documents requis',
-            cell: (campagne) => (
-                <Puces
-                    valeurs={campagne.documents.slice(0, 3)}
-                    reste={campagne.documents.length - 3}
-                    variant="info"
-                />
-            ),
+            key: 'criteres',
+            header: 'Critères',
+            cell: (campagne) => {
+                // Appliqués seulement si les critères de chaque volet ouvert par la campagne sont en vigueur.
+                const etats = (['admission', 'readmission'] as Volet[]).map((volet) => campagne.criteres_etat[volet]).filter(Boolean);
+                const appliques = etats.length > 0 && etats.every((etat) => etat!.etat === 'en_vigueur');
+                return <Badge variant={appliques ? 'success' : 'warning'}>{appliques ? 'Appliqués' : 'Non appliqués'}</Badge>;
+            },
         },
         {
             key: 'residences',
@@ -71,13 +89,16 @@ export default function CampagnesIndex({ campagnes, stats, etat, urls }: Campagn
         {
             key: 'actions',
             header: <span className="sr-only">Actions</span>,
-            headClassName: 'w-28',
+            headClassName: 'w-40',
             className: 'text-right',
             cell: (campagne) => (
                 <RowActions>
                     <RowAction label="Voir le détail" icon={Eye} tone="view" onClick={() => setDetails(campagne)} />
+                    {campagne.urls.criteres && (
+                        <RowAction label="Paramétrer les critères" icon={SlidersHorizontal} tone="view" onClick={() => router.visit(campagne.urls.criteres!)} />
+                    )}
                     {campagne.urls.edit && (
-                        <RowAction label="Modifier" icon={Pencil} tone="edit" onClick={() => router.visit(campagne.urls.edit!)} />
+                        <RowAction label="Modifier la campagne" icon={Pencil} tone="edit" onClick={() => router.visit(campagne.urls.edit!)} />
                     )}
                     {campagne.urls.destroy && (
                         <RowAction label="Supprimer" icon={Trash2} tone="danger" onClick={() => setSuppression(campagne)} />
@@ -101,30 +122,18 @@ export default function CampagnesIndex({ campagnes, stats, etat, urls }: Campagn
 
     return (
         <AdminLayout title="Campagnes">
-            <div className="mb-6 flex flex-col gap-4">
-                <div className="flex flex-col gap-1">
-                    <h1 className="page-title text-xl font-medium text-gray-900">Campagnes</h1>
-                    <p className="text-sm text-muted">Planifiez les campagnes d’admission et de réadmission, leurs critères et les résidences ouvertes.</p>
+            <PageHeader title="Campagnes" description="Planifiez les campagnes d’admission et de réadmission, leurs critères et les résidences ouvertes." />
+
+            <OngletsCampagnesAdmissions actif="campagnes" urls={{ campagnes: urls.filtres.tous, admissions: urls.admissions }} />
+
+            {urls.create && (
+                <div className="mb-6 flex flex-wrap items-center justify-end gap-2">
+                    <Link href={urls.create} className={cn(buttonVariants({ size: 'sm' }), 'h-10 px-4')}>
+                        <Plus {...ICON} aria-hidden />
+                        Nouvelle campagne
+                    </Link>
                 </div>
-                <Separator />
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                    {urls.admissions && (
-                        <a
-                            href={urls.admissions}
-                            className="inline-flex h-10 items-center gap-2 rounded-brand border border-primary bg-white px-4 text-sm font-medium text-primary transition-colors hover:bg-soft focus-visible:bg-soft focus-visible:outline-none"
-                        >
-                            <ClipboardList {...ICON} aria-hidden />
-                            Admissions
-                        </a>
-                    )}
-                    {urls.create && (
-                        <Link href={urls.create} className={cn(buttonVariants({ size: 'sm' }), 'h-10 px-4')}>
-                            <Plus {...ICON} aria-hidden />
-                            Nouvelle campagne
-                        </Link>
-                    )}
-                </div>
-            </div>
+            )}
 
             {/* Indicateurs par statut, qui servent aussi de filtres. */}
             <nav aria-label="Filtrer les campagnes par statut" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -152,7 +161,72 @@ export default function CampagnesIndex({ campagnes, stats, etat, urls }: Campagn
                     <h2 className="text-base font-medium text-gray-900">{filtre.titre}</h2>
                     <span className="text-sm text-muted">{campagnes.total} campagne(s)</span>
                 </div>
-                <DataTable columns={colonnes} data={campagnes} rowKey={(campagne) => campagne.id} emptyMessage="Aucune campagne trouvée pour ce filtre." />
+                <DataTable
+                    columns={colonnes}
+                    data={campagnes}
+                    rowKey={(campagne) => campagne.id}
+                    emptyMessage={filters.q !== '' || filters.annee !== '' ? 'Aucune campagne ne correspond à votre recherche.' : 'Aucune campagne trouvée pour ce filtre.'}
+                    toolbar={
+                        <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                            <div className="w-full sm:max-w-sm">
+                                <Input
+                                    type="search"
+                                    value={recherche}
+                                    onChange={(event) => setRecherche(event.target.value)}
+                                    placeholder="Rechercher par libellé, année ou description…"
+                                    aria-label="Rechercher une campagne"
+                                    icon={<Search />}
+                                    className="h-10"
+                                />
+                            </div>
+                            <Select value={filters.annee || 'toutes'} onValueChange={(valeur) => appliquer({ q: recherche, annee: valeur === 'toutes' ? '' : valeur })}>
+                                <SelectTrigger aria-label="Filtrer par année universitaire" className="h-10 w-full sm:w-60">
+                                    <CalendarDays {...ICON} className="text-muted" aria-hidden />
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="toutes">Toutes les années universitaires</SelectItem>
+                                    {annees.map((annee) => (
+                                        <SelectItem key={annee} value={annee}>
+                                            {annee}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Select
+                                value={filtre.filtre}
+                                onValueChange={(valeur) => appliquer({ q: recherche, annee: filters.annee }, cheminStatut(valeur as FiltreCampagne))}
+                            >
+                                <SelectTrigger aria-label="Filtrer par statut" className="h-10 w-full sm:w-48">
+                                    <CircleDot {...ICON} className="text-muted" aria-hidden />
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="tous">Tous les statuts</SelectItem>
+                                    {(Object.keys(STATUTS_CAMPAGNE) as StatutCampagne[]).map((statut) => (
+                                        <SelectItem key={statut} value={statut}>
+                                            {STATUTS_CAMPAGNE[statut].label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {filtreActif && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-10"
+                                    onClick={() => {
+                                        setRecherche('');
+                                        appliquer({ q: '', annee: '' }, cheminStatut('tous'));
+                                    }}
+                                >
+                                    <X className="size-4" aria-hidden />
+                                    Réinitialiser
+                                </Button>
+                            )}
+                        </div>
+                    }
+                />
             </section>
 
             <CampagneDetailsSheet campagne={details} onClose={() => setDetails(null)} />
@@ -179,7 +253,7 @@ export default function CampagnesIndex({ campagnes, stats, etat, urls }: Campagn
     );
 }
 
-/** Pastilles d'une cellule (documents, résidences), avec « +n » au-delà. */
+/** Pastilles d'une cellule (résidences), avec « +n » au-delà. */
 function Puces({ valeurs, reste = 0, variant }: { valeurs: string[]; reste?: number; variant: 'success' | 'info' }) {
     if (valeurs.length === 0) return <span className="text-muted">—</span>;
 

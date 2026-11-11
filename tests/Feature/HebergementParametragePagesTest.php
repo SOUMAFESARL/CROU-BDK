@@ -38,6 +38,9 @@ class HebergementParametragePagesTest extends TestCase
             '2026_10_26_000001_add_distance_thresholds_to_campaign_scorings.php',
             '2026_10_27_000001_add_criteria_to_campaign_scorings.php',
             '2026_09_24_000001_create_housing_entry_workflow.php',
+            // Critères d'admission / de réadmission (un jeu de critères par volet).
+            '2026_11_11_000001_create_campagne_regles_table.php',
+            '2026_11_11_000002_add_volet_to_campagne_regles.php',
         ] as $migration) {
             (require database_path('migrations/'.$migration))->up();
         }
@@ -81,6 +84,7 @@ class HebergementParametragePagesTest extends TestCase
         });
         (require database_path('migrations/2026_10_27_000002_add_validation_auto_to_campagne.php'))->up();
         Schema::create('residence_campagne', function (Blueprint $t) { $t->string('id_residence_campagne')->primary(); $t->string('campagne_id'); $t->string('cite_id'); $t->timestamps(); });
+        Schema::create('filiere', function (Blueprint $t) { $t->increments('id_filiere'); $t->string('code_filiere'); $t->string('name')->nullable(); $t->timestamps(); });
         Schema::create('document', function (Blueprint $t) {
             $t->string('id_document')->primary(); $t->string('name'); $t->string('slug'); $t->text('description')->nullable(); $t->integer('delai_validite_mois')->nullable();
             $t->boolean('champs_requis')->default(false); $t->boolean('statut')->default(true); $t->integer('ordre_affiche')->default(0);
@@ -150,7 +154,7 @@ class HebergementParametragePagesTest extends TestCase
         $this->assertSame(['Parc immobilier', 'Campagnes & admissions', 'Documents et entrée dans les lieux'], array_column($page['props']['sections'], 'titre'));
         $hrefs = collect($page['props']['sections'])->flatMap(fn ($s) => array_column($s['modules'], 'href'));
         $this->assertContains(route('admin.housing-entry.settings'), $hrefs);
-        $this->assertCount(9, $hrefs);
+        $this->assertCount(8, $hrefs);
     }
 
     public function test_types_de_cite_avec_usage_et_recherche(): void
@@ -224,50 +228,17 @@ class HebergementParametragePagesTest extends TestCase
         $this->assertSame([3, 12, 1, 0], [(int) $document->ordre_affiche, (int) $document->delai_validite_mois, (int) $document->champs_requis, (int) $document->statut]);
     }
 
-    public function test_scoring_propose_des_exemples_sans_bareme(): void
+    public function test_le_bareme_de_score_n_est_plus_parametrable(): void
     {
+        // La page unique « Critères de la campagne » remplace « Règles d'éligibilité », « Scoring » et les pages par volet.
+        foreach (['scoring-campagne.index', 'scoring-campagne.store', 'regles-campagne.index', 'criteres-admission.index', 'criteres-readmission.index'] as $route) {
+            $this->assertFalse(\Illuminate\Support\Facades\Route::has(self::BASE.$route), $route);
+        }
         $this->admin();
-        $page = $this->page(route(self::BASE.'scoring-campagne.index'));
-
-        $this->assertSame('Admin/Hebergement/Parametrage/Scoring', $page['component']);
-        $this->assertSame('camp', $page['props']['campagneId']);
-        $this->assertNull($page['props']['scoring']);
-        $this->assertSame(route(self::BASE.'scoring-campagne.store'), $page['props']['urls']['store']);
-        $this->assertArrayHasKey('academique', $page['props']['fields']);
-        $this->assertContains('age', array_column($page['props']['sources'], 'key'));
-    }
-
-    /** Barème valide minimal, avec le moment de la validation automatique demandé. */
-    private function bareme(string $mode, ?string $date = null): array
-    {
-        $points = collect(\App\Http\Services\CampaignScoringService::FIELDS)->map(fn ($champs) => array_fill_keys(array_keys($champs), 50))->all();
-        return ['campagne_id' => 'camp', 'active' => 1, 'pmr_first' => 0, 'minimum_score' => 50,
-            'weights' => ['social' => 25, 'academique' => 25, 'geographique' => 25, 'specifique' => 25], 'points' => $points,
-            'mode_validation_auto' => $mode, 'date_validation_auto' => $date];
-    }
-
-    public function test_scoring_fixe_la_date_de_validation_automatique_de_la_campagne(): void
-    {
-        $this->admin();
-        DB::table('campagne')->update(['periode_debut' => '2026-11-01', 'periode_fin' => '2026-11-30', 'date_echeance_demande' => '2026-12-15']);
-        $page = $this->page(route(self::BASE.'scoring-campagne.index'));
-        $this->assertSame('reception', $page['props']['validation']['mode']);
-
-        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('date', '2026-12-01'))->assertSessionHasNoErrors();
-        $this->assertSame('2026-12-01', substr((string) DB::table('campagne')->value('date_validation_auto'), 0, 10));
-
-        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('reception'))->assertSessionHasNoErrors();
-        $this->assertNull(DB::table('campagne')->value('date_validation_auto'));
-    }
-
-    public function test_scoring_refuse_une_date_de_validation_hors_campagne(): void
-    {
-        $this->admin();
-        DB::table('campagne')->update(['periode_debut' => '2026-11-01', 'periode_fin' => '2026-11-30', 'date_echeance_demande' => '2026-12-15']);
-        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('date', '2026-10-15'))->assertSessionHasErrors('date_validation_auto');
-        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('date', '2026-12-20'))->assertSessionHasErrors('date_validation_auto');
-        $this->post(route(self::BASE.'scoring-campagne.store'), $this->bareme('date'))->assertSessionHasErrors('date_validation_auto');
-        $this->assertSame(0, DB::table('campaign_scorings')->count());
+        $libelles = collect($this->page(route(self::BASE.'index'))['props']['sections'])->flatMap(fn ($s) => array_column($s['modules'], 'label'));
+        $this->assertContains('Critères de la campagne', $libelles);
+        $this->assertNotContains('Critères d’admission', $libelles);
+        $this->assertNotContains('Scoring', $libelles);
     }
 
     public function test_pages_de_campagne_lisent_les_donnees_reelles(): void
@@ -286,14 +257,15 @@ class HebergementParametragePagesTest extends TestCase
         $this->assertSame(2, $quotas['demandes']['total']);
         $this->assertSame(1, $quotas['demandes']['boursiers']);
 
-        $regles = $this->page(route(self::BASE.'regles-campagne.index', ['campagne_id' => 'inconnue']))['props'];
+        $criteres = $this->page(route(self::BASE.'criteres-campagne.index', ['campagne_id' => 'inconnue']))['props'];
         // Campagne inconnue : retour à la plus récente.
-        $this->assertSame('camp', $regles['campagneId']);
-        $this->assertEquals(10, $regles['regles']['moyenne_min']);
-        $this->assertSame(['L1' => 25], $regles['regles']['ages']);
-        $this->assertSame(['Relevé de notes'], $regles['regles']['documents']);
-        $this->assertSame(['Cité A'], $regles['regles']['residences']);
-        $this->assertTrue($regles['regles']['conditions']['admission']);
+        $this->assertSame('camp', $criteres['campagneId']);
+        $this->assertSame(['Relevé de notes'], $criteres['contexte']['documents']);
+        $this->assertSame(['Cité A'], $criteres['contexte']['residences']);
+        $this->assertTrue($criteres['contexte']['conditions']['admission']);
+        // Campagne ouverte à la seule admission : un seul niveau de paramétrage, celui de l'admission.
+        $this->assertSame(['admission'], array_keys($criteres['niveaux']));
+        $this->assertSame('admission', $criteres['niveau']);
     }
 
     public function test_parametrage_de_l_entree_en_react(): void
@@ -312,6 +284,6 @@ class HebergementParametragePagesTest extends TestCase
     {
         $this->admin(2);
         $this->get(route(self::BASE.'type-cite.index'))->assertForbidden();
-        $this->get(route(self::BASE.'regles-campagne.index'))->assertForbidden();
+        $this->get(route(self::BASE.'criteres-campagne.index'))->assertForbidden();
     }
 }

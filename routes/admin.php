@@ -9,10 +9,10 @@ use App\Http\Controllers\admin\immobilier\parametrage\type_cite\TypeCiteControll
 use App\Http\Controllers\admin\immobilier\parametrage\type_equipement\TypeEquipementController;
 use App\Http\Controllers\admin\immobilier\equipements\EquipementController;
 use App\Http\Controllers\admin\immobilier\campagnes_admission\CampagnesAdmissionController;
+use App\Http\Controllers\admin\immobilier\campagnes_admission\CriteresCampagneController;
 use App\Http\Controllers\admin\immobilier\parametrage\type_chambre\TypeChambreController;
 use App\Http\Controllers\admin\immobilier\parametrage\quotas_campagne\QuotasCampagneController;
 use App\Http\Controllers\admin\immobilier\parametrage\batiments_campagne\BatimentsCampagneController;
-use App\Http\Controllers\admin\immobilier\parametrage\scoring_campagne\ScoringCampagneController;
 use App\Http\Controllers\admin\immobilier\parametrage\regles_campagne\ReglesCampagnesController;
 use App\Http\Controllers\admin\immobilier\depart_etat_des_lieux\DepartEtatDesLieuxController;
 use App\Http\Controllers\admin\immobilier\depart_etat_des_lieux\DepartureSettingController;
@@ -255,6 +255,17 @@ Route::middleware(['admin'])->group(function () {
 
 
 
+    // Actions sur les critères d'un volet (admission / réadmission) d'une campagne : définis dans la page « Critères de la campagne ».
+    Route::prefix('gestion-hebergement/campagnes/{campagne}/criteres/{volet}')
+        ->name('hebergement.eligibilite.criteres.')
+        ->controller(CriteresCampagneController::class)
+        ->whereIn('volet', ['admission', 'readmission'])
+        ->group(function () {
+            Route::put('/', 'update')->name('update');
+            Route::post('/appliquer', 'appliquer')->name('appliquer');
+            Route::delete('/brouillon', 'abandonner')->name('abandonner');
+        });
+
     Route::prefix('gestion-hebergement/depart-etat-des-lieux')
         ->name('hebergement.depart_etat_des_lieux.')
         ->controller(DepartEtatDesLieuxController::class)
@@ -468,20 +479,8 @@ Route::middleware(['admin'])->group(function () {
 
                 });
 
-            Route::prefix('regles-campagne')->name('regles-campagne.')
-                ->controller(ReglesCampagnesController::class)
-                ->group(function () {
-                    Route::get('/', 'index')->name('index');
-
-                });
-
-            Route::prefix('scoring-campagne')->name('scoring-campagne.')
-                ->controller(ScoringCampagneController::class)
-                ->group(function () {
-                    Route::get('/', 'index')->name('index');
-                    Route::post('/', 'store')->middleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class)->name('store');
-
-                });
+            // Critères d'une campagne : une seule page, un niveau par volet ouvert (admission, réadmission).
+            Route::get('criteres-campagne', [ReglesCampagnesController::class, 'index'])->name('criteres-campagne.index');
 
         });
 

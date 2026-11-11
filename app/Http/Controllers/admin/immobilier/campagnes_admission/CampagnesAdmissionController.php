@@ -464,21 +464,42 @@ class CampagnesAdmissionController extends Controller
 
         // En cas d'erreur, le service renvoie une liste vide (et le dépôt une chaîne) : la page reste affichable.
         $campagnes = $result['data']['campagnes'] instanceof EloquentCollection ? $result['data']['campagnes'] : new EloquentCollection();
+        // Recherche (libellé, année, description) et filtre par année universitaire, appliqués avant la pagination.
+        // Le statut est filtré par le segment `{etat}` de l'URL (indicateurs et liste « Statut »).
+        $annees = Campagne::query()->whereNotNull('annee_campagne')->where('annee_campagne', '!=', '')
+            ->distinct()->orderByDesc('annee_campagne')->pluck('annee_campagne')->map(fn ($annee) => (string) $annee)->values();
+        $recherche = trim((string) $request->query('q', ''));
+        $annee = (string) $request->query('annee', '');
+        $annee = $annees->contains($annee) ? $annee : '';
+        $campagnes = $this->rechercherCampagnes($campagnes, $recherche, $annee);
         $campagnes->loadMissing('residences.cites.batiment.chambresDisponibles');
         $page = LengthAwarePaginator::resolveCurrentPage();
         $admin = $request->user('admin');
         $url = fn (string $route) => $access->allows($admin, $route) ? route($route) : null;
+        $pageCampagnes = $campagnes->forPage($page, 10);
+        // Critères de la campagne : étape qui suit la création d'une campagne (un seul bouton vers la page du paramétrage).
+        $criteres = app(\App\Http\Services\Eligibilite\CriteresCampagne::class);
+        $vueCriteres = app(\App\Http\Services\Eligibilite\CriteresCampagneVue::class);
+        $etatsCriteres = $criteres->etats($pageCampagnes->map(fn (Campagne $campagne) => (string) $campagne->id_campagne)->values()->all());
+        $lien = fn (string $route, Campagne $campagne) => $access->allows($admin, $route) ? route($route, $campagne->id_campagne) : null;
+        $voirCriteres = $vueCriteres->visible($admin);
 
         return Inertia::render('Admin/Hebergement/Campagnes/Index', [
             'campagnes' => (new LengthAwarePaginator(
-                $campagnes->forPage($page, 10)->map(fn (Campagne $campagne) => $this->campagneListe($campagne) + [
-                    'urls' => [
-                        'edit' => $access->allows($admin, 'admin.hebergement.campagnes_admission.edit_campagne')
-                            ? route('admin.hebergement.campagnes_admission.edit_campagne', $campagne->id_campagne) : null,
-                        'destroy' => $access->allows($admin, 'admin.hebergement.campagnes_admission.destroy_campagne')
-                            ? route('admin.hebergement.campagnes_admission.destroy_campagne', $campagne->id_campagne) : null,
-                    ],
-                ])->values(),
+                $pageCampagnes->map(function (Campagne $campagne) use ($lien, $admin, $criteres, $vueCriteres, $voirCriteres, $etatsCriteres) {
+                    // Un état et un lien par volet ouvert par la campagne (null pour un volet fermé).
+                    $volets = $criteres->volets($campagne);
+                    $parVolet = fn (callable $valeur) => collect($volets)->map(fn (bool $ouvert, string $volet) => $ouvert ? $valeur($volet) : null)->all();
+
+                    return $this->campagneListe($campagne) + [
+                        'criteres_etat' => $parVolet(fn (string $volet) => $etatsCriteres[(string) $campagne->id_campagne][$volet]),
+                        'urls' => [
+                            'edit' => $lien('admin.hebergement.campagnes_admission.edit_campagne', $campagne),
+                            'destroy' => $lien('admin.hebergement.campagnes_admission.destroy_campagne', $campagne),
+                            'criteres' => $voirCriteres ? $vueCriteres->lienPage($admin, $campagne) : null,
+                        ],
+                    ];
+                })->values(),
                 $campagnes->count(),
                 10,
                 $page,
@@ -486,14 +507,40 @@ class CampagnesAdmissionController extends Controller
             )),
             'stats' => $result['data']['stats'],
             'etat' => $etat,
+            'filters' => ['q' => $recherche, 'annee' => $annee],
+            'annees' => $annees,
             'urls' => [
                 'hebergement' => route('admin.hebergement.index'),
                 'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
                 'create' => $url('admin.hebergement.campagnes_admission.create_campagne'),
                 'filtres' => collect(self::FILTRES_CAMPAGNE)
-                    ->mapWithKeys(fn ($filtre) => [$filtre => route('admin.hebergement.campagnes_admission.campagnes', ['etat' => $filtre])]),
+                    // Changer de statut conserve la recherche et l'année universitaire en cours.
+                    ->mapWithKeys(fn ($filtre) => [$filtre => route('admin.hebergement.campagnes_admission.campagnes', array_filter([
+                        'etat' => $filtre,
+                        'q' => $recherche,
+                        'annee' => $annee,
+                    ], fn ($valeur) => $valeur !== ''))]),
             ],
         ]);
+    }
+
+    /**
+     * Recherche insensible à la casse dans le libellé, l'année et la description,
+     * puis filtre sur l'année universitaire (`annee_campagne`, valeur exacte). L'ordre du dépôt est conservé.
+     */
+    private function rechercherCampagnes(EloquentCollection $campagnes, string $recherche, string $annee): EloquentCollection
+    {
+        if ($annee !== '') {
+            $campagnes = $campagnes->filter(fn (Campagne $campagne) => (string) $campagne->annee_campagne === $annee);
+        }
+
+        if ($recherche !== '') {
+            $terme = mb_strtolower($recherche);
+            $campagnes = $campagnes->filter(fn (Campagne $campagne) => collect([$campagne->libelle, $campagne->annee_campagne, $campagne->description])
+                ->contains(fn ($valeur) => $valeur !== null && str_contains(mb_strtolower((string) $valeur), $terme)));
+        }
+
+        return $campagnes->values();
     }
 
     /** Formulaire de création d'une campagne (Inertia, en plusieurs étapes). */
@@ -610,8 +657,6 @@ class CampagnesAdmissionController extends Controller
             'statut' => $campagne->statut,
             'periode_debut' => $date($campagne->periode_debut),
             'periode_fin' => $date($campagne->periode_fin),
-            'date_echeance_demande' => $date($campagne->date_echeance_demande),
-            'date_echeance_contrat' => $date($campagne->date_echeance_contrat),
             // null : chaque dossier est décidé par le barème dès sa réception.
             'date_validation_auto' => $date($campagne->date_validation_auto),
             'criteres' => [
@@ -637,7 +682,7 @@ class CampagnesAdmissionController extends Controller
 
             return redirect()
                 ->route('admin.hebergement.campagnes_admission.campagnes')
-                ->with('success', 'Campagne créée avec succès');
+                ->with('success', 'Campagne créée avec succès. Étape suivante : paramétrer ses critères (bouton « Paramétrer les critères » de la ligne).');
 
         } catch (\Exception $e) {
             return redirect()

@@ -210,6 +210,11 @@ class AdminPermissionsTest extends TestCase
         $migration->up();
         $this->assertSame($count, DB::table('permissions')->count());
         $this->assertSame(1, DB::table('role_permission')->where('role_id', 2)->count());
+        // Permissions ajoutées par les migrations suivantes (même principe : rôle 1 seulement).
+        foreach (['2026_10_17_000001_add_campagne_update_delete_permissions.php', '2026_11_10_000002_add_eligibilite_permissions.php'] as $suivante) {
+            (require database_path('migrations/'.$suivante))->up();
+        }
+        $this->assertSame(1, DB::table('role_permission')->where('role_id', 2)->count());
         foreach (config('admin_permissions.routes') as $rule) {
             foreach ((array) $rule as $slug) {
                 $this->assertTrue(DB::table('permissions')->where('slug', $slug)->exists(), $slug);

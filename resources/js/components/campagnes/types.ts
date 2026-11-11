@@ -1,4 +1,5 @@
 import type { Paginated } from '@/types/global';
+import type { EtatCriteres, Volet } from './criteres';
 
 export type StatutCampagne = 'active' | 'planifier' | 'terminer';
 export type FiltreCampagne = 'tous' | StatutCampagne;
@@ -57,8 +58,6 @@ export type CampagneItem = {
     statut: StatutCampagne | string | null;
     periode_debut: string | null;
     periode_fin: string | null;
-    date_echeance_demande: string | null;
-    date_echeance_contrat: string | null;
     /** Date de la validation automatique en lot ; null = chaque dossier est décidé dès sa réception. */
     date_validation_auto: string | null;
     criteres: {
@@ -71,14 +70,25 @@ export type CampagneItem = {
     conditions: Record<Condition, boolean>;
     residences: { name: string; places: number }[];
     documents: string[];
+    /** État des critères de chaque volet (null : volet fermé par la campagne). */
+    criteres_etat: Record<Volet, EtatCriteres | null>;
     /** Actions autorisées pour l'administrateur connecté (null = non autorisée). */
-    urls: { edit: string | null; destroy: string | null };
+    urls: {
+        edit: string | null;
+        destroy: string | null;
+        /** Page « Critères de la campagne » (niveaux admission et/ou réadmission selon le type). */
+        criteres: string | null;
+    };
 };
 
 export type CampagnesProps = {
     campagnes: Paginated<CampagneItem>;
     stats: { active: number; planifier: number; terminer: number; total: number };
     etat: FiltreCampagne;
+    /** Recherche (libellé, année, description) et année universitaire, appliquées côté serveur. */
+    filters: { q: string; annee: string };
+    /** Années universitaires des campagnes existantes, la plus récente d'abord. */
+    annees: string[];
     urls: {
         hebergement: string;
         admissions: string | null;

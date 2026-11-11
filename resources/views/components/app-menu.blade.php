@@ -146,8 +146,8 @@
                     </li>
 
                     <li class="{{ $subMenu === 'campagnes' ? 'text-yellow-600 font-semibold bg-gray-100 rounded' : 'text-gray-600' }}">
-                        @adminroute('admin.hebergement.campagnes_admission.admission')
-                        <a href="{{ route('admin.hebergement.campagnes_admission.admission') }}"
+                        @adminroute('admin.hebergement.campagnes_admission.campagnes')
+                        <a href="{{ route('admin.hebergement.campagnes_admission.campagnes') }}"
                            class="flex items-center gap-2 px-2 py-2 rounded hover:text-yellow-600 hover:bg-gray-50 transition">
                             <i class="fa-solid fa-bullhorn"></i> <span>{{ __('ui.campaigns') }}</span>
                         </a>

@@ -69,6 +69,9 @@ class CampagnesPageTest extends TestCase
         Schema::create('admission_derogations', function (Blueprint $t) {
             $t->id(); $t->string('campagne_id')->nullable(); $t->timestamps();
         });
+        // Critères d'admission / de réadmission : état affiché dans la liste.
+        (require database_path('migrations/2026_11_11_000001_create_campagne_regles_table.php'))->up();
+        (require database_path('migrations/2026_11_11_000002_add_volet_to_campagne_regles.php'))->up();
 
         DB::table('cite')->insert([
             ['id_cite' => 'cA', 'name' => 'Cité A', 'statut' => 'ouvert'],
@@ -134,6 +137,33 @@ class CampagnesPageTest extends TestCase
         $inconnu = $this->page('campagnes', '/admin/gestion-hebergement/campagnes_admissions/campagnes/nimporte', ['etat' => 'nimporte'])['props'];
         $this->assertSame('tous', $inconnu['etat']);
         $this->assertCount(2, $inconnu['campagnes']['data']);
+    }
+
+    public function test_recherche_et_filtres_annee_et_statut_des_campagnes(): void
+    {
+        $uri = '/admin/gestion-hebergement/campagnes_admissions/campagnes';
+
+        // Par défaut : aucune recherche ; les années universitaires proposées, la plus récente d'abord.
+        $defaut = $this->page('campagnes', $uri)['props'];
+        $this->assertSame(['q' => '', 'annee' => ''], $defaut['filters']);
+        $this->assertSame(['2026-2027', '2025-2026'], $defaut['annees']);
+        $this->assertSame(['k1', 'k2'], array_column($defaut['campagnes']['data'], 'id'));
+
+        // Recherche insensible à la casse sur le libellé, l'année ou la description.
+        $this->assertSame(['k1'], array_column($this->page('campagnes', $uri.'?q=PRINCIPALE')['props']['campagnes']['data'], 'id'));
+        $this->assertSame([], $this->page('campagnes', $uri.'?q=introuvable')['props']['campagnes']['data']);
+
+        // Filtre par année universitaire ; une année inconnue est ignorée.
+        $this->assertSame(['k2'], array_column($this->page('campagnes', $uri.'?annee=2026-2027')['props']['campagnes']['data'], 'id'));
+        $inconnue = $this->page('campagnes', $uri.'?annee=1990-1991')['props'];
+        $this->assertSame('', $inconnue['filters']['annee']);
+        $this->assertCount(2, $inconnue['campagnes']['data']);
+
+        // Année et statut se combinent ; changer de statut conserve la recherche et l'année.
+        $combine = $this->page('campagnes', $uri.'/active?annee=2026-2027&q=campagne', ['etat' => 'active'])['props'];
+        $this->assertSame([], $combine['campagnes']['data']);
+        $this->assertStringContainsString('annee=2026-2027', $combine['urls']['filtres']['planifier']);
+        $this->assertStringContainsString('q=campagne', $combine['urls']['filtres']['planifier']);
     }
 
     public function test_formulaire_de_creation_propose_les_cites_ouvertes_et_documents_actifs(): void
@@ -220,6 +250,25 @@ class CampagnesPageTest extends TestCase
 
         $this->assertSame(route('admin.hebergement.campagnes_admission.edit_campagne', 'k1'), $k1['urls']['edit']);
         $this->assertSame(route('admin.hebergement.campagnes_admission.destroy_campagne', 'k1'), $k1['urls']['destroy']);
+    }
+
+    public function test_la_liste_mene_a_la_page_des_criteres(): void
+    {
+        [$k1, $k2] = $this->page('campagnes', '/admin/gestion-hebergement/campagnes_admissions/campagnes')['props']['campagnes']['data'];
+        $aParametrer = ['etat' => 'a_parametrer', 'version' => null, 'brouillon' => false];
+        $this->assertSame(['admission' => $aParametrer, 'readmission' => $aParametrer], $k1['criteres_etat']);
+        // Un seul bouton par campagne, vers la page des critères (les niveaux dépendent du type de campagne).
+        $this->assertSame(route('admin.hebergement.parametrage-herb.criteres-campagne.index', ['campagne_id' => 'k1']), $k1['urls']['criteres']);
+        // k2 n'ouvre que la réadmission : pas d'état pour l'admission.
+        $this->assertNull($k2['criteres_etat']['admission']);
+        $this->assertNotNull($k2['criteres_etat']['readmission']);
+        $this->assertSame(route('admin.hebergement.parametrage-herb.criteres-campagne.index', ['campagne_id' => 'k2']), $k2['urls']['criteres']);
+
+        // Critères de réadmission appliqués : seul ce volet passe « en vigueur ».
+        DB::table('campagne_regles')->insert(['id' => 'v1', 'campagne_id' => 'k1', 'volet' => 'readmission', 'version' => 1, 'statut' => 'en_vigueur', 'parametres' => '{}']);
+        $k1 = $this->page('campagnes', '/admin/gestion-hebergement/campagnes_admissions/campagnes')['props']['campagnes']['data'][0];
+        $this->assertSame(['etat' => 'en_vigueur', 'version' => 1, 'brouillon' => false], $k1['criteres_etat']['readmission']);
+        $this->assertSame($aParametrer, $k1['criteres_etat']['admission']);
     }
 
     public function test_formulaire_de_modification_prerempli(): void

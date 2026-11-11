@@ -13,10 +13,16 @@ La migration `2026_11_10_000002_add_eligibilite_permissions.php` crée le socle 
 | Module | Permission | Usage |
 | --- | --- | --- |
 | `hebergement.eligibilite.quotas` | `.view`, `.configure` | Consulter / saisir les places et quotas par cité |
-| `hebergement.eligibilite.regles` | `.view`, `.configure` | Consulter / paramétrer les règles d’éligibilité |
+| `hebergement.eligibilite.regles` | `.view`, `.configure` | Consulter / paramétrer les critères d’admission et de réadmission |
 | `hebergement.eligibilite` | `.generate` | Générer la liste provisoire et la simulation à blanc |
 
-Les routes correspondantes seront déclarées dans `config/admin_permissions.php` avec les écrans de paramétrage.
+Les critères d’une campagne se définissent en une fois, sur la page « Critères de la campagne » du paramétrage hébergement (un niveau admission et/ou réadmission selon le type de campagne) (voir `docs/notes/eligibilite-criteres-campagne.md`). Les anciennes pages « Règles d’éligibilité » et « Scoring » (barème de score) sont supprimées.
+
+| Route | Permission(s) |
+| --- | --- |
+| `admin.hebergement.parametrage-herb.criteres-campagne.index` | `hebergement.parametrage.view` ou un des droits `eligibilite.regles.view/.configure`, `eligibilite.quotas.view/.configure` |
+| `admin.hebergement.eligibilite.criteres.update`, `.abandonner` (paramètre `{volet}` : `admission` ou `readmission`) | `regles.configure` ou `quotas.configure` ; à l’enregistrement, chaque bloc envoyé exige son propre droit (403 sinon) |
+| `admin.hebergement.eligibilite.criteres.appliquer` | `hebergement.eligibilite.regles.configure` |
 
 Attribuer les droits nécessaires dans **Paramètres → Rôles et permissions**. Créer un utilisateur exige `utilisateurs.create` et `parametrage.roles.assign`. Modifier son rôle exige aussi `parametrage.roles.assign`. Seul le rôle 1 peut affecter le rôle 1 ou modifier un compte qui le possède.
 
