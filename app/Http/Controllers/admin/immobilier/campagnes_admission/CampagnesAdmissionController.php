@@ -8,14 +8,8 @@ use App\Http\Services\EtudiantService;
 use App\Models\Document;
 use App\Http\Requests\CampagneRequest;
 use App\Http\Services\CampagneService;
-use Illuminate\Http\JsonResponse;
-use Illuminate\View\View;
 use Illuminate\Http\RedirectResponse;
 use \App\Models\Cite;
-use \App\Models\DocumentCampagne;
-use \App\Models\ResidenceCampagne;
-use App\Http\Services\CiteService;
-use Illuminate\Support\Str;
 use App\Http\Services\DocumentEtudiantService;
 use App\Repositories\Interfaces\DocumentEtudiantRepositoryInterface;
 use App\Repositories\Interfaces\EtudiantRepositoryInterface;
@@ -40,18 +34,14 @@ use Inertia\Inertia;
 
 class CampagnesAdmissionController extends Controller
 {
+    protected EtudiantService $etudiantService;
 
+    protected CampagneService $campagneService;
 
-    protected $campusService;
-    protected $citeService;
-
-    public function __construct(EtudiantService $etudiantService,CampagneService $campagneService,CiteService $citeService)
+    public function __construct(EtudiantService $etudiantService, CampagneService $campagneService)
     {
-       
         $this->etudiantService = $etudiantService;
         $this->campagneService = $campagneService;
-        $this->citeService = $citeService;
-         
     }
 
 
@@ -148,18 +138,6 @@ class CampagnesAdmissionController extends Controller
                     : null,
             ],
         ]);
-    }
-
-    // Nouvelle méthode pour récupérer uniquement les stats (pour API ou appels AJAX)
-    public function getStats()
-    {
-        $result = $this->etudiantService->getStats(); 
-
-        if ($result['success']) {
-            return response()->json($result);
-        }
-
-        return response()->json($result, 500);
     }
 
     /** Traitement d'un dossier de candidature (page React `Admin/Hebergement/Admissions/Show`). */
@@ -465,26 +443,6 @@ class CampagnesAdmissionController extends Controller
         ];
     }
 
-    public function getCampagne($id)
-    {
-        try {
-            $campagne = $this->campagneService->getCampagneDetails($id);
-
-            return response()->json([
-                'success' => true,
-                'data' => $campagne
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Campagne non trouvée'
-            ], 404);
-        }
-    }
-
-
-
-
     /** Filtres de la liste des campagnes (statut en base, `tous` = aucun filtre). */
     private const FILTRES_CAMPAGNE = ['tous', 'active', 'planifier', 'terminer'];
 
@@ -566,6 +524,7 @@ class CampagnesAdmissionController extends Controller
             'campagne' => [
                 'id' => (string) $campagne->id_campagne,
                 'annee_campagne' => (string) $campagne->annee_campagne,
+                'type' => CampagneService::typeDe($campagne),
                 'libelle' => (string) $campagne->libelle,
                 'description' => (string) $campagne->description,
                 'periode_debut' => $date($campagne->periode_debut),
@@ -604,7 +563,6 @@ class CampagnesAdmissionController extends Controller
                     'id' => (string) $cite->id_cite,
                     'name' => $cite->name,
                     'chambres' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->count()),
-                    'places' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->sum('capacite_max')),
                 ])->values(),
             'documents' => $documents
                 ->map(fn ($document) => ['id' => (string) $document->id_document, 'name' => $document->name])->values(),
@@ -671,54 +629,11 @@ class CampagnesAdmissionController extends Controller
         ];
     }
 
-    /**
-     * Créer une nouvelle campagne
-     */
+    /** Crée une campagne avec ses résidences et ses documents requis. */
     public function storeCampagne(CampagneRequest $request): RedirectResponse
     {
         try {
-
-            $data = $request->validated();
-
-            // Traitement des résidences sélectionnées
-            $residences = $data['residences'] ?? [];
-            unset($data['residences']);
-
-            // Traitement des documents requis
-            $documents = $data['documents'] ?? [];
-            unset($data['documents']);
-
-            // Création de la campagne
-
-        //  dd($requestData);
-            $campagne = $this->campagneService->createCampagne($data);
-
-            // Association des résidences (à implémenter selon votre logique)
-            if (!empty($residences)) {
-                foreach ($residences as $residence) {
-
-                    $residenceCampagne = ResidenceCampagne::create([
-                        'campagne_id' => $campagne['id_campagne'],
-                        'cite_id' => $residence,
-
-                    ]);
-
-                }
-            }
-
-            // Association des documents requis (à implémenter selon votre logique)
-            if (!empty($documents)) {
-                foreach ($documents as $doc) {
-
-                    $documentCampagne = DocumentCampagne::create([
-                        'id_campagne' => $campagne['id_campagne'],
-                        'document_id' => $doc,
-
-                    ]);
-
-                }
-
-            }
+            $this->campagneService->createCampagne($request->validated());
 
             return redirect()
                 ->route('admin.hebergement.campagnes_admission.campagnes')
@@ -777,7 +692,6 @@ class CampagnesAdmissionController extends Controller
         $documentService = new DocumentEtudiantService(
             app()->make(DocumentEtudiantRepositoryInterface::class)
         );
-       // dd($documentId, $statut, $message);
         $document = $documentService->updateDocument($documentId, $statut, $message);
 
         return back();

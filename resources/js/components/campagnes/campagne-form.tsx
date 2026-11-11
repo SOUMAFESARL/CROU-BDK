@@ -1,12 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { router, usePage } from '@inertiajs/react';
-import { Building, CalendarDays, ClipboardCheck, Info } from 'lucide-react';
+import { Building, CalendarDays, ClipboardCheck, Info, RefreshCw, UserPlus, Users } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { formatDate, type CampagneFormValues, type CreateCampagneProps } from '@/components/campagnes/types';
+import { formatDate, TYPES_CAMPAGNE, type CampagneFormValues, type CreateCampagneProps, type TypeCampagne } from '@/components/campagnes/types';
 import { AdminLayout } from '@/components/layout/admin-layout';
-import { RecapSection, ToggleCard } from '@/components/parc-immobilier/form/inputs';
+import { ChoiceCard, RecapSection, ToggleCard } from '@/components/parc-immobilier/form/inputs';
 import { FormAlert, SectionTitle, useWizard, Wizard, type WizardStep } from '@/components/parc-immobilier/form/wizard';
 import { Badge } from '@/components/ui/badge';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -25,6 +25,8 @@ type ChampDate = (typeof DATES)[number]['name'];
 
 const date = (article: string) => z.string().min(1, `Renseignez ${article}.`);
 
+const ICONES_TYPE: Record<TypeCampagne, typeof Info> = { admission: UserPlus, readmission: RefreshCw, admission_readmission: Users };
+
 /** Règles par champ (mêmes bornes que `CampagneRequest`) ; les règles entre champs sont dans `reglesCroisees`. */
 const schema = z.object({
     libelle: z.string().trim().min(1, 'Renseignez le libellé de la campagne.').max(150, '150 caractères au maximum.'),
@@ -33,6 +35,10 @@ const schema = z.object({
         .trim()
         .regex(/^\d{4}-\d{4}$/, 'L’année universitaire doit respecter le format AAAA-AAAA (ex. 2025-2026).')
         .refine((v) => Number(v.slice(5)) === Number(v.slice(0, 4)) + 1, 'L’année universitaire doit couvrir deux années consécutives.'),
+    type: z
+        .string()
+        .refine((v) => TYPES_CAMPAGNE.some((item) => item.value === v), 'Choisissez le type de campagne.')
+        .transform((v) => v as TypeCampagne),
     description: z.string().trim().max(1000, '1 000 caractères au maximum.'),
     periode_debut: date(DATES[0].article),
     periode_fin: date(DATES[1].article),
@@ -45,7 +51,7 @@ type FormOutput = z.output<typeof schema>;
 type Champ = keyof FormInput;
 
 const STEPS: (WizardStep & { fields: Champ[] })[] = [
-    { label: 'Informations', description: 'Année universitaire et présentation', icon: Info, fields: ['annee_campagne', 'libelle', 'description'] },
+    { label: 'Informations', description: 'Année, type et présentation', icon: Info, fields: ['annee_campagne', 'libelle', 'type', 'description'] },
     { label: 'Calendrier', description: 'Ouverture et clôture', icon: CalendarDays, fields: DATES.map((d) => d.name) },
     { label: 'Résidences', description: 'Cités ouvertes et documents requis', icon: Building, fields: ['residences', 'documents'] },
     { label: 'Vérification', description: 'Relire avant d’enregistrer', icon: ClipboardCheck, fields: [] },
@@ -73,6 +79,7 @@ function reglesCroisees(values: FormInput): Partial<Record<Champ, string>> {
 const OBLIGATOIRES: { champ: Champ; label: string }[] = [
     { champ: 'annee_campagne', label: 'Année universitaire' },
     { champ: 'libelle', label: 'Libellé' },
+    { champ: 'type', label: 'Type de campagne' },
     ...DATES.map((item) => ({ champ: item.name as Champ, label: item.label })),
     { champ: 'residences', label: 'Résidences concernées' },
 ];
@@ -90,6 +97,7 @@ const ANNEE_EN_COURS = new Date().getFullYear();
 
 const VALEURS_INITIALES: CampagneFormValues = {
     annee_campagne: `${ANNEE_EN_COURS}-${ANNEE_EN_COURS + 1}`,
+    type: '',
     libelle: '',
     description: '',
     periode_debut: '',
@@ -236,7 +244,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
         !manquants.some((item) => item.etape === index) &&
         !STEPS[index].fields.some((champ) => errors[champ]);
     const selection = useMemo(() => residences.filter((residence) => values.residences.includes(residence.id)), [residences, values.residences]);
-    const placesSelectionnees = selection.reduce((total, residence) => total + residence.places, 0);
+    const chambresSelectionnees = selection.reduce((total, residence) => total + residence.chambres, 0);
     const describedBy = (champ: Champ) => (errors[champ] ? `${champ}-error` : undefined);
     const unknownError = serverErrors.error ?? serverErrors.campagne;
     const titre = campagne ? `Modifier la campagne ${campagne.libelle || campagne.annee_campagne}` : 'Nouvelle campagne';
@@ -338,6 +346,33 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                     {...register('libelle')}
                                 />
                             </Field>
+                            <fieldset className="space-y-1.5" aria-describedby={describedBy('type')}>
+                                <legend className="mb-1.5 block text-sm font-medium text-gray-800">
+                                    Type de campagne<span className="ml-0.5 text-red-600">*</span>
+                                </legend>
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                    {TYPES_CAMPAGNE.map((item) => {
+                                        const Icone = ICONES_TYPE[item.value];
+                                        return (
+                                            <ChoiceCard
+                                                key={item.value}
+                                                name="type"
+                                                value={item.value}
+                                                selected={values.type === item.value}
+                                                onSelect={() => setValue('type', item.value, { shouldDirty: true, shouldValidate: !!errors.type })}
+                                                title={item.label}
+                                                description={item.description}
+                                                icon={<Icone size={18} strokeWidth={1.25} aria-hidden />}
+                                            />
+                                        );
+                                    })}
+                                </div>
+                                {errors.type && (
+                                    <p id="type-error" role="alert" className="text-xs font-medium text-red-600">
+                                        {errors.type.message}
+                                    </p>
+                                )}
+                            </fieldset>
                             <Field id="description" label="Description" error={errors.description?.message}>
                                 <textarea
                                     id="description"
@@ -388,7 +423,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
 
                     {wizard.current === 2 && (
                         <>
-                            <SectionTitle hint="Cités ouvertes et places actuellement libres.">
+                            <SectionTitle hint="Cités ouvertes et chambres actuellement disponibles.">
                                 Résidences concernées <span className="text-red-600">*</span>
                             </SectionTitle>
                             {residences.length === 0 ? (
@@ -401,10 +436,8 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                                 key={residence.id}
                                                 checked={values.residences.includes(residence.id)}
                                                 onChange={(coche) => basculer('residences', residence.id, coche)}
-                                                label={`${residence.name} · ${residence.places} place(s)`}
-                                                description={
-                                                    residence.chambres ? `${residence.chambres} chambre(s) disponible(s)` : 'Aucune chambre disponible'
-                                                }
+                                                label={`${residence.name} · ${residence.chambres} chambre(s)`}
+                                                description={residence.chambres ? undefined : 'Aucune chambre disponible'}
                                             />
                                         ))}
                                     </div>
@@ -413,7 +446,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                             Résidences sélectionnées : <strong className="tabular-nums">{selection.length}</strong>
                                         </span>
                                         <span>
-                                            Places libres : <strong className="tabular-nums">{placesSelectionnees}</strong>
+                                            Chambres disponibles : <strong className="tabular-nums">{chambresSelectionnees}</strong>
                                         </span>
                                     </p>
                                 </>
@@ -485,6 +518,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                 rows={[
                                     ['Année universitaire', values.annee_campagne],
                                     ['Libellé', values.libelle],
+                                    ['Type de campagne', TYPES_CAMPAGNE.find((item) => item.value === values.type)?.label],
                                     ['Description', values.description],
                                 ]}
                             />
@@ -494,7 +528,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                 onEdit={() => wizard.goTo(2)}
                                 rows={[
                                     [
-                                        `Résidences (${placesSelectionnees} place(s) libre(s))`,
+                                        `Résidences (${chambresSelectionnees} chambre(s) disponible(s))`,
                                         selection.length ? (
                                             <span className="flex flex-wrap gap-1">
                                                 {selection.map((residence) => (

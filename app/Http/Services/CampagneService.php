@@ -3,14 +3,11 @@
 namespace App\Http\Services;
 
 use App\Repositories\CampagneRepository;
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Exception;
 use App\Models\Campagne;
-use App\Models\DemandeEtudiant;
 use App\Models\DocumentCampagne;
 use App\Models\ResidenceCampagne;
 use Illuminate\Validation\ValidationException;
@@ -26,102 +23,73 @@ class CampagneService
         'age_L1_max', 'age_L2_max', 'age_L3_max', 'age_M1_max', 'age_M2_max', 'age_D1_max', 'age_D2_max', 'age_D3_max',
     ];
 
+    /** Type de campagne saisi dans le formulaire → colonnes `admission` / `readmission`. */
+    public const TYPES = [
+        'admission' => ['admission' => true, 'readmission' => false],
+        'readmission' => ['admission' => false, 'readmission' => true],
+        'admission_readmission' => ['admission' => true, 'readmission' => true],
+    ];
+
+    /** Type de campagne déduit des colonnes `admission` / `readmission` ('' si non renseigné). */
+    public static function typeDe(Campagne $campagne): string
+    {
+        foreach (self::TYPES as $type => $colonnes) {
+            if ((bool) $campagne->admission === $colonnes['admission'] && (bool) $campagne->readmission === $colonnes['readmission']) {
+                return $type;
+            }
+        }
+
+        return '';
+    }
+
+    /** Remplace le champ `type` du formulaire par les colonnes `admission` / `readmission`. */
+    protected function appliquerType(array $data): array
+    {
+        if (isset($data['type'], self::TYPES[$data['type']])) {
+            $data = self::TYPES[$data['type']] + $data;
+        }
+        unset($data['type']);
+
+        return $data;
+    }
+
     public function __construct(CampagneRepository $campagneRepository)
     {
         $this->campagneRepository = $campagneRepository;
     }
 
     /**
-     * Créer une nouvelle campagne
+     * Créer une campagne avec ses résidences et ses documents requis (public et critères non paramétrés).
      */
     public function createCampagne(array $data): Campagne
     {
+        $residences = $data['residences'] ?? [];
+        $documents = $data['documents'] ?? [];
+        unset($data['residences'], $data['documents']);
+
+        $this->validateDates($data);
+        $data = $this->appliquerType($data) + array_fill_keys(self::CHAMPS_PARAMETRAGE, null);
+
         try {
-            DB::beginTransaction();
+            return DB::transaction(function () use ($data, $residences, $documents) {
+                $campagne = $this->campagneRepository->create($data);
+                $this->synchroniserResidences($campagne, $residences);
+                $this->synchroniserDocuments($campagne, $documents);
 
-            // Validation des dates
-            $this->validateDates($data);
-
-            // Validation des âges
-            $this->validateAges($data);
-
-            $data = $this->prepareBooleanData($data) + array_fill_keys(self::CHAMPS_PARAMETRAGE, null);
-
-            // Création de la campagne
-            $campagne = $this->campagneRepository->create($data);
-
-            DB::commit();
-            return $campagne;
-
+                return $campagne;
+            });
         } catch (Exception $e) {
-            DB::rollBack();
-            Log::error('Erreur lors de la création de la campagne: ' . $e->getMessage());
+            Log::error('Erreur lors de la création de la campagne: '.$e->getMessage());
             throw $e;
         }
     }
 
-    /**
-     * Valider les dates
-     */
+    /** La clôture doit être postérieure à l'ouverture. */
     protected function validateDates(array $data): void
     {
-        // Vérifier les dates principales
-        if (isset($data['periode_debut']) && isset($data['periode_fin'])) {
-            if ($data['periode_fin'] <= $data['periode_debut']) {
-                throw new Exception('La date de fin de campagne doit être postérieure à la date de début');
-            }
+        if (isset($data['periode_debut'], $data['periode_fin']) && $data['periode_fin'] <= $data['periode_debut']) {
+            throw new Exception('La date de fin de campagne doit être postérieure à la date de début');
         }
-
-        // Vérifier la date d'échéance des demandes
-        if (isset($data['periode_fin']) && isset($data['date_echeance_demande'])) {
-            if ($data['date_echeance_demande'] <= $data['periode_fin']) {
-                throw new Exception('La date d\'échéance des demandes doit être après la fin de la campagne');
-            }
-        }
-
-        // Vérifier la date d'échéance des contrats
-        if (isset($data['date_echeance_demande']) && isset($data['date_echeance_contrat'])) {
-            if ($data['date_echeance_contrat'] <= $data['date_echeance_demande']) {
-                throw new Exception('La date d\'échéance des contrats doit être après la date d\'échéance des demandes');
-            }
-        }
-    }
-
-    /**
-     * Valider les âges
-     */
-    protected function validateAges(array $data): void
-    {
-        if (isset($data['age_min']) && isset($data['age_max'])) {
-            if ($data['age_max'] <= $data['age_min']) {
-                throw new Exception('L\'âge maximum doit être supérieur à l\'âge minimum');
-            }
-        }
-    }
-
-    /**
-     * Préparer les données booléennes
-     */
-    protected function prepareBooleanData(array $data): array
-    {
-        $booleanFields = [
-            'new_bachelier',
-            'old_bachelier',
-            'readmission',
-            'pmr',
-            'internationnaux',
-            'redoublement',
-            'is_participate',
-            'is_discipline'
-        ];
-
-        foreach ($booleanFields as $field) {
-            if (isset($data[$field])) {
-                $data[$field] = filter_var($data[$field], FILTER_VALIDATE_BOOLEAN);
-            }
-        }
-
-        return $data;
     }
 
     /**
@@ -139,7 +107,7 @@ class CampagneService
         unset($data['residences'], $data['documents']);
 
         $this->validateDates($data);
-        $data = $this->prepareBooleanData($data);
+        $data = $this->appliquerType($data);
 
         DB::transaction(function () use ($campagne, $data, $residences, $documents) {
             $this->campagneRepository->update($campagne->id_campagne, $data);
@@ -240,39 +208,6 @@ class CampagneService
             ];
         }
     }
-
-    public function getCampagneDetails(string $id): array
-    {
-        try {
-
-            $campagne = $this->campagneRepository->findWithRelations($id);
-
-            if (!$campagne) {
-                return [
-                    'success' => false,
-                    'message' => 'Campagne non trouvé',
-                    'data' => null
-                ];
-            }
-
-            return [
-                'success' => true,
-                'message' => 'Détails récupérés avec succès',
-                'data' => $campagne
-            ];
-
-        } catch (\Exception $e) {
-            //   Log::error('Erreur lors de la récupération des détails: ' . $e->getMessage());
-
-            return [
-                'success' => false,
-                'message' => 'Erreur lors de la récupération des détails',
-                'error' => \App\Support\UserFacingErrors::caught($e),
-                'data' => null
-            ];
-        }
-    }
-
 
     public function getStats(): array
     {

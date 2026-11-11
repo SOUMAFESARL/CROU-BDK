@@ -141,7 +141,7 @@ class CampagnesPageTest extends TestCase
         $page = $this->page('createCampagne', '/admin/gestion-hebergement/campagnes_admissions/campagnes/nouvelle');
 
         $this->assertSame('Admin/Hebergement/Campagnes/Create', $page['component']);
-        $this->assertSame([['id' => 'cA', 'name' => 'Cité A', 'chambres' => 2, 'places' => 5]], $page['props']['residences']);
+        $this->assertSame([['id' => 'cA', 'name' => 'Cité A', 'chambres' => 2]], $page['props']['residences']);
         $this->assertSame([['id' => 'd1', 'name' => 'Certificat de scolarité']], $page['props']['documents']);
         $this->assertNotNull($page['props']['urls']['submit']);
     }
@@ -157,8 +157,10 @@ class CampagnesPageTest extends TestCase
         $campagne = DB::table('campagne')->where('annee_campagne', '2030-2031')->first();
         $this->assertNotNull($campagne);
         $this->assertSame('Campagne de test', $campagne->libelle);
-        // Public et critères : non paramétrés à la création.
-        foreach (['admission', 'readmission', 'internationnaux', 'pmr', 'redoublement', 'is_discipline', 'moyenne_min', 'age_L1_max', 'date_echeance_demande', 'date_echeance_contrat'] as $champ) {
+        // Le type choisi renseigne admission / réadmission ; le reste du public et les critères ne sont pas paramétrés.
+        $this->assertSame(1, (int) $campagne->admission);
+        $this->assertSame(1, (int) $campagne->readmission);
+        foreach (['internationnaux', 'pmr', 'redoublement', 'is_discipline', 'moyenne_min', 'age_L1_max', 'date_echeance_demande', 'date_echeance_contrat'] as $champ) {
             $this->assertNull($campagne->{$champ}, $champ);
         }
         $this->assertSame(['cA'], DB::table('residence_campagne')->where('campagne_id', $campagne->id_campagne)->pluck('cite_id')->all());
@@ -176,6 +178,30 @@ class CampagnesPageTest extends TestCase
             ->put(route('admin.hebergement.campagnes_admission.update_campagne', 'k2'), $this->donnees(['libelle' => str_repeat('a', 151)]))
             ->assertSessionHasErrors('libelle');
         $this->assertSame(0, DB::table('campagne')->where('annee_campagne', '2030-2031')->count());
+    }
+
+    public function test_le_type_de_campagne_est_obligatoire_et_renseigne_le_public(): void
+    {
+        $this->withoutMiddleware();
+
+        $this->from(route('admin.hebergement.campagnes_admission.create_campagne'))
+            ->post(route('admin.hebergement.campagnes_admission.post_campagnes'), $this->donnees(['type' => '']))
+            ->assertSessionHasErrors('type');
+        $this->from(route('admin.hebergement.campagnes_admission.create_campagne'))
+            ->post(route('admin.hebergement.campagnes_admission.post_campagnes'), $this->donnees(['type' => 'inconnu']))
+            ->assertSessionHasErrors('type');
+        $this->assertSame(0, DB::table('campagne')->where('annee_campagne', '2030-2031')->count());
+        $this->flushSession();
+
+        $this->post(route('admin.hebergement.campagnes_admission.post_campagnes'), $this->donnees(['type' => 'admission']))
+            ->assertSessionHasNoErrors();
+        $creee = DB::table('campagne')->where('annee_campagne', '2030-2031')->first();
+        $this->assertSame([1, 0], [(int) $creee->admission, (int) $creee->readmission]);
+
+        $this->put(route('admin.hebergement.campagnes_admission.update_campagne', 'k1'), $this->donnees(['type' => 'readmission']))
+            ->assertSessionHasNoErrors();
+        $modifiee = DB::table('campagne')->where('id_campagne', 'k1')->first();
+        $this->assertSame([0, 1], [(int) $modifiee->admission, (int) $modifiee->readmission]);
     }
 
     public function test_la_description_est_facultative(): void
@@ -210,6 +236,7 @@ class CampagnesPageTest extends TestCase
         $this->assertArrayNotHasKey('date_echeance_demande', $campagne);
         $this->assertArrayNotHasKey('moyenne_min', $campagne);
         $this->assertArrayNotHasKey('admission', $campagne);
+        $this->assertSame('admission_readmission', $campagne['type']);
         $this->assertSame(['cA'], $campagne['residences']);
         $this->assertSame(['d1'], $campagne['documents']);
         // La cité liée reste proposée même fermée depuis, pour ne pas la retirer à l'insu de l'utilisateur.
@@ -238,7 +265,7 @@ class CampagnesPageTest extends TestCase
         $this->assertSame('Campagne modifiée', $campagne->libelle);
         $this->assertSame('2030-2031', $campagne->annee_campagne);
         $this->assertSame(2030, (int) $campagne->annee_debut);
-        // Public, critères et échéances ne passent plus par ce formulaire : valeurs conservées.
+        // Type « admission et réadmission » ; critères et échéances ne passent plus par ce formulaire : valeurs conservées.
         $this->assertSame(1, (int) $campagne->admission);
         $this->assertSame(1, (int) $campagne->readmission);
         $this->assertSame(10.5, (float) $campagne->moyenne_min);
@@ -291,6 +318,7 @@ class CampagnesPageTest extends TestCase
         return array_merge([
             'libelle' => 'Campagne de test',
             'annee_campagne' => '2030-2031',
+            'type' => 'admission_readmission',
             'description' => 'Campagne de test complète',
             'periode_debut' => '2030-09-01',
             'periode_fin' => '2030-10-01',

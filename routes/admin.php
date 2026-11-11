@@ -244,7 +244,6 @@ Route::middleware(['admin'])->group(function () {
             Route::put('/campagnes/{id}', 'updateCampagne')->name('update_campagne');
             Route::delete('/campagnes/{id}', 'destroyCampagne')->name('destroy_campagne');
             Route::get('/validateDocument/{documentId}/{statut}/{message?}', 'valideDocument')->name('validate_document');
-            Route::get('campagne/{id}','getCampagne')->name('getCampagne');
             Route::put('/etudiants/{etudiant}', 'updateEtudiant')->name('update_etudiant');
             Route::get('/{id}',  'show')->name('show');
             Route::post('/traiter-demande/{id}',  'submitTraitement')->name('submit-traitement');

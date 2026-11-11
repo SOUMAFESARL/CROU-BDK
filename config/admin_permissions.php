@@ -53,7 +53,6 @@ return [
         'admin.hebergement.campagnes_admission.derogations.store' => 'hebergement.admissions.create',
         'admin.hebergement.campagnes_admission.destroy_campagne' => 'hebergement.admissions.delete',
         'admin.hebergement.campagnes_admission.edit_campagne' => 'hebergement.admissions.update',
-        'admin.hebergement.campagnes_admission.getCampagne' => 'hebergement.admissions.view',
         'admin.hebergement.campagnes_admission.lever_refus_automatiques' => 'hebergement.admissions.validate',
         'admin.hebergement.campagnes_admission.post_campagnes' => 'hebergement.admissions.create',
         'admin.hebergement.campagnes_admission.show' => ['hebergement.admissions.view', 'hebergement.residents.view', 'hebergement.attributions.view'],

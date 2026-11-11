@@ -23,6 +23,15 @@ export const TYPES_ADMISSION = [
     { name: 'internationnaux', label: 'Étudiants internationaux', description: 'Ouvrir la campagne aux étudiants étrangers' },
 ] as const;
 
+/** Type de campagne choisi dans le formulaire ; enregistré dans les colonnes `admission` et `readmission`. */
+export const TYPES_CAMPAGNE = [
+    { value: 'admission', label: 'Admission', description: 'Premières demandes de logement' },
+    { value: 'readmission', label: 'Réadmission', description: 'Étudiants déjà logés qui renouvellent' },
+    { value: 'admission_readmission', label: 'Admission et réadmission', description: 'Nouvelles demandes et renouvellements' },
+] as const;
+
+export type TypeCampagne = (typeof TYPES_CAMPAGNE)[number]['value'];
+
 /** Conditions oui / non de la campagne. */
 export const CONDITIONS = [
     { name: 'redoublement', label: 'Redoublants autorisés', description: 'Les étudiants redoublants peuvent postuler' },
@@ -78,7 +87,7 @@ export type CampagnesProps = {
     };
 };
 
-export type ResidenceOption = { id: string; name: string; chambres: number; places: number };
+export type ResidenceOption = { id: string; name: string; chambres: number };
 
 export type CreateCampagneProps = {
     residences: ResidenceOption[];
@@ -90,6 +99,8 @@ export type CreateCampagneProps = {
 export type CampagneFormValues = {
     libelle: string;
     annee_campagne: string;
+    /** Vide pour une campagne antérieure dont le public n'a pas été renseigné. */
+    type: TypeCampagne | '';
     description: string;
     periode_debut: string;
     periode_fin: string;
