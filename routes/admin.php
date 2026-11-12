@@ -255,11 +255,11 @@ Route::middleware(['admin'])->group(function () {
 
 
 
-    // Actions sur les critères d'un volet (admission / réadmission) d'une campagne : définis dans la page « Critères de la campagne ».
+    // Actions sur un jeu de critères d'une campagne (paramétrage général, admission, réadmission) : définis dans la page « Critères de la campagne ».
     Route::prefix('gestion-hebergement/campagnes/{campagne}/criteres/{volet}')
         ->name('hebergement.eligibilite.criteres.')
         ->controller(CriteresCampagneController::class)
-        ->whereIn('volet', ['admission', 'readmission'])
+        ->whereIn('volet', ['general', 'admission', 'readmission'])
         ->group(function () {
             Route::put('/', 'update')->name('update');
             Route::post('/appliquer', 'appliquer')->name('appliquer');

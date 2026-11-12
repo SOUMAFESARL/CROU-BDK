@@ -6,14 +6,16 @@ use App\Http\Services\CampagneService;
 use App\Models\Campagne;
 use App\Models\CampagneRegles;
 use App\Models\Filiere;
+use App\Models\NiveauEtude;
 use App\Models\User;
 use App\Services\AdminAccess;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 
 /**
- * Données de la page « Critères de la campagne » du paramétrage hébergement : un niveau par volet ouvert
- * (admission, réadmission), chacun avec sa définition (assistant prérempli), sa version en vigueur et son historique.
- * Chaque bloc (règles, places par cité) n'est envoyé qu'avec le droit de le consulter.
+ * Données de la page « Critères de la campagne » du paramétrage hébergement : le paramétrage général, puis un niveau
+ * par volet ouvert (admission, réadmission), chacun avec sa définition (assistant prérempli), sa version en vigueur
+ * et son historique. Chaque bloc (règles, places par cité) n'est envoyé qu'avec le droit de le consulter.
  */
 class CriteresCampagneVue
 {
@@ -25,7 +27,7 @@ class CriteresCampagneVue
 
     public const QUOTAS_CONFIGURE = 'hebergement.eligibilite.quotas.configure';
 
-    /** Page du paramétrage des critères (les deux niveaux sur la même page). */
+    /** Page du paramétrage des critères (paramétrage général et volets sur la même page). */
     public const PAGE = 'admin.hebergement.parametrage-herb.criteres-campagne.index';
 
     public function __construct(private CriteresCampagne $criteres, private AdminAccess $access) {}
@@ -59,22 +61,33 @@ class CriteresCampagneVue
             ? route(self::PAGE, array_filter(['campagne_id' => $campagne->getKey(), 'volet' => $volet])) : null;
     }
 
-    /** Niveaux de la page : un par volet ouvert par la campagne (admission et/ou réadmission). */
+    /**
+     * Niveaux de la page : le paramétrage général (avec le droit de consulter les règles), puis un niveau par volet
+     * ouvert par la campagne (admission et/ou réadmission).
+     */
     public function niveaux(Campagne $campagne, User $admin): array
     {
-        return collect($this->criteres->volets($campagne))
+        $general = $this->droits($admin)['voirRegles'] ? ['general' => $this->page($campagne, 'general', $admin)] : [];
+
+        return $general + collect($this->criteres->volets($campagne))
             ->filter()
             ->map(fn (bool $ouvert, string $volet) => $this->page($campagne, $volet, $admin))
             ->all();
     }
 
     /**
-     * Niveau d'un volet : assistant prérempli (brouillon, version en vigueur ou modèle CROU),
-     * version en vigueur détaillée et historique des versions.
+     * Niveau d'un jeu (general, admission, readmission) : assistant prérempli (brouillon, version en vigueur
+     * ou modèle CROU), version en vigueur détaillée et historique des versions. Un volet reçoit aussi le paramétrage
+     * général qu'il applique (crédits, âges, catégories).
      */
     public function page(Campagne $campagne, string $volet, User $admin): array
     {
         $droits = $this->droits($admin);
+        if ($volet === 'general') {
+            // Le paramétrage général n'a pas de places par cité.
+            $droits['voirPlaces'] = false;
+            $droits['configurerPlaces'] = false;
+        }
         $vigueur = $this->criteres->enVigueur($campagne, $volet);
         $brouillon = $this->criteres->brouillon($campagne, $volet);
         $modele = $this->criteres->modeleParDefaut($volet, $campagne);
@@ -89,7 +102,7 @@ class CriteresCampagneVue
             'droits' => $droits,
             // Saisie : sans droit de consulter les règles, le modèle sert seulement à initialiser l'assistant (étapes masquées).
             'regles' => $droits['voirRegles'] ? $this->criteres->reglesCourantes($campagne, $volet) : $modele,
-            'places' => $droits['voirPlaces'] ? $this->placesAffichees($places, $this->criteres->reglesCourantes($campagne, $volet), $volet) : [],
+            'places' => $droits['voirPlaces'] ? $this->placesAffichees($places, $volet, $campagne) : [],
             'source' => $brouillon ? 'brouillon' : ($vigueur ? 'en_vigueur' : 'modele'),
             'etat' => [
                 'etat' => $vigueur ? 'en_vigueur' : ($brouillon ? 'brouillon' : 'a_parametrer'),
@@ -100,7 +113,7 @@ class CriteresCampagneVue
             'enVigueur' => $vigueur ? $this->version($vigueur, $droits, $campagne, $volet) : null,
             'modele' => ! $vigueur ? [
                 'regles' => $droits['voirRegles'] ? $modele : null,
-                'places' => $droits['voirPlaces'] ? $this->placesAffichees($places, $modele, $volet) : null,
+                'places' => $droits['voirPlaces'] ? $this->placesAffichees($places, $volet, $campagne) : null,
             ] : null,
             'versions' => $this->criteres->versions($campagne, $volet)->map(fn (CampagneRegles $regles) => [
                 'id' => $regles->id,
@@ -112,7 +125,9 @@ class CriteresCampagneVue
                 'applique_le' => $regles->applique_le?->format('Y-m-d H:i'),
                 'motif' => $regles->motif,
             ])->values()->all(),
-            'filieres' => $volet === 'readmission' ? $this->filieres() : [],
+            'general' => $volet !== 'general' && $droits['voirRegles'] ? $this->general($campagne) : null,
+            'filieres' => $volet === 'admission' ? [] : $this->filieres(),
+            'niveauxEtude' => $this->niveauxEtude(),
             'urls' => [
                 'submit' => $modifiable && ($droits['configurerRegles'] || $droits['configurerPlaces'])
                     ? $action('admin.hebergement.eligibilite.criteres.update', true) : null,
@@ -137,13 +152,13 @@ class CriteresCampagneVue
             'date_echeance_demande' => $date($campagne->date_echeance_demande),
             'volets' => $this->criteres->volets($campagne),
             'modifiable' => $this->criteres->modifiable($campagne),
+            // « en cours » ou « terminée » : critères figés.
+            'verrou' => $this->criteres->verrou($campagne),
         ];
     }
 
     private function version(CampagneRegles $regles, array $droits, Campagne $campagne, string $volet): array
     {
-        $parametres = $this->criteres->completer($volet, $regles->parametres ?? [], $campagne);
-
         return [
             'version' => $regles->version,
             'statut' => $regles->statut,
@@ -152,25 +167,40 @@ class CriteresCampagneVue
             'applique_par' => $regles->applique_par_name,
             'applique_le' => $regles->applique_le?->format('Y-m-d H:i'),
             'motif' => $regles->motif,
-            'regles' => $droits['voirRegles'] ? $parametres : null,
-            'places' => $droits['voirPlaces'] ? $this->placesAffichees($regles->places ?? [], $parametres, $volet) : null,
+            'regles' => $droits['voirRegles'] ? $this->criteres->completer($volet, $regles->parametres ?? [], $campagne) : null,
+            'places' => $droits['voirPlaces'] ? $this->placesAffichees($regles->places ?? [], $volet, $campagne) : null,
         ];
     }
 
-    /** Places par cité ; en réadmission, avec le quota des cas sociaux (C4) calculé et le solde (C2 / C6). */
-    private function placesAffichees(array $places, array $regles, string $volet): array
+    /**
+     * Paramétrage général appliqué par les volets : version en vigueur, sinon brouillon ou modèle (signalé par `etat`),
+     * et catégories de réadmission qui en découlent.
+     */
+    private function general(Campagne $campagne): array
     {
-        return collect($places)->map(function (array $ligne) use ($regles, $volet) {
-            if ($volet !== 'readmission') {
-                return $ligne;
-            }
-            $ligne['quotas'] ??= ['C1' => null, 'C3' => null, 'C5' => null];
+        $vigueur = $this->criteres->enVigueur($campagne, 'general');
+        $regles = $vigueur
+            ? $this->criteres->completer('general', $vigueur->parametres ?? [], $campagne)
+            : $this->criteres->reglesCourantes($campagne, 'general');
 
-            return $ligne + [
-                'cas_sociaux' => $this->criteres->placesCasSociaux($ligne, $regles),
-                'solde' => ($ligne['places'] ?? null) === null ? null : max(0, (int) $ligne['places'] - $this->criteres->sousQuotas($ligne, $regles)),
-            ];
-        })->values()->all();
+        return [
+            'etat' => $vigueur ? 'en_vigueur' : ($this->criteres->brouillon($campagne, 'general') ? 'brouillon' : 'a_parametrer'),
+            'regles' => $regles,
+            'categories' => $this->criteres->categories($regles),
+        ];
+    }
+
+    /** Places par cité ; en réadmission, avec les places des cas sociaux (C4) calculées selon le paramétrage général. */
+    private function placesAffichees(array $places, string $volet, Campagne $campagne): array
+    {
+        if ($volet !== 'readmission') {
+            return array_values($places);
+        }
+        $general = $this->criteres->reglesCourantes($campagne, 'general');
+
+        return collect($places)->map(fn (array $ligne) => Arr::except($ligne, ['quotas']) + [
+            'cas_sociaux' => $this->criteres->placesCasSociaux($ligne, $general),
+        ])->values()->all();
     }
 
     private function filieres(): array
@@ -180,6 +210,19 @@ class CriteresCampagneVue
                 'value' => (string) $filiere->id_filiere,
                 'label' => $filiere->name ?: $filiere->code_filiere,
                 'description' => $filiere->code_filiere,
+            ])->values()->all();
+    }
+
+    /** Niveaux d'études (identifiant, libellé), dans l'ordre du paramétrage, pour l'âge maximum par niveau (hors Terminale). */
+    private function niveauxEtude(): array
+    {
+        return NiveauEtude::query()->ordonnes()->get(['id_niveau_etude', 'name', 'abreviation'])
+            ->reject(fn (NiveauEtude $niveau) => CriteresCampagne::niveauSansAgeMax($niveau->name, $niveau->abreviation))
+            ->map(fn (NiveauEtude $niveau) => [
+                'value' => (string) $niveau->id_niveau_etude,
+                // Libellé complet (« Licence 1 ») plutôt que l'abréviation (« L1 »).
+                'label' => $niveau->name ?: ($niveau->abreviation ?: (string) $niveau->id_niveau_etude),
+                'description' => $niveau->abreviation,
             ])->values()->all();
     }
 }

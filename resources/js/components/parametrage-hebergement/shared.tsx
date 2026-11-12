@@ -374,7 +374,7 @@ export function Note({
     children,
     ton = "info",
 }: {
-    icone: ReactNode;
+    icone?: ReactNode;
     children: ReactNode;
     ton?: "info" | "attention";
 }) {
@@ -386,12 +386,14 @@ export function Note({
                     : "flex items-start gap-2.5 rounded-brand border border-[#C6E3A6] bg-soft px-4 py-3 text-sm text-gray-800"
             }
         >
-            <span
-                className="mt-px shrink-0 [&_svg]:size-[18px] [&_svg]:stroke-[1.25]"
-                aria-hidden
-            >
-                {icone}
-            </span>
+            {icone && (
+                <span
+                    className="mt-px shrink-0 [&_svg]:size-[18px] [&_svg]:stroke-[1.25]"
+                    aria-hidden
+                >
+                    {icone}
+                </span>
+            )}
             <div className="min-w-0 space-y-1">{children}</div>
         </div>
     );

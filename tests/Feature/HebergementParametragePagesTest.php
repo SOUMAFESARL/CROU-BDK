@@ -85,6 +85,7 @@ class HebergementParametragePagesTest extends TestCase
         (require database_path('migrations/2026_10_27_000002_add_validation_auto_to_campagne.php'))->up();
         Schema::create('residence_campagne', function (Blueprint $t) { $t->string('id_residence_campagne')->primary(); $t->string('campagne_id'); $t->string('cite_id'); $t->timestamps(); });
         Schema::create('filiere', function (Blueprint $t) { $t->increments('id_filiere'); $t->string('code_filiere'); $t->string('name')->nullable(); $t->timestamps(); });
+        Schema::create('niveau_etude', function (Blueprint $t) { $t->string('id_niveau_etude')->primary(); $t->string('name'); $t->string('abreviation')->nullable(); $t->unsignedInteger('ordre')->default(0); $t->timestamps(); });
         Schema::create('document', function (Blueprint $t) {
             $t->string('id_document')->primary(); $t->string('name'); $t->string('slug'); $t->text('description')->nullable(); $t->integer('delai_validite_mois')->nullable();
             $t->boolean('champs_requis')->default(false); $t->boolean('statut')->default(true); $t->integer('ordre_affiche')->default(0);
@@ -263,9 +264,9 @@ class HebergementParametragePagesTest extends TestCase
         $this->assertSame(['Relevé de notes'], $criteres['contexte']['documents']);
         $this->assertSame(['Cité A'], $criteres['contexte']['residences']);
         $this->assertTrue($criteres['contexte']['conditions']['admission']);
-        // Campagne ouverte à la seule admission : un seul niveau de paramétrage, celui de l'admission.
-        $this->assertSame(['admission'], array_keys($criteres['niveaux']));
-        $this->assertSame('admission', $criteres['niveau']);
+        // Campagne ouverte à la seule admission : le paramétrage général, puis le seul niveau de l'admission.
+        $this->assertSame(['general', 'admission'], array_keys($criteres['niveaux']));
+        $this->assertSame('general', $criteres['niveau']);
     }
 
     public function test_parametrage_de_l_entree_en_react(): void

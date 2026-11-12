@@ -1,15 +1,27 @@
-import { CalendarDays, FileText, Hotel, ListChecks, Pencil } from "lucide-react";
+import {
+    CalendarDays,
+    CircleCheck,
+    CircleDashedCheck,
+    FileText,
+    History,
+    Hotel,
+    ListChecks,
+    Pencil,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { CriteresConsultation } from "@/components/campagnes/criteres-consultation";
 import {
     CriteresFormulaire,
     EtatCriteresVolet,
 } from "@/components/campagnes/criteres-formulaire";
+import { CriteresGenerauxFormulaire } from "@/components/campagnes/criteres-generaux-formulaire";
 import {
     ETATS_CRITERES,
-    VOLETS,
+    JEUX,
+    type Jeu,
     type PageCriteres,
-    type Volet,
+    type PageGeneral,
+    type PageNiveau,
 } from "@/components/campagnes/criteres";
 import { AdminLayout } from "@/components/layout/admin-layout";
 import { ICON } from "@/components/layout/app-sidebar";
@@ -37,29 +49,33 @@ type Props = {
     campagnes: CampagneOption[];
     campagneId: string | null;
     contexte: Contexte | null;
-    /** Un niveau par volet ouvert par la campagne (admission puis réadmission) ; null sans droit de consulter. */
-    niveaux: Partial<Record<Volet, PageCriteres>> | null;
+    /**
+     * Paramétrage général, puis un niveau par volet ouvert par la campagne (admission puis réadmission) ;
+     * null sans droit de consulter.
+     */
+    niveaux: {
+        general?: PageGeneral;
+        admission?: PageCriteres;
+        readmission?: PageCriteres;
+    } | null;
     /** Niveau affiché à l'ouverture (`?volet=`, sinon le premier). */
-    niveau: Volet | null;
+    niveau: Jeu | null;
     urls: {
         index: string;
         editCampagne: string | null;
     };
 };
 
-const ORDRE: Volet[] = ["admission", "readmission"];
+const ORDRE: Jeu[] = ["general", "admission", "readmission"];
 
-const DESCRIPTIONS: Record<Volet, string> = {
-    admission:
-        "Nouveaux étudiants : places par cité, recevabilité, mérite, éloignement et classement.",
-    readmission:
-        "Anciens résidents : places par cité, conditions pour postuler, catégories prioritaires et classement.",
-};
+/** Onglet de consultation des critères en vigueur et de l'historique, à côté des niveaux de paramétrage. */
+const EN_VIGUEUR = "en-vigueur";
+type Onglet = Jeu | typeof EN_VIGUEUR;
 
 /**
- * « Critères de la campagne » : les critères se paramètrent sur une seule page, en deux niveaux
- * (admission puis réadmission) pour une campagne d'admission et de réadmission, un seul niveau sinon.
- * Passer d'un niveau à l'autre ne change pas de page et conserve la saisie en cours.
+ * « Critères de la campagne » : tout se paramètre sur une seule page — le paramétrage général, puis les critères
+ * d'admission et/ou de réadmission selon le type de campagne. Passer d'un niveau à l'autre ne change pas de page
+ * et conserve la saisie en cours.
  */
 export default function Criteres({
     campagnes,
@@ -70,15 +86,15 @@ export default function Criteres({
     urls,
 }: Props) {
     const volets = ORDRE.filter((volet) => niveaux?.[volet]);
-    const [actif, setActif] = useState<Volet>(
-        niveau ?? volets[0] ?? "admission",
+    const [actif, setActif] = useState<Onglet>(
+        niveau ?? volets[0] ?? "general",
     );
 
     return (
         <AdminLayout title="Critères de la campagne">
             <PageHeader
                 title="Critères de la campagne"
-                description="Paramétrez en une fois les critères de la campagne (places, conditions et classement) : admission et/ou réadmission selon le type de campagne."
+                description="Paramétrage général de la campagne, puis critères d’admission et/ou de réadmission : critères de rejet, puis critères de classement de la liste provisoire."
                 actions={
                     urls.editCampagne && (
                         <a
@@ -111,49 +127,82 @@ export default function Criteres({
                         url={urls.index}
                     />
 
-                    {volets.length === 1 && (
-                        <Niveau page={niveaux![volets[0]]!} />
-                    )}
-
-                    {volets.length > 1 && (
-                        <Tabs
-                            value={actif}
-                            onValueChange={(valeur) =>
-                                setActif(valeur as Volet)
-                            }
-                        >
-                            <TabsList aria-label="Niveaux de paramétrage">
-                                {volets.map((volet, index) => {
-                                    const etat =
-                                        ETATS_CRITERES[
-                                            niveaux![volet]!.etat.etat
-                                        ];
-                                    return (
-                                        <TabsTrigger key={volet} value={volet}>
-                                            <span className="tabular-nums">
-                                                {index + 1}.
-                                            </span>
-                                            {VOLETS[volet].titre}
-                                            <Badge variant={etat.variant}>
-                                                {etat.label}
-                                            </Badge>
-                                        </TabsTrigger>
-                                    );
-                                })}
-                            </TabsList>
-                            {/* Les deux niveaux restent montés : la saisie en cours n'est pas perdue en changeant de niveau. */}
-                            {volets.map((volet) => (
-                                <TabsContent
-                                    key={volet}
-                                    value={volet}
-                                    forceMount
-                                    className="data-[state=inactive]:hidden"
-                                >
-                                    <Niveau page={niveaux![volet]!} />
-                                </TabsContent>
-                            ))}
-                        </Tabs>
-                    )}
+                    <Tabs
+                        value={actif}
+                        onValueChange={(valeur) =>
+                            setActif(valeur as Onglet)
+                        }
+                    >
+                        <TabsList aria-label="Niveaux de paramétrage">
+                            {volets.map((volet, index) => {
+                                const code = niveaux![volet]!.etat.etat;
+                                const parametre = code === "en_vigueur";
+                                const Icone = parametre
+                                    ? CircleCheck
+                                    : CircleDashedCheck;
+                                return (
+                                    <TabsTrigger key={volet} value={volet}>
+                                        <span className="tabular-nums">
+                                            {index + 1}.
+                                        </span>
+                                        {JEUX[volet].titre}
+                                        {/* Paramétré (critères appliqués) : coche verte ; sinon coche grise en pointillés. */}
+                                        <Icone
+                                            {...ICON}
+                                            className={
+                                                parametre
+                                                    ? "text-[#006400]"
+                                                    : "text-gray-400"
+                                            }
+                                            aria-label={
+                                                ETATS_CRITERES[code].label
+                                            }
+                                        >
+                                            <title>
+                                                {ETATS_CRITERES[code].label}
+                                            </title>
+                                        </Icone>
+                                    </TabsTrigger>
+                                );
+                            })}
+                            {volets.length > 0 && (
+                                <TabsTrigger value={EN_VIGUEUR}>
+                                    <History {...ICON} aria-hidden />
+                                    Critères en vigueur
+                                </TabsTrigger>
+                            )}
+                        </TabsList>
+                        {/* Les niveaux restent montés : la saisie en cours n'est pas perdue en changeant d'onglet. */}
+                        {volets.map((volet) => (
+                            <TabsContent
+                                key={volet}
+                                value={volet}
+                                forceMount
+                                className="data-[state=inactive]:hidden"
+                            >
+                                <Niveau page={niveaux![volet]!} />
+                            </TabsContent>
+                        ))}
+                        {volets.length > 0 && (
+                            <TabsContent
+                                value={EN_VIGUEUR}
+                                className="space-y-8"
+                            >
+                                {volets.map((volet) => (
+                                    <section
+                                        key={volet}
+                                        aria-label={JEUX[volet].titre}
+                                        className="space-y-3"
+                                    >
+                                        <EnTete volet={volet} />
+                                        <CriteresConsultation
+                                            {...niveaux![volet]!}
+                                        />
+                                    </section>
+                                ))}
+                            </TabsContent>
+                        )}
+                    </Tabs>
 
                     <div className="grid gap-4 lg:grid-cols-3">
                         <Bloc
@@ -192,51 +241,53 @@ export default function Criteres({
     );
 }
 
-/** Un niveau (volet) : définition des critères, version en vigueur et historique, état et actions. */
-function Niveau({ page }: { page: PageCriteres }) {
-    const [onglet, setOnglet] = useState(
-        page.urls.submit ? "definir" : "consulter",
-    );
-
+/**
+ * Un niveau (paramétrage général ou volet) : le formulaire s'affiche directement, avec l'état et les actions.
+ * Sans droit de modification, la version en vigueur est affichée à la place du formulaire.
+ */
+function Niveau({ page }: { page: PageNiveau }) {
+    const actions =
+        page.volet !== "general" &&
+        !!(page.urls.appliquer || page.urls.abandonner);
     return (
-        <section aria-label={VOLETS[page.volet].titre} className="space-y-3">
-            <div className="flex flex-col gap-0.5">
-                <h2 className="text-base font-medium text-gray-900">
-                    {VOLETS[page.volet].titre}
-                </h2>
-                <p className="text-sm text-muted">
-                    {DESCRIPTIONS[page.volet]}
-                </p>
-            </div>
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-                <Tabs
-                    value={onglet}
-                    onValueChange={setOnglet}
-                    className="min-w-0"
-                >
-                    <TabsList>
-                        <TabsTrigger value="definir">
-                            Définir les critères
-                        </TabsTrigger>
-                        <TabsTrigger value="consulter">
-                            Critères en vigueur et historique
-                        </TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="definir">
-                        <CriteresFormulaire {...page} />
-                    </TabsContent>
-                    <TabsContent value="consulter">
+        <section aria-label={JEUX[page.volet].titre} className="space-y-3">
+            <EnTete volet={page.volet} />
+            {/* Le paramétrage général s'applique depuis son assistant (dernière étape) : pas d'encart d'état. */}
+            <div
+                className={cn(
+                    "grid gap-4",
+                    actions
+                        ? "xl:grid-cols-[minmax(0,1fr)_300px]"
+                        : "max-w-5xl",
+                )}
+            >
+                <div className="min-w-0">
+                    {!page.urls.submit ? (
                         <CriteresConsultation {...page} />
-                    </TabsContent>
-                </Tabs>
-                <EtatCriteresVolet
-                    volet={page.volet}
-                    campagne={page.campagne}
-                    etat={page.etat}
-                    urls={page.urls}
-                />
+                    ) : page.volet === "general" ? (
+                        <CriteresGenerauxFormulaire {...page} />
+                    ) : (
+                        <CriteresFormulaire {...page} />
+                    )}
+                </div>
+                {actions && (
+                    <EtatCriteresVolet
+                        volet={page.volet}
+                        campagne={page.campagne}
+                        etat={page.etat}
+                        urls={page.urls}
+                    />
+                )}
             </div>
         </section>
+    );
+}
+
+function EnTete({ volet }: { volet: Jeu }) {
+    return (
+        <h2 className="text-base font-medium text-gray-900">
+            {JEUX[volet].titre}
+        </h2>
     );
 }
 

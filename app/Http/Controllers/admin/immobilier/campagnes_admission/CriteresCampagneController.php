@@ -13,8 +13,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Actions sur les critères d'un volet (admission / réadmission) d'une campagne : enregistrer, appliquer, abandonner le brouillon.
- * Les critères se définissent et se consultent dans la page « Critères de la campagne » du paramétrage (un niveau par volet).
+ * Actions sur un jeu de critères d'une campagne (paramétrage général, admission, réadmission) : enregistrer, appliquer,
+ * abandonner le brouillon. Les critères se définissent et se consultent dans la page « Critères de la campagne » du
+ * paramétrage (paramétrage général, puis un niveau par volet ouvert).
  * Voir docs/notes/eligibilite-criteres-campagne.md.
  */
 class CriteresCampagneController extends Controller
@@ -35,27 +36,26 @@ class CriteresCampagneController extends Controller
         abort_if($appliquer && ! $this->access->allows($admin, 'admin.hebergement.eligibilite.criteres.appliquer'), 403, 'Vous n’avez pas le droit d’appliquer les critères.');
 
         $validees = $request->validated();
-        DB::transaction(function () use ($campagne, $volet, $validees, $admin, $appliquer, $request) {
+        DB::transaction(function () use ($campagne, $volet, $validees, $admin, $appliquer) {
             $this->criteres->enregistrer($campagne, $volet, $validees['regles'] ?? null, $validees['places'] ?? null, $admin);
             if ($appliquer) {
-                $this->criteres->appliquer($campagne, $volet, $request->input('motif'), $admin);
+                $this->criteres->appliquer($campagne, $volet, $admin);
             }
         });
 
         return $this->retourPage($campagne, $volet)
             ->with('success', $appliquer
-                ? 'Critères '.CriteresCampagne::VOLETS[$volet].' enregistrés et appliqués à la campagne.'
-                : 'Brouillon des critères '.CriteresCampagne::VOLETS[$volet].' enregistré. Appliquez-le pour le mettre en vigueur.');
+                ? 'Critères '.CriteresCampagne::JEUX[$volet].' enregistrés et appliqués à la campagne.'
+                : 'Brouillon des critères '.CriteresCampagne::JEUX[$volet].' enregistré. Appliquez-le pour le mettre en vigueur.');
     }
 
-    /** Met en vigueur le brouillon du volet, ou le modèle CROU par défaut si ce volet n'a encore aucun critère. */
+    /** Met en vigueur le brouillon du jeu, ou le modèle CROU par défaut si ce jeu n'a encore aucun critère. */
     public function appliquer(Request $request, string $campagne, string $volet): RedirectResponse
     {
         $campagne = Campagne::findOrFail($campagne);
-        $request->validate(['motif' => 'nullable|string|max:1000']);
-        $version = $this->criteres->appliquer($campagne, $volet, $request->input('motif'), $request->user('admin'));
+        $version = $this->criteres->appliquer($campagne, $volet, $request->user('admin'));
 
-        return $this->retourPage($campagne, $volet)->with('success', 'Critères '.CriteresCampagne::VOLETS[$volet]." appliqués à la campagne (version {$version->version}).");
+        return $this->retourPage($campagne, $volet)->with('success', 'Critères '.CriteresCampagne::JEUX[$volet]." appliqués à la campagne (version {$version->version}).");
     }
 
     /** Supprime le brouillon en attente du volet. */
@@ -64,7 +64,7 @@ class CriteresCampagneController extends Controller
         $campagne = Campagne::findOrFail($campagne);
         $this->criteres->abandonnerBrouillon($campagne, $volet);
 
-        return $this->retourPage($campagne, $volet)->with('success', 'Brouillon des critères '.CriteresCampagne::VOLETS[$volet].' abandonné.');
+        return $this->retourPage($campagne, $volet)->with('success', 'Brouillon des critères '.CriteresCampagne::JEUX[$volet].' abandonné.');
     }
 
     /** Retour sur la page « Critères de la campagne », ouverte sur le niveau traité. */

@@ -1,12 +1,10 @@
 import {
     Building,
     CalendarClock,
-    History,
     Layers,
+    ListChecks,
     ListOrdered,
     ShieldCheck,
-    TriangleAlert,
-    UserPlus,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -15,242 +13,311 @@ import {
     CODES_CATEGORIES,
     DEPARTAGE,
     DEPARTAGE_VOLET,
-    formatDateHeure,
     GROUPES_C2,
-    HANDICAP_VISIBLE,
+    JEUX,
+    lignesCredits,
     MERITE_ADMISSION,
-    PRIORITE_BOURSIERS,
     REPORT_PLACES,
-    SOURCE_BOURSIER,
-    STATUTS_VERSION,
-    tranchesEloignement,
-    VOLETS,
-    type DroitsCriteres,
-    type FiliereOption,
-    type PageCriteres,
+    type PageNiveau,
     type PlacesCite,
     type Regles,
+    type ReglesGenerales,
     type Volet,
 } from "@/components/campagnes/criteres";
+import { CartesAges } from "@/components/campagnes/cartes-ages";
 import { formatDate } from "@/components/campagnes/types";
 import { ICON } from "@/components/layout/app-sidebar";
-import { Bloc, Note } from "@/components/parametrage-hebergement/shared";
-import { Badge } from "@/components/ui/badge";
-import { StatCard } from "@/components/ui/stat-card";
-import { cn } from "@/lib/utils";
+import { Note } from "@/components/parametrage-hebergement/shared";
+import {
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger,
+} from "@/components/ui/accordion";
 
 /**
- * Consultation des critères d'un volet : version en vigueur (ou modèle CROU proposé tant que rien n'est appliqué)
- * et historique des versions. Le brouillon en attente se relit et se modifie dans l'onglet « Définir ».
+ * Consultation d'un jeu de critères (paramétrage général ou volet) : version en vigueur (ou modèle CROU proposé tant
+ * que rien n'est appliqué). Le brouillon en attente se relit et se modifie dans l'onglet du niveau concerné.
  */
-export function CriteresConsultation({
-    volet,
-    campagne,
-    droits,
-    enVigueur,
-    etat,
-    modele,
-    versions,
-    filieres,
-}: PageCriteres) {
+export function CriteresConsultation(page: PageNiveau) {
+    const { volet, campagne, enVigueur, modele } = page;
     const places = enVigueur?.places ?? modele?.places ?? null;
-    const placesSaisies = (places ?? []).filter(
-        (ligne) => ligne.places !== null,
-    ).length;
 
     return (
         <section className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <StatCard
-                    tone={enVigueur ? "green" : "amber"}
-                    label="Critères"
-                    value={
-                        enVigueur
-                            ? "Appliqués"
-                            : etat.brouillon
-                              ? "Brouillon"
-                              : "À appliquer"
-                    }
-                />
-                <StatCard
-                    tone="blue"
-                    label="Brouillon en attente"
-                    value={etat.brouillon ? "Oui" : "Aucun"}
-                />
-                <StatCard
-                    tone="plum"
-                    label="Cités avec places saisies"
-                    value={
-                        droits.voirPlaces
-                            ? `${placesSaisies} / ${places?.length ?? 0}`
-                            : "—"
-                    }
-                />
-                <StatCard
-                    tone="amber"
-                    label="Public"
-                    value={VOLETS[volet].public}
-                />
-            </div>
-
             <div className="space-y-3">
                 {!campagne.modifiable && (
                     <Note icone={<ShieldCheck />}>
-                        Campagne terminée : ses critères sont figés.
+                        Campagne {campagne.verrou ?? "terminée"} : ses critères
+                        sont figés.
                     </Note>
                 )}
                 {!enVigueur && (
-                    <Note icone={<TriangleAlert />} ton="attention">
+                    <Note ton="attention">
                         <p>
-                            Aucun critère {VOLETS[volet].complement} n’est
-                            encore appliqué à cette campagne. Le modèle CROU de
-                            Bondoukou ci-dessous est proposé ; adaptez-le dans
-                            l’onglet « Définir les critères ».
+                            Aucun critère {JEUX[volet].complement} n’est encore
+                            appliqué à cette campagne.
                         </p>
                     </Note>
                 )}
             </div>
 
-            <Detail
-                volet={volet}
-                regles={enVigueur?.regles ?? modele?.regles ?? null}
-                places={places}
-                droits={droits}
-                filieres={filieres}
-            />
-
-            {versions.length > 0 && (
-                <Bloc
-                    titre={`Historique des versions des critères ${VOLETS[volet].complement}`}
-                    icone={<History {...ICON} />}
-                >
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead className="bg-surface/60 text-left text-xs text-muted">
-                                <tr>
-                                    <th className="px-4 py-2 font-medium">
-                                        Version
-                                    </th>
-                                    <th className="px-4 py-2 font-medium">
-                                        Statut
-                                    </th>
-                                    <th className="px-4 py-2 font-medium">
-                                        Dernière modification
-                                    </th>
-                                    <th className="px-4 py-2 font-medium">
-                                        Application
-                                    </th>
-                                    <th className="px-4 py-2 font-medium">
-                                        Motif
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {versions.map((version) => (
-                                    <tr
-                                        key={version.id}
-                                        className="border-t align-top"
-                                    >
-                                        <td className="px-4 py-2.5 tabular-nums">
-                                            v{version.version}
-                                        </td>
-                                        <td className="px-4 py-2.5">
-                                            <Badge
-                                                variant={
-                                                    STATUTS_VERSION[
-                                                        version.statut
-                                                    ].variant
-                                                }
-                                            >
-                                                {
-                                                    STATUTS_VERSION[
-                                                        version.statut
-                                                    ].label
-                                                }
-                                            </Badge>
-                                        </td>
-                                        <td className="px-4 py-2.5 whitespace-nowrap">
-                                            {formatDateHeure(
-                                                version.modifie_le,
-                                            )}
-                                            {version.auteur && (
-                                                <span className="block text-xs text-muted">
-                                                    {version.auteur}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-2.5 whitespace-nowrap">
-                                            {version.applique_le
-                                                ? formatDateHeure(
-                                                      version.applique_le,
-                                                  )
-                                                : "—"}
-                                            {version.applique_par && (
-                                                <span className="block text-xs text-muted">
-                                                    {version.applique_par}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="max-w-80 px-4 py-2.5 text-gray-700">
-                                            {version.motif ?? "—"}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </Bloc>
-            )}
+            <Accordion key={volet} type="multiple">
+                <Detail
+                    page={page}
+                    regles={enVigueur?.regles ?? modele?.regles ?? null}
+                    places={places}
+                />
+            </Accordion>
         </section>
     );
 }
 
+/** Critère défini dans le paramétrage général : le volet ne fait que l'activer, sans en répéter les valeurs. */
+const SELON_GENERAL = "Activé (selon le paramétrage général)";
+
+/** Section repliable de la consultation (élément d'accordéon). */
+function Section({
+    valeur,
+    titre,
+    icone,
+    children,
+}: {
+    valeur: string;
+    titre: ReactNode;
+    icone: ReactNode;
+    children: ReactNode;
+}) {
+    return (
+        <AccordionItem value={valeur}>
+            <AccordionTrigger>
+                <span className="text-primary" aria-hidden>
+                    {icone}
+                </span>
+                {titre}
+            </AccordionTrigger>
+            <AccordionContent>{children}</AccordionContent>
+        </AccordionItem>
+    );
+}
+
 type DetailProps = {
-    volet: Volet;
-    regles: Regles | null;
+    page: PageNiveau;
+    regles: Regles | ReglesGenerales | null;
     places: PlacesCite[] | null;
-    droits: DroitsCriteres;
-    filieres: FiliereOption[];
 };
 
-/** Lecture d'un jeu de critères, étage par étage de l'entonnoir du volet. */
-function Detail({ volet, regles, places, droits, filieres }: DetailProps) {
-    const r = regles?.readmission;
-    const a = regles?.admission;
+/** Lecture d'un jeu de critères : paramétrage général, ou rejet puis classement d'un volet. */
+function Detail({ page, regles, places }: DetailProps) {
+    const { droits, filieres, niveauxEtude } = page;
+
+    if (page.volet === "general") {
+        const g = regles as ReglesGenerales | null;
+        if (!droits.voirRegles || !g) return null;
+        return (
+            <>
+                <Section
+                    valeur="credits"
+                    titre="Crédits exigés"
+                    icone={<ShieldCheck {...ICON} />}
+                >
+                    <Lignes lignes={lignesCredits(g.credits, filieres)} />
+                </Section>
+                <Section
+                    valeur="ages"
+                    titre="Âge maximum par niveau"
+                    icone={<ListChecks {...ICON} />}
+                >
+                    <CartesAges
+                        ages={g.age_max}
+                        niveaux={niveauxEtude}
+                        className="p-4"
+                    />
+                </Section>
+                <Section
+                    valeur="rangs"
+                    titre="Rangs et places réservées"
+                    icone={<Layers {...ICON} />}
+                >
+                    <Lignes
+                        lignes={[
+                            [
+                                "Rang par filière",
+                                g.rang_filiere.actif
+                                    ? `${g.rang_filiere.n} premiers · ${GROUPES_C2[g.rang_filiere.groupe].toLowerCase()}`
+                                    : "Désactivé",
+                            ],
+                            [
+                                "Clubs et associations",
+                                g.clubs.actif
+                                    ? `${g.clubs.n} premiers par discipline`
+                                    : "Désactivé",
+                            ],
+                            [
+                                "Cas sociaux",
+                                g.cas_sociaux.actif
+                                    ? `${g.cas_sociaux.taux} % ${BASES_C4[g.cas_sociaux.base]}`
+                                    : "Désactivé",
+                            ],
+                            [
+                                "Comité des résidents",
+                                g.comite.actif
+                                    ? `${g.comite.places} places`
+                                    : "Désactivé",
+                            ],
+                        ]}
+                    />
+                </Section>
+            </>
+        );
+    }
+
+    const volet = page.volet;
+    const v = regles as Regles | null;
+    const r = v?.readmission;
+    const a = v?.admission;
+    const categories = page.general?.categories ?? null;
+    const ageActif = r?.age_actif ?? a?.age_actif ?? false;
 
     return (
-        <div className="space-y-4">
+        <>
             {droits.voirPlaces && places && (
-                <TablePlaces volet={volet} places={places} regles={regles} />
+                <TablePlaces volet={volet} places={places} />
             )}
 
-            {droits.voirRegles && regles && (
-                <div className="grid gap-4 lg:grid-cols-2">
-                    <Bloc
-                        titre="E1 · Recevabilité et calendrier"
-                        icone={<CalendarClock {...ICON} />}
+            {droits.voirRegles && v && (
+                <>
+                    <Section
+                        valeur="rejet"
+                        titre="1. Critères de rejet"
+                        icone={<ShieldCheck {...ICON} />}
                     >
                         <Lignes
                             lignes={[
-                                ...(volet === "readmission"
+                                ...(r
                                     ? ([
                                           [
-                                              "Contrôle des préalables",
-                                              regles.calendrier
-                                                  .date_controle_prealables
-                                                  ? formatDate(
-                                                        regles.calendrier
-                                                            .date_controle_prealables,
-                                                    )
-                                                  : "À la clôture des dépôts",
+                                              "Loyers de l’année",
+                                              r.loyers.actif
+                                                  ? `${r.loyers.mois_exiges} mois soldés`
+                                                  : "Non contrôlés",
+                                          ],
+                                          [
+                                              "Crédits validés",
+                                              r.credits_actif
+                                                  ? SELON_GENERAL
+                                                  : "Désactivé",
+                                          ],
+                                          [
+                                              "Conduite en cité",
+                                              r.conduite.actif
+                                                  ? "Résident sanctionné (suspension, expulsion) rejeté"
+                                                  : "Désactivé",
+                                          ],
+                                      ] as [string, ReactNode][])
+                                    : []),
+                                ...(a
+                                    ? ([
+                                          [
+                                              MERITE_ADMISSION[a.merite].seuil,
+                                              a.seuil_actif && a.seuil !== null
+                                                  ? `${a.seuil} ${MERITE_ADMISSION[a.merite].unite}`
+                                                  : "Désactivé",
                                           ],
                                       ] as [string, ReactNode][])
                                     : []),
                                 [
-                                    "Liste provisoire",
-                                    regles.calendrier.date_liste_provisoire
+                                    "Âge maximum par niveau",
+                                    ageActif ? SELON_GENERAL : "Désactivé",
+                                ],
+                                [
+                                    "Étudiants internationaux",
+                                    v.recevabilite.internationaux
+                                        ? "Acceptés"
+                                        : "Non acceptés",
+                                ],
+                            ]}
+                        />
+                    </Section>
+
+                    <Section
+                        valeur="classement"
+                        titre="2. Critères de classement"
+                        icone={<ListOrdered {...ICON} />}
+                    >
+                        <Lignes
+                            lignes={[
+                                ...(r
+                                    ? ([
+                                          [
+                                              "Catégories actives",
+                                              categories
+                                                  ? CODES_CATEGORIES.filter(
+                                                        (code) =>
+                                                            categories[code]
+                                                                .actif,
+                                                    )
+                                                        .map(
+                                                            (code) =>
+                                                                CATEGORIES[code]
+                                                                    .label,
+                                                        )
+                                                        .join(" › ")
+                                                  : "—",
+                                          ],
+                                          [
+                                              "Priorité aux boursiers",
+                                              v.classement
+                                                  .priorite_boursiers ===
+                                              "aucune"
+                                                  ? "Non"
+                                                  : "Oui",
+                                          ],
+                                          [
+                                              "Places non pourvues",
+                                              REPORT_PLACES[r.report_places],
+                                          ],
+                                      ] as [string, ReactNode][])
+                                    : []),
+                                ...(a
+                                    ? ([
+                                          [
+                                              "Mérite",
+                                              MERITE_ADMISSION[a.merite].label,
+                                          ],
+                                          [
+                                              "Ville du bac",
+                                              `Hors ${a.ville_bac} prioritaire`,
+                                          ],
+                                      ] as [string, ReactNode][])
+                                    : []),
+                                [
+                                    "Départage",
+                                    libelleDepartage(
+                                        volet,
+                                        v.classement.departage,
+                                    ),
+                                ],
+                                [
+                                    "Liste élargie",
+                                    `× ${v.classement.k_liste_elargie} (titulaires puis complémentaires)`,
+                                ],
+                            ]}
+                        />
+                    </Section>
+
+                    <Section
+                        valeur="liste"
+                        titre="Liste provisoire"
+                        icone={<CalendarClock {...ICON} />}
+                    >
+                        <Lignes
+                            lignes={[
+                                [
+                                    "Génération",
+                                    v.calendrier.date_liste_provisoire
                                         ? formatDate(
-                                              regles.calendrier
+                                              v.calendrier
                                                   .date_liste_provisoire,
                                           )
                                         : volet === "readmission"
@@ -258,231 +325,31 @@ function Detail({ volet, regles, places, droits, filieres }: DetailProps) {
                                           : "À la clôture des dépôts",
                                 ],
                                 [
-                                    "Étudiants internationaux",
-                                    regles.recevabilite.internationaux
-                                        ? "Acceptés"
-                                        : "Non acceptés",
-                                ],
-                                [
-                                    "Sanctions bloquantes",
-                                    "Suspension, expulsion",
-                                ],
-                                ...(a
-                                    ? ([
-                                          [
-                                              "Âge maximum en L1",
-                                              a.age_max_L1
-                                                  ? `${a.age_max_L1} ans`
-                                                  : "Désactivé",
-                                          ],
-                                      ] as [string, ReactNode][])
-                                    : []),
-                            ]}
-                        />
-                    </Bloc>
-
-                    {r && (
-                        <Bloc
-                            titre="E2 · Conditions pour postuler"
-                            icone={<ShieldCheck {...ICON} />}
-                        >
-                            <Lignes
-                                lignes={[
-                                    [
-                                        "Année validée exigée",
-                                        r.ue_actif
-                                            ? `${r.seuil_ue} % des UE (selon le PV)`
-                                            : "Désactivé",
-                                    ],
-                                    [
-                                        "Écoles sur concours",
-                                        r.concours_actif
-                                            ? `${r.seuil_concours} % minimum, sinon retrait de chambre`
-                                            : "Désactivé",
-                                    ],
-                                    [
-                                        "Filières sur concours",
-                                        r.filieres_concours.length
-                                            ? r.filieres_concours
-                                                  .map(
-                                                      (id) =>
-                                                          filieres.find(
-                                                              (filiere) =>
-                                                                  filiere.value ===
-                                                                  id,
-                                                          )?.label ?? id,
-                                                  )
-                                                  .join(", ")
-                                            : "Aucune sélectionnée",
-                                    ],
-                                    [
-                                        "Loyers de l’année",
-                                        r.loyers.actif
-                                            ? `${r.loyers.mois_exiges} mois soldés (tolérance ${r.loyers.tolerance_fcfa.toLocaleString("fr-FR")} FCFA)`
-                                            : "Non contrôlés",
-                                    ],
-                                    [
-                                        "Âge maximum",
-                                        r.age_max
-                                            ? `${r.age_max} ans`
-                                            : "Désactivé",
-                                    ],
-                                ]}
-                            />
-                        </Bloc>
-                    )}
-
-                    {r && (
-                        <Bloc
-                            titre="E4 · Catégories en cascade"
-                            icone={<Layers {...ICON} />}
-                        >
-                            <ol className="divide-y">
-                                {CODES_CATEGORIES.map((code) => {
-                                    const categorie = r.categories[code];
-                                    const detail =
-                                        code === "C2"
-                                            ? `${r.categories.C2.n} premiers · ${GROUPES_C2[r.categories.C2.groupe].toLowerCase()}`
-                                            : code === "C3"
-                                              ? `${r.categories.C3.n} premiers par discipline`
-                                              : code === "C4"
-                                                ? `${r.categories.C4.taux} % ${BASES_C4[r.categories.C4.base]}`
-                                                : code === "C5"
-                                                  ? r.categories.C5.prealables
-                                                      ? "Conditions pour postuler exigées"
-                                                      : "Sans conditions pour postuler"
-                                                  : null;
-                                    return (
-                                        <li
-                                            key={code}
-                                            className={cn(
-                                                "flex items-start gap-3 px-4 py-2.5",
-                                                !categorie.actif &&
-                                                    "opacity-60",
-                                            )}
-                                        >
-                                            <Badge
-                                                variant={
-                                                    categorie.actif
-                                                        ? "success"
-                                                        : "neutral"
-                                                }
-                                            >
-                                                {code}
-                                            </Badge>
-                                            <div className="min-w-0 flex-1 text-sm">
-                                                <p className="text-gray-900">
-                                                    {CATEGORIES[code].label}
-                                                    {!categorie.actif && (
-                                                        <span className="text-muted">
-                                                            {" "}
-                                                            · désactivée
-                                                        </span>
-                                                    )}
-                                                </p>
-                                                <p className="text-xs text-muted">
-                                                    {detail ??
-                                                        CATEGORIES[code]
-                                                            .condition}
-                                                </p>
-                                                <p className="text-xs text-muted">
-                                                    Mérite :{" "}
-                                                    {CATEGORIES[code].merite}
-                                                </p>
-                                            </div>
-                                        </li>
-                                    );
-                                })}
-                            </ol>
-                            <p className="border-t px-4 py-2.5 text-xs text-muted">
-                                Places non pourvues :{" "}
-                                {REPORT_PLACES[r.report_places].toLowerCase()}.
-                            </p>
-                        </Bloc>
-                    )}
-
-                    {a && (
-                        <Bloc
-                            titre="Mérite et éloignement"
-                            icone={<UserPlus {...ICON} />}
-                        >
-                            <Lignes
-                                lignes={[
-                                    ["Mérite", MERITE_ADMISSION[a.merite]],
-                                    [
-                                        "Handicap visible",
-                                        HANDICAP_VISIBLE[a.handicap_visible],
-                                    ],
-                                ]}
-                            />
-                            <ul className="border-t px-4 py-2.5 text-xs text-gray-700">
-                                {tranchesEloignement(
-                                    a.eloignement.tranches_km,
-                                ).map((tranche) => (
-                                    <li key={tranche.code} className="py-0.5">
-                                        <span className="tabular-nums">
-                                            {tranche.code}
-                                        </span>{" "}
-                                        · {tranche.libelle}{" "}
-                                        <span className="text-muted">
-                                            ({tranche.ordre})
-                                        </span>
-                                    </li>
-                                ))}
-                            </ul>
-                        </Bloc>
-                    )}
-
-                    <Bloc
-                        titre="E5 · Classement et liste élargie"
-                        icone={<ListOrdered {...ICON} />}
-                    >
-                        <Lignes
-                            lignes={[
-                                [
-                                    "Priorité aux boursiers",
-                                    PRIORITE_BOURSIERS[
-                                        regles.classement.priorite_boursiers
-                                    ].label,
-                                ],
-                                [
-                                    "Statut de boursier",
-                                    SOURCE_BOURSIER[
-                                        regles.classement.source_boursier
-                                    ],
-                                ],
-                                [
-                                    "Départage",
-                                    libelleDepartage(
-                                        volet,
-                                        regles.classement.departage,
-                                    ),
-                                ],
-                                [
-                                    "Liste élargie",
-                                    `× ${regles.classement.k_liste_elargie} (titulaires puis complémentaires)`,
-                                ],
-                                [
                                     "Égalité persistante",
                                     "Arbitrage motivé de la S/DAL",
                                 ],
                             ]}
                         />
-                    </Bloc>
-                </div>
+                    </Section>
+                </>
             )}
-        </div>
+        </>
     );
 }
 
 /** « 1. Âge · 2. Excellence (désactivés : comportement) ». */
-function libelleDepartage(volet: Volet, actifs: Regles["classement"]["departage"]) {
+function libelleDepartage(
+    volet: Volet,
+    actifs: Regles["classement"]["departage"],
+) {
     const desactives = DEPARTAGE_VOLET[volet].filter(
         (critere) => !actifs.includes(critere),
     );
     return (
         actifs
-            .map((critere, index) => `${index + 1}. ${DEPARTAGE[critere].label}`)
+            .map(
+                (critere, index) => `${index + 1}. ${DEPARTAGE[critere].label}`,
+            )
             .join(" · ") +
         (desactives.length
             ? ` (désactivés : ${desactives.map((critere) => DEPARTAGE[critere].label.toLowerCase()).join(", ")})`
@@ -493,15 +360,11 @@ function libelleDepartage(volet: Volet, actifs: Regles["classement"]["departage"
 function TablePlaces({
     volet,
     places,
-    regles,
 }: {
     volet: Volet;
     places: PlacesCite[];
-    regles: Regles | null;
 }) {
     const readmission = volet === "readmission";
-    const actif = (code: "C1" | "C3" | "C4" | "C5") =>
-        regles?.readmission?.categories[code].actif ?? true;
     const valeur = (nombre: number | null | undefined) =>
         nombre === null || nombre === undefined ? (
             <span className="text-muted">À saisir</span>
@@ -510,7 +373,11 @@ function TablePlaces({
         );
 
     return (
-        <Bloc titre="E0 · Places par cité" icone={<Building {...ICON} />}>
+        <Section
+            valeur="places"
+            titre="Places par cité"
+            icone={<Building {...ICON} />}
+        >
             {places.length === 0 ? (
                 <p className="px-4 py-3 text-sm text-muted">
                     Aucune résidence n’est ouverte à cette campagne.
@@ -525,31 +392,11 @@ function TablePlaces({
                                     Capacité
                                 </th>
                                 <th className="px-4 py-2 font-medium">
-                                    Places {VOLETS[volet].complement}
+                                    Places {JEUX[volet].complement}
                                 </th>
-                                {readmission && actif("C1") && (
-                                    <th className="px-4 py-2 font-medium">
-                                        C1 Concours
-                                    </th>
-                                )}
-                                {readmission && actif("C3") && (
-                                    <th className="px-4 py-2 font-medium">
-                                        C3 Clubs
-                                    </th>
-                                )}
-                                {readmission && actif("C4") && (
-                                    <th className="px-4 py-2 font-medium">
-                                        C4 Cas sociaux
-                                    </th>
-                                )}
-                                {readmission && actif("C5") && (
-                                    <th className="px-4 py-2 font-medium">
-                                        C5 Comité
-                                    </th>
-                                )}
                                 {readmission && (
                                     <th className="px-4 py-2 font-medium">
-                                        Solde C2 / C6
+                                        Cas sociaux
                                     </th>
                                 )}
                             </tr>
@@ -573,29 +420,9 @@ function TablePlaces({
                                     <td className="px-4 py-2.5">
                                         {valeur(ligne.places)}
                                     </td>
-                                    {readmission && actif("C1") && (
-                                        <td className="px-4 py-2.5">
-                                            {valeur(ligne.quotas?.C1)}
-                                        </td>
-                                    )}
-                                    {readmission && actif("C3") && (
-                                        <td className="px-4 py-2.5">
-                                            {valeur(ligne.quotas?.C3)}
-                                        </td>
-                                    )}
-                                    {readmission && actif("C4") && (
-                                        <td className="px-4 py-2.5">
-                                            {ligne.cas_sociaux ?? "—"}
-                                        </td>
-                                    )}
-                                    {readmission && actif("C5") && (
-                                        <td className="px-4 py-2.5">
-                                            {valeur(ligne.quotas?.C5)}
-                                        </td>
-                                    )}
                                     {readmission && (
                                         <td className="px-4 py-2.5">
-                                            {ligne.solde ?? "—"}
+                                            {ligne.cas_sociaux ?? "—"}
                                         </td>
                                     )}
                                 </tr>
@@ -604,7 +431,7 @@ function TablePlaces({
                     </table>
                 </div>
             )}
-        </Bloc>
+        </Section>
     );
 }
 
