@@ -108,7 +108,7 @@ function etapesDuVolet(volet: Volet, droits: PageCriteres["droits"]): Etape[] {
             champs:
                 volet === "admission"
                     ? ["recevabilite", "admission.merite", "admission.seuil_actif", "admission.seuil", "admission.age_actif"]
-                    : ["recevabilite", "readmission.loyers", "readmission.credits_actif", "readmission.conduite_actif", "readmission.age_actif"],
+                    : ["recevabilite", "readmission.loyers", "readmission.credits_actif", "readmission.conduite_actif", "readmission.conduite_note_min", "readmission.age_actif"],
         });
         liste.push({
             cle: "classement",
@@ -156,6 +156,7 @@ function Assistant({
     general,
     filieres,
     niveauxEtude,
+    noteConduite,
     urls,
 }: PageCriteres) {
     const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
@@ -205,6 +206,7 @@ function Assistant({
         controlerPlaces: droits.configurerPlaces,
         controlerRegles: droits.configurerRegles,
         general: g,
+        noteConduite,
     };
     /** Un bloc en lecture seule (droit absent, campagne terminée) n'est ni validé ni envoyé. */
     const editable = (bloc: Bloc) =>
@@ -257,7 +259,7 @@ function Assistant({
         Object.entries(erreurs).forEach(([cle, message]) => {
             const champ = cle
                 .replace(/^regles\./, "")
-                .replace(/^readmission\.conduite\.actif$/, "readmission.conduite_actif")
+                .replace(/^readmission\.conduite\.(actif|note_min)$/, "readmission.conduite_$1")
                 .replace(/^places$/, "places.0.places")
                 .replace(/^(classement\.departage)\.\d+$/, "$1");
             const index = etapes.findIndex((e) => couvre(e, champ));
@@ -458,6 +460,22 @@ function Assistant({
                             {interrupteur(
                                 "readmission.conduite_actif",
                                 "Conduite en cité",
+                                "Note de conduite calculée à partir du paramétrage des sanctions.",
+                            )}
+                            {readmission.conduite_actif && (
+                                <div className="md:max-w-xs">
+                                    {champNombre(
+                                        "readmission.conduite_note_min",
+                                        "Note de conduite minimale",
+                                        noteConduite !== null ? `/ ${String(noteConduite).replace(".", ",")} pts` : "pts",
+                                        {
+                                            requis: true,
+                                            decimal: true,
+                                            placeholder: "Ex. 10",
+                                            aide: "En dessous de cette note, la demande est rejetée.",
+                                        },
+                                    )}
+                                </div>
                             )}
                             {interrupteur(
                                 "readmission.age_actif",
@@ -702,7 +720,7 @@ function Assistant({
                                                           readmission.credits_actif &&
                                                               "crédits validés",
                                                           readmission.conduite_actif &&
-                                                              "conduite",
+                                                              `conduite ≥ ${readmission.conduite_note_min || "—"} pts`,
                                                           readmission.age_actif &&
                                                               "âge maximum",
                                                       ]

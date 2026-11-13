@@ -1,4 +1,4 @@
-import { ArrowUpRight, BedDouble, Building, CalendarClock, ChartPie, FileText, Hotel, ListChecks, type LucideIcon, Sofa, Star } from 'lucide-react';
+import { ArrowUpRight, BedDouble, Building, CalendarClock, ChartPie, FileText, Gavel, Hotel, ListChecks, type LucideIcon, Sofa, Star } from 'lucide-react';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { PageHeader } from '@/components/ui/page-header';
@@ -13,6 +13,7 @@ const ICONES: Record<string, LucideIcon> = {
     pie: ChartPie,
     building: Building,
     check: ListChecks,
+    gavel: Gavel,
     star: Star,
     file: FileText,
     calendar: CalendarClock,

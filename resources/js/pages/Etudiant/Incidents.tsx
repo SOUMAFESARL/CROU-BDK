@@ -22,6 +22,11 @@ import {
     Vide,
     type PaginationSimpleProps,
 } from "@/components/etudiant/panneau";
+import {
+    HistoriqueSanctions,
+    NoteConduite,
+    type Conduite,
+} from "@/components/etudiant/conduite";
 import { ICON } from "@/components/layout/app-sidebar";
 import { EtudiantLayout } from "@/components/layout/etudiant-layout";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +53,7 @@ import {
 } from "@/components/ui/select";
 import { StatCard } from "@/components/ui/stat-card";
 import { Stepper } from "@/components/ui/stepper";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
     dateHeure,
@@ -79,8 +85,14 @@ type Signalement = {
     transmisLe: string | null;
 };
 
+type Onglet = "conduite" | "signalements";
+
 type IncidentsProps = {
-    statutDisciplinaire: { cle: string; libelle: string } | null;
+    /** Onglet ouvert (`?onglet=`), « conduite » par défaut. */
+    onglet: Onglet;
+    statutDisciplinaire: { cle: string; libelle: string; effet: string } | null;
+    /** Note de conduite et sanctions qui visent l'étudiant. */
+    conduite: Conduite;
     residence: { cite: string | null; batiment: string | null; chambre: string | null } | null;
     natures: { code: string; libelle: string }[];
     compteurs: { total: number; enCours: number; traites: number; retournes: number };
@@ -102,9 +114,15 @@ const vide = (): Incident => ({
     sincerite: false,
 });
 
-/** Page « Signaler un incident » : déclaration d'un incident disciplinaire au Service Sécurité et suivi des signalements de l'étudiant. */
+/**
+ * Page « Conduite et signalements », en deux onglets : « Conduite » (note de conduite et sanctions appliquées à
+ * l'étudiant) puis « Signalements » (déclaration d'un incident disciplinaire au Service Sécurité et suivi des
+ * signalements qu'il a transmis).
+ */
 export default function Incidents({
+    onglet,
     statutDisciplinaire,
+    conduite,
     residence,
     natures,
     compteurs,
@@ -113,16 +131,26 @@ export default function Incidents({
     urls,
 }: IncidentsProps) {
     const [modalOuverte, setModalOuverte] = useState(false);
+    const [actif, setActif] = useState<Onglet>(onglet);
+
+    // L'onglet ouvert reste dans l'URL (?onglet=…) pour le partage et le retour arrière.
+    const changerOnglet = (valeur: string) => {
+        setActif(valeur as Onglet);
+        const url = new URL(window.location.href);
+        url.searchParams.set("onglet", valeur);
+        window.history.replaceState(window.history.state, "", url);
+    };
 
     return (
-        <EtudiantLayout title="Signaler un incident">
+        <EtudiantLayout title="Conduite et signalements">
             <div className="flex flex-col gap-5">
                 <header className="min-w-0">
                     <h1 className="page-title text-xl font-medium text-gray-900">
-                        Signaler un incident
+                        Conduite et signalements
                     </h1>
                     <p className="mt-2 text-sm text-muted">
-                        Déclarez au Service Sécurité un incident survenu dans la résidence et suivez son traitement.
+                        Consultez votre note de conduite et les sanctions qui vous ont été appliquées, déclarez au Service
+                        Sécurité un incident survenu dans la résidence et suivez son traitement.
                     </p>
                 </header>
 
@@ -134,65 +162,99 @@ export default function Incidents({
                         <ShieldAlert {...ICON} className="mt-0.5 shrink-0" />
                         <p>
                             Votre statut disciplinaire : <strong className="font-medium">{statutDisciplinaire.libelle}</strong>.
-                            {statutDisciplinaire.cle === "expulsion" &&
+                            {statutDisciplinaire.effet === "expulsion" &&
                                 " Contactez le service Logement pour organiser l’état des lieux de sortie."}
                         </p>
                     </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                    <StatCard label="Mes signalements" value={compteurs.total} tone="blue" />
-                    <StatCard label="En cours de traitement" value={compteurs.enCours} tone="amber" />
-                    <StatCard label="Traités" value={compteurs.traites} tone="green" />
-                    <StatCard
-                        label="Retournés"
-                        value={compteurs.retournes}
-                        tone={compteurs.retournes > 0 ? "red" : "neutral"}
-                    />
-                </div>
-
-                <Panneau
-                    surtitre="Suivi"
-                    titre="Mes signalements"
-                    badge={`${pagination.total} signalement${pagination.total > 1 ? "s" : ""}`}
-                    action={
-                        <Button size="sm" onClick={() => setModalOuverte(true)} className="font-medium">
+                <Tabs value={actif} onValueChange={changerOnglet}>
+                    <TabsList aria-label="Rubriques de la conduite" className="bg-white px-1">
+                        <TabsTrigger value="conduite">
+                            <ShieldCheck {...ICON} />
+                            Conduite
+                        </TabsTrigger>
+                        <TabsTrigger value="signalements">
                             <TriangleAlert {...ICON} />
-                            Signaler un incident
-                        </Button>
-                    }
-                >
-                    {signalements.length === 0 ? (
-                        <Vide icone={ShieldCheck}>Aucun signalement transmis.</Vide>
-                    ) : (
-                        <ul className="-mx-2 divide-y">
-                            {signalements.map((signalement) => (
-                                <LigneSignalement key={signalement.id} signalement={signalement} />
-                            ))}
-                        </ul>
-                    )}
-                    <PaginationSimple {...pagination} />
-                </Panneau>
+                            Signalements
+                            {compteurs.retournes > 0 && (
+                                <span className="rounded-sm bg-accent px-1.5 text-xs font-medium text-white">
+                                    {compteurs.retournes}
+                                </span>
+                            )}
+                        </TabsTrigger>
+                    </TabsList>
 
-                <div className="grid gap-5 lg:grid-cols-2">
-                    <div className="flex items-start gap-2.5 rounded-brand border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                        <Siren {...ICON} className="mt-0.5 shrink-0" />
-                        <div>
-                            <strong className="block font-medium">Danger immédiat ?</strong>
-                            <p className="mt-1">
-                                Éloignez-vous de la zone et contactez sans délai le poste de sécurité de votre résidence.
-                            </p>
+                    <TabsContent value="conduite">
+                        <div className="grid gap-5 lg:grid-cols-3">
+                            <NoteConduite conduite={conduite} className="h-fit" />
+                            <Panneau
+                                surtitre="Ma conduite"
+                                titre="Sanctions qui me concernent"
+                                badge={`${conduite.sanctions.length} sanction${conduite.sanctions.length > 1 ? "s" : ""}`}
+                                className="lg:col-span-2"
+                            >
+                                <HistoriqueSanctions sanctions={conduite.sanctions} />
+                            </Panneau>
                         </div>
-                    </div>
-                    <Panneau surtitre="Résidence associée" titre={residence?.cite ?? "Non disponible"}>
-                        <p className="flex items-center gap-2 text-sm text-muted">
-                            <MapPin {...ICON} className="shrink-0" />
-                            {residence
-                                ? `${residence.batiment ?? "Bâtiment non renseigné"} · Chambre ${residence.chambre ?? "—"}`
-                                : "Aucune chambre active"}
-                        </p>
-                    </Panneau>
-                </div>
+                    </TabsContent>
+
+                    <TabsContent value="signalements" className="flex flex-col gap-5">
+                        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                            <StatCard label="Mes signalements" value={compteurs.total} tone="blue" />
+                            <StatCard label="En cours de traitement" value={compteurs.enCours} tone="amber" />
+                            <StatCard label="Traités" value={compteurs.traites} tone="green" />
+                            <StatCard
+                                label="Retournés"
+                                value={compteurs.retournes}
+                                tone={compteurs.retournes > 0 ? "red" : "neutral"}
+                            />
+                        </div>
+
+                        <Panneau
+                            surtitre="Suivi"
+                            titre="Mes signalements"
+                            badge={`${pagination.total} signalement${pagination.total > 1 ? "s" : ""}`}
+                            action={
+                                <Button size="sm" onClick={() => setModalOuverte(true)} className="font-medium">
+                                    <TriangleAlert {...ICON} />
+                                    Signaler un incident
+                                </Button>
+                            }
+                        >
+                            {signalements.length === 0 ? (
+                                <Vide icone={ShieldCheck}>Aucun signalement transmis.</Vide>
+                            ) : (
+                                <ul className="-mx-2 divide-y">
+                                    {signalements.map((signalement) => (
+                                        <LigneSignalement key={signalement.id} signalement={signalement} />
+                                    ))}
+                                </ul>
+                            )}
+                            <PaginationSimple {...pagination} />
+                        </Panneau>
+
+                        <div className="grid gap-5 lg:grid-cols-2">
+                            <div className="flex items-start gap-2.5 rounded-brand border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                                <Siren {...ICON} className="mt-0.5 shrink-0" />
+                                <div>
+                                    <strong className="block font-medium">Danger immédiat ?</strong>
+                                    <p className="mt-1">
+                                        Éloignez-vous de la zone et contactez sans délai le poste de sécurité de votre résidence.
+                                    </p>
+                                </div>
+                            </div>
+                            <Panneau surtitre="Résidence associée" titre={residence?.cite ?? "Non disponible"}>
+                                <p className="flex items-center gap-2 text-sm text-muted">
+                                    <MapPin {...ICON} className="shrink-0" />
+                                    {residence
+                                        ? `${residence.batiment ?? "Bâtiment non renseigné"} · Chambre ${residence.chambre ?? "—"}`
+                                        : "Aucune chambre active"}
+                                </p>
+                            </Panneau>
+                        </div>
+                    </TabsContent>
+                </Tabs>
             </div>
 
             <ModalIncident

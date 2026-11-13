@@ -2,16 +2,17 @@
 
 namespace App\Services;
 
-use App\Http\Services\DisciplinaryImpactService;
+use App\Http\Services\CatalogueSanctions;
 use App\Models\AssignationChambre;
 use App\Models\DisciplinaryReport;
 use App\Models\Etudiant;
 
 /**
- * Props de la page React « Signaler un incident » de l'espace étudiant (Etudiant/Incidents) :
- * statut disciplinaire de l'étudiant, résidence rattachée au signalement (assignation active,
- * comme DisciplinaryIncidentController::store) et suivi des signalements qu'il a déclarés.
- * Seul l'état du dossier est montré : ni la décision ni la sanction (qui peut viser un autre résident).
+ * Props de la page React « Conduite et signalements » de l'espace étudiant (Etudiant/Incidents) :
+ * statut disciplinaire et note de conduite de l'étudiant, sanctions qui le visent (`EtudiantConduite`),
+ * résidence rattachée au signalement (assignation active, comme DisciplinaryIncidentController::store)
+ * et suivi des signalements qu'il a déclarés, répartis en deux onglets (`?onglet=conduite|signalements`). Pour un signalement, seul l'état du dossier est montré :
+ * ni la décision ni la sanction (qui peut viser un autre résident).
  */
 class EtudiantIncidents
 {
@@ -38,6 +39,9 @@ class EtudiantIncidents
 
     private const GRAVITES = ['faible' => 'Faible', 'moyenne' => 'Moyenne', 'grave' => 'Grave', 'critique' => 'Critique'];
 
+    /** Onglets de la page (`?onglet=`) : « Conduite » (par défaut) puis « Signalements ». */
+    public const ONGLETS = ['conduite', 'signalements'];
+
     public function props(Etudiant $etudiant): array
     {
         $id = (string) $etudiant->getKey();
@@ -52,18 +56,24 @@ class EtudiantIncidents
             ->where('declarant_id', $id)
             ->latest('date_incident')
             ->paginate(10)
-            ->withPath(route('etudiants.dashboard'))->appends(['section' => 'incidents']);
+            ->withPath(route('etudiants.dashboard'))->appends(['section' => 'incidents', 'onglet' => 'signalements']);
 
         $parStatut = DisciplinaryReport::query()->where('declarant_id', $id)->toBase()
             ->selectRaw('statut, count(*) as total')->groupBy('statut')->pluck('total', 'statut');
 
         $statut = $etudiant->statut_disciplinaire;
+        $catalogue = app(CatalogueSanctions::class);
+
+        $onglet = request()->query('onglet');
 
         return [
-            'statutDisciplinaire' => $statut && $statut !== 'aucune' ? [
+            'onglet' => in_array($onglet, self::ONGLETS, true) ? $onglet : 'conduite',
+            'statutDisciplinaire' => $statut && $statut !== CatalogueSanctions::AUCUNE ? [
                 'cle' => $statut,
-                'libelle' => DisciplinaryImpactService::LABELS[$statut] ?? ucfirst($statut),
+                'libelle' => $catalogue->libelle($statut),
+                'effet' => $catalogue->effet($statut),
             ] : null,
+            'conduite' => app(EtudiantConduite::class)->props($etudiant),
             'residence' => $chambre ? [
                 'cite' => $chambre->cite?->name,
                 'batiment' => $chambre->batiment?->name,

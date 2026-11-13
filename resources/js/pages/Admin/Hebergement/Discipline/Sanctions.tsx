@@ -3,7 +3,7 @@ import { Eye, Gavel, PenLine, Scale, ShieldAlert, X } from 'lucide-react';
 import { useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
-import { SanctionDialog } from '@/components/discipline/sanction-dialog';
+import { SanctionDialog, type TypeSaisie } from '@/components/discipline/sanction-dialog';
 import { StatutSanctionDialog } from '@/components/discipline/statut-sanction-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
@@ -16,6 +16,7 @@ import { StatCard } from '@/components/ui/stat-card';
 import { Chronologie, Lignes, type Structure } from '@/components/vie-residentielle/shared';
 import { dateFr, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
+import { points } from '@/schemas/parametrage-sanctions';
 import type { Paginated } from '@/types/global';
 
 export type Sanction = {
@@ -26,6 +27,10 @@ export type Sanction = {
     cible: { titre: string; detail: string | null };
     type: string;
     type_label: string;
+    /** Effet du type (paramétrage des sanctions) : aucun, suspension, expulsion. */
+    effet: string;
+    /** Points retirés à la note de conduite (sanction individuelle seulement). */
+    points_retires: number | null;
     motif: string;
     faits: string | null;
     date_debut: string | null;
@@ -41,6 +46,9 @@ type Props = {
     sanctions: Paginated<Sanction>;
     stats: { total: number; active: number; avertissements: number; suspensions: number };
     filters: Filtres;
+    /** Types du paramétrage des sanctions (filtre) et types proposés à la saisie directe. */
+    types: { value: string; label: string }[];
+    typesSaisie: TypeSaisie[];
     structure: Structure;
     urls: { index: string; store: string | null; incidents: string | null };
 };
@@ -53,19 +61,13 @@ export const STATUTS_SANCTION: Record<string, { label: string; variante: 'danger
     annulee: { label: 'Annulée', variante: 'neutral' },
 };
 
-const VARIANTES_TYPE: Record<string, 'warning' | 'danger' | 'info'> = { avertissement: 'warning', blame: 'danger', suspension: 'info', expulsion: 'danger' };
-
-const TYPES = [
-    { value: 'avertissement', label: 'Avertissement' },
-    { value: 'blame', label: 'Blâme' },
-    { value: 'suspension', label: 'Suspension' },
-    { value: 'expulsion', label: 'Expulsion' },
-];
+/** Couleur du badge selon l'effet du type de sanction. */
+const VARIANTES_EFFET: Record<string, 'warning' | 'danger' | 'info'> = { aucun: 'warning', suspension: 'info', expulsion: 'danger' };
 
 const libelleStatut = (statut: string | null) => (statut ? (STATUTS_SANCTION[statut]?.label ?? statut) : '—');
 
 /** Sanctions disciplinaires (remplace `vie_residentielle/sanctions/index.blade.php`). */
-export default function SanctionsIndex({ sanctions, stats, filters, structure, urls }: Props) {
+export default function SanctionsIndex({ sanctions, stats, filters, types, typesSaisie, structure, urls }: Props) {
     const [nouvelle, setNouvelle] = useState(false);
     const [detail, setDetail] = useState<Sanction | null>(null);
     const [statut, setStatut] = useState<Sanction | null>(null);
@@ -97,7 +99,7 @@ export default function SanctionsIndex({ sanctions, stats, filters, structure, u
                 </div>
             ),
         },
-        { key: 'type', header: 'Type', cell: (s) => <Badge variant={VARIANTES_TYPE[s.type] ?? 'neutral'}>{s.type_label}</Badge> },
+        { key: 'type', header: 'Type', cell: (s) => <Badge variant={VARIANTES_EFFET[s.effet] ?? 'neutral'}>{s.type_label}</Badge> },
         { key: 'motif', header: 'Motif', cell: (s) => <span className="line-clamp-2 max-w-64">{s.motif}</span> },
         {
             key: 'periode',
@@ -167,7 +169,7 @@ export default function SanctionsIndex({ sanctions, stats, filters, structure, u
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value={TOUS}>Tous les types</SelectItem>
-                                        {TYPES.map((type) => (
+                                        {types.map((type) => (
                                             <SelectItem key={type.value} value={type.value}>
                                                 {type.label}
                                             </SelectItem>
@@ -217,7 +219,7 @@ export default function SanctionsIndex({ sanctions, stats, filters, structure, u
                 />
             </section>
 
-            {urls.store && <SanctionDialog open={nouvelle} onClose={() => setNouvelle(false)} url={urls.store} structure={structure} />}
+            {urls.store && <SanctionDialog open={nouvelle} onClose={() => setNouvelle(false)} url={urls.store} structure={structure} types={typesSaisie} />}
             <StatutSanctionDialog sanction={statut} onClose={() => setStatut(null)} />
 
             <Sheet open={detail !== null} onOpenChange={(ouvert) => !ouvert && setDetail(null)}>
@@ -232,7 +234,7 @@ export default function SanctionsIndex({ sanctions, stats, filters, structure, u
                                     <SheetDescription className="text-xs text-muted">Sanction {detail.numero}</SheetDescription>
                                     <SheetTitle className="truncate text-lg font-medium text-gray-900">{detail.cible.titre}</SheetTitle>
                                     <div className="mt-2 flex flex-wrap gap-1.5">
-                                        <Badge variant={VARIANTES_TYPE[detail.type] ?? 'neutral'}>{detail.type_label}</Badge>
+                                        <Badge variant={VARIANTES_EFFET[detail.effet] ?? 'neutral'}>{detail.type_label}</Badge>
                                         <Badge variant={STATUTS_SANCTION[detail.statut]?.variante ?? 'neutral'}>{libelleStatut(detail.statut)}</Badge>
                                     </div>
                                 </div>
@@ -247,6 +249,9 @@ export default function SanctionsIndex({ sanctions, stats, filters, structure, u
                                         ['Décision du', dateFr(detail.date_decision)],
                                         ['Concerne', detail.cible.detail ?? detail.cible.titre],
                                         ...((detail.date_debut || detail.date_fin) ? ([['Période', `${dateFr(detail.date_debut)} au ${dateFr(detail.date_fin)}`]] as [string, string][]) : []),
+                                        ...(detail.points_retires !== null
+                                            ? ([['Note de conduite', detail.statut === 'annulee' ? `${points(detail.points_retires)} point(s) restitué(s)` : `−${points(detail.points_retires)} point(s)`]] as [string, string][])
+                                            : []),
                                     ]}
                                 />
                                 <div>

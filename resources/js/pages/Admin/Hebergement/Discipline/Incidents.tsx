@@ -4,7 +4,7 @@ import { Fragment, useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
 import { GRAVITES, RapportDialog } from '@/components/discipline/rapport-dialog';
-import { ACTIONS, TransitionDialog, type ActionRapport } from '@/components/discipline/transition-dialog';
+import { ACTIONS, TransitionDialog, type ActionRapport, type OptionSanction } from '@/components/discipline/transition-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
@@ -51,7 +51,7 @@ type Props = {
     stats: { brouillons: number; transmis: number; en_cours: number; decides: number };
     filters: Filtres;
     structure: Structure;
-    sanctions: { value: string; label: string }[];
+    sanctions: OptionSanction[];
     urls: { index: string; store: string | null; sanctions: string | null };
 };
 

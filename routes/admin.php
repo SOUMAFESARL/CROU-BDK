@@ -14,6 +14,7 @@ use App\Http\Controllers\admin\immobilier\parametrage\type_chambre\TypeChambreCo
 use App\Http\Controllers\admin\immobilier\parametrage\quotas_campagne\QuotasCampagneController;
 use App\Http\Controllers\admin\immobilier\parametrage\batiments_campagne\BatimentsCampagneController;
 use App\Http\Controllers\admin\immobilier\parametrage\regles_campagne\ReglesCampagnesController;
+use App\Http\Controllers\admin\immobilier\parametrage\sanctions\ParametrageSanctionsController;
 use App\Http\Controllers\admin\immobilier\depart_etat_des_lieux\DepartEtatDesLieuxController;
 use App\Http\Controllers\admin\immobilier\depart_etat_des_lieux\DepartureSettingController;
 use App\Http\Controllers\admin\immobilier\parametrage\document\documentController;
@@ -477,6 +478,17 @@ Route::middleware(['admin'])->group(function () {
                 ->group(function () {
                     Route::get('/', 'index')->name('index');
 
+                });
+
+            // Paramétrage des sanctions : note de conduite initiale et types de sanction (points retirés, effet).
+            Route::prefix('sanctions')->name('sanctions.')
+                ->controller(ParametrageSanctionsController::class)
+                ->group(function () {
+                    Route::get('/', 'index')->name('index');
+                    Route::put('/note-conduite', 'noteConduite')->name('note');
+                    Route::post('/types', 'store')->name('store');
+                    Route::put('/types/{type}', 'update')->name('update');
+                    Route::delete('/types/{type}', 'destroy')->name('destroy');
                 });
 
             // Critères d'une campagne : une seule page, un niveau par volet ouvert (admission, réadmission).

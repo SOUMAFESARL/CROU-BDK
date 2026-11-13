@@ -211,7 +211,7 @@ function Detail({ page, regles, places }: DetailProps) {
                                           [
                                               "Conduite en cité",
                                               r.conduite.actif
-                                                  ? "Résident sanctionné (suspension, expulsion) rejeté"
+                                                  ? `Note de conduite d’au moins ${String(r.conduite.note_min ?? "—").replace(".", ",")}${page.noteConduite !== null ? ` / ${String(page.noteConduite).replace(".", ",")}` : ""} points, sinon rejet`
                                                   : "Désactivé",
                                           ],
                                       ] as [string, ReactNode][])

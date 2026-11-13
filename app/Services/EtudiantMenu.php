@@ -55,7 +55,8 @@ class EtudiantMenu
                 ['label' => 'Paiements', 'icon' => 'credit-card', 'page' => 'paiements', 'href' => $sectionUrl('paiements')],
                 ['label' => 'Annonces', 'icon' => 'megaphone', 'page' => 'annonce', 'href' => $sectionUrl('annonce')],
                 ['label' => 'Maintenance', 'icon' => 'wrench', 'page' => 'maintenance', 'href' => $sectionUrl('maintenance')],
-                ['label' => 'Signaler un incident', 'icon' => 'triangle-alert', 'page' => 'incidents', 'href' => $sectionUrl('incidents')],
+                // Sanctions appliquées à l'étudiant et signalement d'incidents.
+                ['label' => 'Conduite et signalements', 'icon' => 'triangle-alert', 'page' => 'incidents', 'href' => $sectionUrl('incidents')],
                 ['label' => 'Carte interactive', 'icon' => 'map', 'page' => 'carte-interactive', 'href' => $sectionUrl('carte-interactive')],
                 ['label' => 'Documents de la résidence', 'icon' => 'file-text', 'href' => route('etudiants.documents.index'), 'routes' => ['etudiants.documents.index']],
                 ['label' => 'Mes documents', 'icon' => 'folder-open', 'href' => route('etudiants.documents.personal'), 'routes' => ['etudiants.documents.personal', 'etudiants.contract.*']],

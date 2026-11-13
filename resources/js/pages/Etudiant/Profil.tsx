@@ -1,7 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Check, Circle, CircleCheck, Eye, EyeOff, IdCard, Info, KeyRound, Loader2, Lock, Phone, ShieldCheck } from 'lucide-react';
+import { Check, Circle, CircleCheck, Eye, EyeOff, Gavel, IdCard, Info, KeyRound, Loader2, Lock, Phone, ShieldCheck } from 'lucide-react';
 import { useMemo, useState, type ComponentProps, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
+import { HistoriqueSanctions, NoteConduite, type Conduite } from '@/components/etudiant/conduite';
 import { ICON } from '@/components/layout/app-sidebar';
 import { EtudiantLayout } from '@/components/layout/etudiant-layout';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,7 @@ import {
     type ReglesMotDePasse,
 } from '@/schemas/etudiant-profil';
 
-type Onglet = 'identite' | 'coordonnees' | 'securite';
+type Onglet = 'identite' | 'conduite' | 'coordonnees' | 'securite';
 
 type ProfilProps = {
     onglet: Onglet;
@@ -36,6 +37,8 @@ type ProfilProps = {
         faculte: string | null;
         email1: string | null;
     };
+    /** Note de conduite et historique des retraits de points. */
+    conduite: Conduite;
     coordonnees: Coordonnees;
     reglesMotDePasse: ReglesMotDePasse;
     urls: { coordonnees: string; motDePasse: string };
@@ -43,12 +46,13 @@ type ProfilProps = {
 
 const ONGLETS: { cle: Onglet; libelle: string; icone: typeof IdCard }[] = [
     { cle: 'identite', libelle: 'Identité', icone: IdCard },
+    { cle: 'conduite', libelle: 'Ma conduite', icone: Gavel },
     { cle: 'coordonnees', libelle: 'Coordonnées', icone: Phone },
     { cle: 'securite', libelle: 'Sécurité', icone: Lock },
 ];
 
 /** Page « Mon profil » : identité en lecture seule, coordonnées et mot de passe modifiables. */
-export default function Profil({ onglet, etudiant, coordonnees, reglesMotDePasse, urls }: ProfilProps) {
+export default function Profil({ onglet, etudiant, conduite, coordonnees, reglesMotDePasse, urls }: ProfilProps) {
     const [actif, setActif] = useState<Onglet>(onglet);
 
     // L'onglet ouvert reste dans l'URL (?onglet=…) pour le partage et le retour arrière.
@@ -89,6 +93,20 @@ export default function Profil({ onglet, etudiant, coordonnees, reglesMotDePasse
                     <TabsContent value="identite">
                         <Panneau surtitre="Identité" titre="Informations personnelles">
                             <Identite etudiant={etudiant} />
+                        </Panneau>
+                    </TabsContent>
+                    <TabsContent value="conduite">
+                        <Panneau surtitre="Ma conduite" titre="Note de conduite et retraits de points">
+                            <div className="flex flex-col gap-5">
+                                <NoteConduite conduite={conduite} />
+                                <Notice icone={<ShieldCheck {...ICON} />}>
+                                    Chaque sanction retire des points à votre note de conduite. Une sanction annulée vous les restitue. Cette note est prise en compte lors de votre réadmission.
+                                </Notice>
+                                <div>
+                                    <h3 className="mb-2 text-sm font-medium text-gray-900">Historique</h3>
+                                    <HistoriqueSanctions sanctions={conduite.sanctions} />
+                                </div>
+                            </div>
                         </Panneau>
                     </TabsContent>
                     <TabsContent value="coordonnees">

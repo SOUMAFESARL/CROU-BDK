@@ -63,6 +63,7 @@ class DisciplinePagesTest extends TestCase
             '2026_08_10_000005_create_departure_requests_and_settlements.php',
             '2026_08_31_000010_complete_departure_workflow.php',
             '2026_09_23_000004_link_disciplinary_decisions_to_sanctions.php',
+            '2026_11_13_000001_create_parametrage_sanctions_tables.php',
         ] as $migration) {
             (require database_path('migrations/'.$migration))->up();
         }

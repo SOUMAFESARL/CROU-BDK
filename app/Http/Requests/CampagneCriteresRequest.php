@@ -92,6 +92,8 @@ class CampagneCriteresRequest extends FormRequest
             $r.'loyers.mois_exiges' => 'required_with:regles|integer|min:1|max:12',
             $r.'credits_actif' => 'required_with:regles|boolean',
             $r.'conduite.actif' => 'required_with:regles|boolean',
+            // Note de conduite minimale, bornée par la note initiale du paramétrage des sanctions.
+            $r.'conduite.note_min' => 'nullable|required_if_accepted:'.$r.'conduite.actif|numeric|decimal:0,2|min:0|max:'.app(\App\Http\Services\CatalogueSanctions::class)->noteInitiale(),
             $r.'age_actif' => 'required_with:regles|boolean',
             $r.'report_places' => ['required_with:regles', Rule::in(C::REPORT_PLACES)],
             'regles.classement.priorite_boursiers' => ['required_with:regles', Rule::in(C::PRIORITE_BOURSIERS)],
@@ -126,6 +128,7 @@ class CampagneCriteresRequest extends FormRequest
             'regles.admission.seuil' => 'seuil minimum',
             'regles.admission.ville_bac' => 'ville de référence du baccalauréat',
             $r.'loyers.mois_exiges' => 'mois de loyers exigés',
+            $r.'conduite.note_min' => 'note de conduite minimale',
             'regles.classement.k_liste_elargie' => 'coefficient de la liste élargie',
             'regles.classement.departage' => 'ordre de départage',
             'regles.classement.departage.*' => 'critère de départage',

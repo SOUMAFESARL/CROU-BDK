@@ -31,10 +31,12 @@ class ParametrageHebergement
         ],
         [
             'titre' => 'Campagnes & admissions',
-            'description' => 'Capacités, résidences ouvertes et critères d’admission et de réadmission des campagnes.',
+            'description' => 'Capacités, résidences ouvertes, barème des sanctions et critères d’admission et de réadmission des campagnes.',
             'modules' => [
                 ['label' => 'Capacités et quotas', 'icon' => 'pie', 'route' => 'admin.hebergement.parametrage-herb.quotas-campagne.index', 'description' => 'Places et demandes par campagne'],
                 ['label' => 'Bâtiments par campagne', 'icon' => 'building', 'route' => 'admin.hebergement.parametrage-herb.batiments-campagne.index', 'description' => 'Résidences ouvertes'],
+                // Avant les critères : la note de conduite minimale de la réadmission s'appuie sur ce barème.
+                ['label' => 'Paramétrage des sanctions', 'icon' => 'gavel', 'route' => 'admin.hebergement.parametrage-herb.sanctions.index', 'description' => 'Note de conduite et points retirés'],
                 ['label' => 'Critères de la campagne', 'icon' => 'check', 'route' => 'admin.hebergement.parametrage-herb.criteres-campagne.index', 'description' => 'Admission et réadmission : places, conditions et classement'],
             ],
         ],

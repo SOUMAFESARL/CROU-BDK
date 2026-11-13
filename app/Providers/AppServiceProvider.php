@@ -67,7 +67,10 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(LoyerRepositoryInterface::class, LoyerRepository::class);
-        
+
+        // Paramétrage des sanctions lu une fois par requête (ou par tâche de file d'attente).
+        $this->app->scoped(\App\Http\Services\CatalogueSanctions::class);
+
         // Enregistrement du service
         $this->app->singleton(LoyerService::class, function ($app) {
             return new LoyerService(

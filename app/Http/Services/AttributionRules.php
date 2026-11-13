@@ -32,8 +32,9 @@ class AttributionRules
     {
         $errors = [];
         $discipline = app(DisciplinaryImpactService::class)->statut($student->getKey());
-        if (in_array($discipline, ['expulsion', 'suspension'], true)) {
-            $errors[] = 'Attribution bloquée : sanction disciplinaire active ('.$discipline.').';
+        $catalogue = app(CatalogueSanctions::class);
+        if ($catalogue->estBloquant($discipline)) {
+            $errors[] = 'Attribution bloquée : sanction disciplinaire active ('.mb_strtolower($catalogue->libelle($discipline)).').';
         }
         if (!$room->estActivePourAttribution()) {
             $errors[] = 'La chambre, son bâtiment ou sa cité est désactivé, supprimé ou incohérent.';

@@ -2,44 +2,52 @@
 namespace App\Http\Services;
 
 use App\Models\{AssignationChambre, DepartureRequest, DisciplinaryReport, Etudiant, Sanction, SanctionHistory};
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
+/**
+ * Effets des sanctions disciplinaires. Les types de sanction, leurs points et leurs effets viennent du
+ * paramétrage (`CatalogueSanctions`) : le comportement dépend de l'effet (suspension, expulsion), jamais du code.
+ */
 class DisciplinaryImpactService
 {
-    public const LABELS = [
-        'aucune' => 'Aucune sanction', 'avertissement' => 'Avertissement',
-        'blame' => 'Blâme', 'suspension' => 'Suspension', 'expulsion' => 'Expulsion',
-    ];
+    public function __construct(private CatalogueSanctions $catalogue) {}
 
+    /** Règles de la décision d'un rapport (types actifs du paramétrage ; période obligatoire pour une suspension). */
     public static function decisionRules(): array
     {
+        $catalogue = app(CatalogueSanctions::class);
+        $codes = $catalogue->actifs()->pluck('code')->all();
+        $suspensions = $catalogue->codesParEffet('suspension', true);
+
         return [
-            'sanction' => 'nullable|required_if:action,decider|in:aucune,avertissement,blame,suspension,expulsion',
-            'etudiant_sanctionne_id' => 'nullable|required_if:sanction,avertissement,blame,suspension,expulsion|string|exists:etudiants,id_etudiant',
-            'sanction_fin' => 'nullable|required_if:sanction,suspension|date|after_or_equal:today',
+            'sanction' => ['nullable', 'required_if:action,decider', Rule::in([CatalogueSanctions::AUCUNE, ...$codes])],
+            'etudiant_sanctionne_id' => array_filter(['nullable', $codes ? 'required_if:sanction,'.implode(',', $codes) : null, 'string', 'exists:etudiants,id_etudiant']),
+            'sanction_fin' => array_filter(['nullable', $suspensions ? 'required_if:sanction,'.implode(',', $suspensions) : null, 'date', 'after_or_equal:today']),
         ];
     }
 
     public function statut(?string $studentId): string
     {
-        if (!$studentId) return 'aucune';
-        $types = Sanction::where('scope_type', 'etudiant')->where('etudiant_id', $studentId)
+        if (!$studentId) return CatalogueSanctions::AUCUNE;
+        $codes = Sanction::where('scope_type', 'etudiant')->where('etudiant_id', $studentId)
             ->where('statut', 'active')
             ->where(fn ($q) => $q->whereNull('date_debut')->orWhereDate('date_debut', '<=', today()))
             ->where(fn ($q) => $q->whereNull('date_fin')->orWhereDate('date_fin', '>=', today()))
             ->pluck('type')->all();
-        foreach (['expulsion', 'suspension', 'blame', 'avertissement'] as $type) {
-            if (in_array($type, $types, true)) return $type;
+        // Le type le plus lourd du paramétrage (expulsion, suspension, puis points retirés décroissants).
+        foreach ($this->catalogue->tous()->pluck('code') as $code) {
+            if (in_array($code, $codes, true)) return $code;
         }
-        return 'aucune';
+        return $codes[0] ?? CatalogueSanctions::AUCUNE;
     }
 
     public function verifier(Etudiant $student): void
     {
         $status = $this->statut($student->getKey());
-        if (in_array($status, ['suspension', 'expulsion'], true)) {
+        if ($this->catalogue->estBloquant($status)) {
             throw ValidationException::withMessages([
-                'etudiant_id' => 'Admission ou attribution bloquée : '.self::LABELS[$status].' disciplinaire active.',
+                'etudiant_id' => 'Admission ou attribution bloquée : '.$this->catalogue->libelle($status).' disciplinaire active.',
             ]);
         }
     }
@@ -49,7 +57,7 @@ class DisciplinaryImpactService
     {
         $type = $data['sanction'];
         $report->update(['sanction_decidee' => $type]);
-        if ($type === 'aucune') return;
+        if ($type === CatalogueSanctions::AUCUNE) return;
         // Ne jamais déduire le destinataire du déclarant d'un signalement.
         $student = Etudiant::whereKey($data['etudiant_sanctionne_id'])->lockForUpdate()->firstOrFail();
         $assignment = AssignationChambre::where('etudiant_id', $student->getKey())->actives()
@@ -62,13 +70,14 @@ class DisciplinaryImpactService
             'chambre_id' => $assignment?->chambre_id,
             'motif' => $data['decision'], 'faits_reproches' => $report->description,
             'date_decision' => today(), 'date_debut' => today(),
-            'date_fin' => $type === 'suspension' ? $data['sanction_fin'] : null,
+            'date_fin' => $this->catalogue->effet($type) === 'suspension' ? $data['sanction_fin'] : null,
+            'points_retires' => $this->catalogue->points($type),
             'commentaire' => $data['commentaire'] ?? null, 'created_by' => $author,
         ]);
         SanctionHistory::create([
             'sanction_id' => $sanction->getKey(), 'action' => 'decision_incident',
             'nouveau_statut' => 'active', 'auteur_id' => $author,
-            'details' => 'Décision du rapport '.$report->numero_rapport.' : '.self::LABELS[$type].'.',
+            'details' => 'Décision du rapport '.$report->numero_rapport.' : '.$this->catalogue->libelle($type).'.',
         ]);
         $this->synchroniser($sanction, $author);
     }
@@ -77,10 +86,10 @@ class DisciplinaryImpactService
     {
         if ($sanction->scope_type !== 'etudiant' || !$sanction->etudiant_id) return;
         Etudiant::whereKey($sanction->etudiant_id)->lockForUpdate()->firstOrFail();
-        if ($sanction->type !== 'expulsion') return;
+        if ($this->catalogue->effet($sanction->type) !== 'expulsion') return;
         if ($sanction->statut !== 'active') {
             $other = Sanction::where('etudiant_id', $sanction->etudiant_id)->where('scope_type', 'etudiant')
-                ->where('type', 'expulsion')->where('statut', 'active')->whereKeyNot($sanction->getKey())->first();
+                ->whereIn('type', $this->catalogue->codesParEffet('expulsion'))->where('statut', 'active')->whereKeyNot($sanction->getKey())->first();
             if ($other) { $this->synchroniser($other, $author); return; }
             // Une sortie déjà clôturée ne doit jamais être rouverte.
             DepartureRequest::where('sanction_id', $sanction->getKey())->where('statut', 'en_attente')

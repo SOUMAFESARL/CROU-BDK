@@ -128,6 +128,8 @@ class CriteresCampagneVue
             'general' => $volet !== 'general' && $droits['voirRegles'] ? $this->general($campagne) : null,
             'filieres' => $volet === 'admission' ? [] : $this->filieres(),
             'niveauxEtude' => $this->niveauxEtude(),
+            // Réadmission : note de conduite initiale (paramétrage des sanctions), maximum de la note minimale exigée.
+            'noteConduite' => $volet === 'readmission' ? app(\App\Http\Services\CatalogueSanctions::class)->noteInitiale() : null,
             'urls' => [
                 'submit' => $modifiable && ($droits['configurerRegles'] || $droits['configurerPlaces'])
                     ? $action('admin.hebergement.eligibilite.criteres.update', true) : null,

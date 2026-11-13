@@ -22,43 +22,42 @@ export const PORTEES = [
     { value: 'cite', label: 'Une cité', description: 'Tous les résidents de la cité.', icone: <Houses {...ICON} /> },
 ] as const;
 
-/** Types proposés à la saisie directe (l'expulsion passe par la décision d'un rapport disciplinaire). */
-const TYPES = [
-    { value: 'avertissement', label: 'Avertissement' },
-    { value: 'blame', label: 'Blâme' },
-    { value: 'suspension', label: 'Suspension' },
-] as const;
+/** Type proposé à la saisie directe (`CatalogueSanctions::options`, hors expulsion : elle passe par la décision d'un rapport). */
+export type TypeSaisie = { value: string; label: string; description?: string; effet?: string };
 
 const requis = (message: string) => z.string().trim().min(1, message);
 
-const schema = z
-    .object({
-        scope_type: z.enum(['etudiant', 'chambre', 'batiment', 'cite']),
-        cite_id: requis('Choisissez la cité.'),
-        batiment_id: z.string(),
-        chambre_id: z.string(),
-        etudiant_id: z.string(),
-        type: z.enum(['avertissement', 'blame', 'suspension'], { error: 'Choisissez le type de sanction.' }),
-        date_decision: requis('Indiquez la date de la décision.'),
-        date_debut: z.string(),
-        date_fin: z.string(),
-        motif: requis('Le motif est obligatoire.').max(2000, '2 000 caractères au maximum.'),
-        faits_reproches: z.string().max(5000, '5 000 caractères au maximum.'),
-        commentaire: z.string().max(2000, '2 000 caractères au maximum.'),
-    })
-    .superRefine((valeurs, ctx) => {
-        if (valeurs.scope_type !== 'cite' && !valeurs.batiment_id) ctx.addIssue({ code: 'custom', path: ['batiment_id'], message: 'Choisissez le bâtiment.' });
-        if (['chambre', 'etudiant'].includes(valeurs.scope_type) && !valeurs.chambre_id) ctx.addIssue({ code: 'custom', path: ['chambre_id'], message: 'Choisissez la chambre.' });
-        if (valeurs.scope_type === 'etudiant' && !valeurs.etudiant_id) ctx.addIssue({ code: 'custom', path: ['etudiant_id'], message: 'Choisissez le résident.' });
-        if (valeurs.type === 'suspension') {
-            if (!valeurs.date_debut) ctx.addIssue({ code: 'custom', path: ['date_debut'], message: 'Indiquez le début de la suspension.' });
-            if (!valeurs.date_fin) ctx.addIssue({ code: 'custom', path: ['date_fin'], message: 'Indiquez la fin de la suspension.' });
-            if (valeurs.date_debut && valeurs.date_fin && valeurs.date_fin < valeurs.date_debut)
-                ctx.addIssue({ code: 'custom', path: ['date_fin'], message: 'La fin doit être postérieure ou égale au début.' });
-        }
-    });
+const construireSchema = (types: TypeSaisie[]) => {
+    const effet = (code: string) => types.find((t) => t.value === code)?.effet;
+    return z
+        .object({
+            scope_type: z.enum(['etudiant', 'chambre', 'batiment', 'cite']),
+            cite_id: requis('Choisissez la cité.'),
+            batiment_id: z.string(),
+            chambre_id: z.string(),
+            etudiant_id: z.string(),
+            type: z.string().refine((code) => types.some((t) => t.value === code), 'Choisissez le type de sanction.'),
+            date_decision: requis('Indiquez la date de la décision.'),
+            date_debut: z.string(),
+            date_fin: z.string(),
+            motif: requis('Le motif est obligatoire.').max(2000, '2 000 caractères au maximum.'),
+            faits_reproches: z.string().max(5000, '5 000 caractères au maximum.'),
+            commentaire: z.string().max(2000, '2 000 caractères au maximum.'),
+        })
+        .superRefine((valeurs, ctx) => {
+            if (valeurs.scope_type !== 'cite' && !valeurs.batiment_id) ctx.addIssue({ code: 'custom', path: ['batiment_id'], message: 'Choisissez le bâtiment.' });
+            if (['chambre', 'etudiant'].includes(valeurs.scope_type) && !valeurs.chambre_id) ctx.addIssue({ code: 'custom', path: ['chambre_id'], message: 'Choisissez la chambre.' });
+            if (valeurs.scope_type === 'etudiant' && !valeurs.etudiant_id) ctx.addIssue({ code: 'custom', path: ['etudiant_id'], message: 'Choisissez le résident.' });
+            if (effet(valeurs.type) === 'suspension') {
+                if (!valeurs.date_debut) ctx.addIssue({ code: 'custom', path: ['date_debut'], message: 'Indiquez le début de la suspension.' });
+                if (!valeurs.date_fin) ctx.addIssue({ code: 'custom', path: ['date_fin'], message: 'Indiquez la fin de la suspension.' });
+                if (valeurs.date_debut && valeurs.date_fin && valeurs.date_fin < valeurs.date_debut)
+                    ctx.addIssue({ code: 'custom', path: ['date_fin'], message: 'La fin doit être postérieure ou égale au début.' });
+            }
+        });
+};
 
-type Valeurs = z.infer<typeof schema>;
+type Valeurs = z.infer<ReturnType<typeof construireSchema>>;
 
 const CHAMPS_ETAPES: (keyof Valeurs)[][] = [
     ['scope_type', 'cite_id', 'batiment_id', 'chambre_id', 'etudiant_id'],
@@ -67,13 +66,13 @@ const CHAMPS_ETAPES: (keyof Valeurs)[][] = [
 ];
 const ETAPES = ['Portée', 'Décision', 'Vérification'];
 
-const valeursInitiales = (): Valeurs => ({
+const valeursInitiales = (types: TypeSaisie[]): Valeurs => ({
     scope_type: 'etudiant',
     cite_id: '',
     batiment_id: '',
     chambre_id: '',
     etudiant_id: '',
-    type: 'avertissement',
+    type: types[0]?.value ?? '',
     date_decision: aujourdhui(),
     date_debut: '',
     date_fin: '',
@@ -83,7 +82,8 @@ const valeursInitiales = (): Valeurs => ({
 });
 
 /** Appliquer une sanction (action `sanctions.store` inchangée : contrôles de cohérence refaits côté serveur). */
-export function SanctionDialog({ open, onClose, url, structure }: { open: boolean; onClose: () => void; url: string; structure: Structure }) {
+export function SanctionDialog({ open, onClose, url, structure, types }: { open: boolean; onClose: () => void; url: string; structure: Structure; types: TypeSaisie[] }) {
+    const schema = useMemo(() => construireSchema(types), [types]);
     const [etape, setEtape] = useState(0);
     const [atteinte, setAtteinte] = useState(0);
     const [erreurServeur, setErreurServeur] = useState<string | null>(null);
@@ -97,17 +97,18 @@ export function SanctionDialog({ open, onClose, url, structure }: { open: boolea
         setError,
         getValues,
         formState: { errors, isSubmitting },
-    } = useForm<Valeurs>({ resolver: zodResolver(schema), mode: 'onTouched', defaultValues: valeursInitiales() });
+    } = useForm<Valeurs>({ resolver: zodResolver(schema), mode: 'onTouched', defaultValues: valeursInitiales(types) });
     const [portee, citeId, batimentId, chambreId, type] = useWatch({ control, name: ['scope_type', 'cite_id', 'batiment_id', 'chambre_id', 'type'] });
+    const suspension = types.find((t) => t.value === type)?.effet === 'suspension';
 
     useEffect(() => {
         if (open) {
-            reset(valeursInitiales());
+            reset(valeursInitiales(types));
             setEtape(0);
             setAtteinte(0);
             setErreurServeur(null);
         }
-    }, [open, reset]);
+    }, [open, reset, types]);
 
     const batiments = useMemo(() => structure.batiments.filter((b) => b.cite_id === citeId), [structure.batiments, citeId]);
     const chambres = useMemo(() => structure.chambres.filter((c) => c.batiment_id === batimentId), [structure.chambres, batimentId]);
@@ -280,8 +281,14 @@ export function SanctionDialog({ open, onClose, url, structure }: { open: boolea
                                         Type de sanction <span className="text-red-600">*</span>
                                     </legend>
                                     <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                                        {TYPES.map((option) => (
-                                            <ChoixCarte key={option.value} actif={type === option.value} onClick={() => setValue('type', option.value)} titre={option.label} />
+                                        {types.map((option) => (
+                                            <ChoixCarte
+                                                key={option.value}
+                                                actif={type === option.value}
+                                                onClick={() => setValue('type', option.value, { shouldValidate: true })}
+                                                titre={option.label}
+                                                description={portee === 'etudiant' ? option.description : undefined}
+                                            />
                                         ))}
                                     </div>
                                 </fieldset>
@@ -293,7 +300,7 @@ export function SanctionDialog({ open, onClose, url, structure }: { open: boolea
                                             render={({ field }) => <DatePicker id="sa-date_decision" value={field.value} onChange={field.onChange} invalid={!!errors.date_decision} />}
                                         />
                                     </Field>
-                                    {type === 'suspension' && (
+                                    {suspension && (
                                         <>
                                             <Field id="sa-date_debut" label="Début de suspension" required error={errors.date_debut?.message}>
                                                 <Controller
@@ -314,7 +321,8 @@ export function SanctionDialog({ open, onClose, url, structure }: { open: boolea
                                         </>
                                     )}
                                 </div>
-                                {type === 'suspension' && (
+                                {errors.type?.message && <p className="text-sm text-red-600">{errors.type.message}</p>}
+                                {suspension && (
                                     <Encadre ton="warning">Suspension : nouvelles admissions, attributions et confirmations bloquées pour un résident visé, jusqu’à la date de fin incluse.</Encadre>
                                 )}
                                 <Field id="sa-motif" label="Motif" required error={errors.motif?.message}>
@@ -338,9 +346,12 @@ export function SanctionDialog({ open, onClose, url, structure }: { open: boolea
                                         ...(v.scope_type !== 'cite' ? ([['Bâtiment', batiment ?? '']] as [string, string][]) : []),
                                         ...(['chambre', 'etudiant'].includes(v.scope_type) ? ([['Chambre', chambre ? `Chambre ${chambre}` : '']] as [string, string][]) : []),
                                         ...(v.scope_type === 'etudiant' ? ([['Résident', resident ? `${resident.name} · ${resident.matricule ?? 'sans matricule'}` : '']] as [string, string][]) : []),
-                                        ['Type', TYPES.find((t) => t.value === v.type)?.label ?? ''],
+                                        ['Type', types.find((t) => t.value === v.type)?.label ?? ''],
+                                        ...(v.scope_type === 'etudiant' && types.find((t) => t.value === v.type)?.description
+                                            ? ([['Note de conduite', types.find((t) => t.value === v.type)?.description ?? '']] as [string, string][])
+                                            : []),
                                         ['Date de décision', dateFr(v.date_decision)],
-                                        ...(v.type === 'suspension' ? ([['Période', `${dateFr(v.date_debut)} au ${dateFr(v.date_fin)}`]] as [string, string][]) : []),
+                                        ...(suspension ? ([['Période', `${dateFr(v.date_debut)} au ${dateFr(v.date_fin)}`]] as [string, string][]) : []),
                                         ['Motif', <span className="whitespace-pre-line">{v.motif}</span>],
                                         ...(v.faits_reproches ? ([['Faits reprochés', <span className="whitespace-pre-line">{v.faits_reproches}</span>]] as [string, ReactNode][]) : []),
                                     ]}

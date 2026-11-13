@@ -76,7 +76,7 @@ class DisciplinaryIncidentController extends Controller
             return $report;
         });
 
-        return redirect()->route('etudiants.dashboard', ['section' => 'incidents'])
+        return redirect()->route('etudiants.dashboard', ['section' => 'incidents', 'onglet' => 'signalements'])
             ->with('success', "Votre signalement {$report->numero_rapport} a été transmis au Service Sécurité.");
     }
 }

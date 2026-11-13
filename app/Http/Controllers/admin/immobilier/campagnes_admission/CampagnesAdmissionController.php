@@ -177,8 +177,8 @@ class CampagnesAdmissionController extends Controller
                 'date' => $derniere->created_at ? Carbon::parse($derniere->created_at)->toDateString() : null,
             ] : null,
             'discipline' => $statutDisciplinaire !== 'aucune' ? [
-                'label' => \App\Http\Services\DisciplinaryImpactService::LABELS[$statutDisciplinaire] ?? $statutDisciplinaire,
-                'bloquant' => in_array($statutDisciplinaire, ['suspension', 'expulsion'], true),
+                'label' => app(\App\Http\Services\CatalogueSanctions::class)->libelle($statutDisciplinaire),
+                'bloquant' => app(\App\Http\Services\CatalogueSanctions::class)->estBloquant($statutDisciplinaire),
             ] : null,
             'eligibilite' => $vues->allows($admin, 'admissions.eligibility')
                 ? $this->criteresEligibilite($etudiant, $this->campagneActive())

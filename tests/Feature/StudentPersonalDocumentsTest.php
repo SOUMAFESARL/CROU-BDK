@@ -38,6 +38,10 @@ class StudentPersonalDocumentsTest extends TestCase
         Schema::create('assignation_chambres', function (Blueprint $t) {
             $t->string('id_assignation')->primary(); $t->string('etudiant_id'); $t->string('statut');
         });
+        // Onglet « Ma conduite » du profil : sanctions et paramétrage des sanctions.
+        foreach (['2026_08_10_000001_create_sanctions_tables.php', '2026_08_10_000002_add_scope_to_sanctions_table.php', '2026_11_13_000001_create_parametrage_sanctions_tables.php'] as $migration) {
+            (require database_path('migrations/'.$migration))->up();
+        }
         $this->actingAs(new Etudiant(['id_etudiant' => 'student', 'name' => 'Étudiant test', 'matricule' => 'TEST']), 'etudiant');
     }
 
@@ -80,6 +84,10 @@ class StudentPersonalDocumentsTest extends TestCase
         $this->assertSame(route('etudiants.profile.update'), $page['props']['urls']['coordonnees']);
         $this->assertSame(route('etudiants.profile.password'), $page['props']['urls']['motDePasse']);
         $this->assertSame('identite', $this->inertiaPage(route('etudiants.profile', ['onglet' => 'inconnu']))['props']['onglet']);
+        // Onglet « Ma conduite » : note de conduite initiale, aucune sanction.
+        $conduite = $this->inertiaPage(route('etudiants.profile', ['onglet' => 'conduite']))['props'];
+        $this->assertSame('conduite', $conduite['onglet']);
+        $this->assertEquals([20, 20, []], [$conduite['conduite']['note'], $conduite['conduite']['initiale'], $conduite['conduite']['sanctions']]);
 
         $documents = $this->inertiaPage(route('etudiants.documents.personal'));
         $this->assertSame(route('etudiants.profile'), $documents['props']['auth']['profileUrl']);

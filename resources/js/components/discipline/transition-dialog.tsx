@@ -25,6 +25,7 @@ export const ACTIONS: Record<ActionRapport, { label: string; titre: string; aide
     cloturer: { label: 'Clôturer', titre: 'Clôturer le dossier', aide: 'Le traitement est terminé ; l’historique reste consultable.', commentaire: 'Note de clôture', commentaireRequis: false, icone: Lock, bouton: 'Clôturer' },
 };
 
+/** Conséquences d'une décision selon l'effet du type de sanction (paramétrage des sanctions). */
 const EFFETS: Record<string, string> = {
     expulsion: 'Expulsion : nouvelles admissions et attributions bloquées, réservations annulées et sortie préparée. La place reste occupée jusqu’à l’état des lieux de sortie.',
     suspension: 'Suspension immédiate : nouvelles admissions, attributions et confirmations bloquées jusqu’à la date indiquée incluse. Le séjour existant reste enregistré.',
@@ -32,15 +33,18 @@ const EFFETS: Record<string, string> = {
 
 export type RapportCible = { numero: string; nature: string; resident: string | null; url_transition: string | null };
 
+/** Décision proposée (`CatalogueSanctions::options`) : « Aucune sanction » ou un type actif du paramétrage. */
+export type OptionSanction = { value: string; label: string; description?: string; effet?: string; points?: number };
+
 type Props = {
     rapport: RapportCible | null;
     action: ActionRapport | null;
     onClose: () => void;
-    sanctions: { value: string; label: string }[];
+    sanctions: OptionSanction[];
     residents: ResidentOption[];
 };
 
-const construireSchema = (action: ActionRapport | null) =>
+const construireSchema = (action: ActionRapport | null, effet: (code: string) => string | undefined) =>
     z
         .object({
             commentaire: z.string().max(5000, '5 000 caractères au maximum.'),
@@ -55,7 +59,7 @@ const construireSchema = (action: ActionRapport | null) =>
             if (!v.sanction) ctx.addIssue({ code: 'custom', path: ['sanction'], message: 'Choisissez la décision.' });
             if (!v.decision.trim()) ctx.addIssue({ code: 'custom', path: ['decision'], message: 'Décrivez la décision retenue.' });
             if (v.sanction && v.sanction !== 'aucune' && !v.etudiant_sanctionne_id) ctx.addIssue({ code: 'custom', path: ['etudiant_sanctionne_id'], message: 'Désignez l’étudiant sanctionné.' });
-            if (v.sanction === 'suspension') {
+            if (effet(v.sanction) === 'suspension') {
                 if (!v.sanction_fin) ctx.addIssue({ code: 'custom', path: ['sanction_fin'], message: 'Indiquez la fin de la suspension.' });
                 else if (v.sanction_fin < aujourdhui()) ctx.addIssue({ code: 'custom', path: ['sanction_fin'], message: 'La date ne peut pas être passée.' });
             }
@@ -67,7 +71,11 @@ const CHAMPS_ETAPES: (keyof Valeurs)[][] = [['sanction', 'etudiant_sanctionne_id
 
 /** Étape suivante du workflow d'un rapport (action `incidents.transition` : transitions vérifiées côté serveur). */
 export function TransitionDialog({ rapport, action, onClose, sanctions, residents }: Props) {
-    const schema = useMemo(() => construireSchema(action), [action]);
+    const effetDe = useMemo(() => {
+        const effets = new Map(sanctions.map((s) => [s.value, s.effet]));
+        return (code: string) => effets.get(code);
+    }, [sanctions]);
+    const schema = useMemo(() => construireSchema(action, effetDe), [action, effetDe]);
     const decider = action === 'decider';
     const etapes = decider ? ['Décision', 'Motifs'] : [];
     const [etape, setEtape] = useState(0);
@@ -83,6 +91,8 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
         formState: { errors, isSubmitting },
     } = useForm<Valeurs>({ resolver: zodResolver(schema), mode: 'onTouched', defaultValues: VIDES });
     const sanction = useWatch({ control, name: 'sanction' });
+    const effet = effetDe(sanction);
+    const choisie = sanctions.find((s) => s.value === sanction);
 
     useEffect(() => {
         if (action) {
@@ -181,7 +191,7 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
                                         />
                                     </Field>
                                 )}
-                                {sanction === 'suspension' && (
+                                {effet === 'suspension' && (
                                     <Field id="tr-sanction_fin" label="Suspension jusqu’au (inclus)" required error={errors.sanction_fin?.message}>
                                         <Controller
                                             control={control}
@@ -190,7 +200,12 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
                                         />
                                     </Field>
                                 )}
-                                {sanction && <Encadre ton={EFFETS[sanction] ? 'warning' : 'info'}>{EFFETS[sanction] ?? 'La décision et son auteur sont conservés dans l’historique.'}</Encadre>}
+                                {sanction && (
+                                    <Encadre ton={effet && EFFETS[effet] ? 'warning' : 'info'}>
+                                        {(effet && EFFETS[effet]) ?? 'La décision et son auteur sont conservés dans l’historique.'}
+                                        {sanction !== 'aucune' && choisie?.points !== undefined && ` ${choisie.description ?? ''} pour l’étudiant sanctionné.`}
+                                    </Encadre>
+                                )}
                                 <Field id="tr-decision" label="Décision disciplinaire" required error={errors.decision?.message} hint="Mesure retenue, durée et conditions d’application.">
                                     <Textarea id="tr-decision" rows={4} invalid={!!errors.decision} placeholder="Ex. Avertissement écrit, exclusion temporaire de 7 jours…" {...register('decision')} />
                                 </Field>
@@ -204,7 +219,10 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
                                         lignes={[
                                             ['Décision', sanctions.find((s) => s.value === v.sanction)?.label ?? ''],
                                             ...(v.sanction !== 'aucune' ? ([['Étudiant sanctionné', residentsUniques.find((r) => r.id === v.etudiant_sanctionne_id)?.name ?? '']] as [string, string][]) : []),
-                                            ...(v.sanction === 'suspension' ? ([['Jusqu’au', dateFr(v.sanction_fin)]] as [string, string][]) : []),
+                                            ...(effetDe(v.sanction) === 'suspension' ? ([['Jusqu’au', dateFr(v.sanction_fin)]] as [string, string][]) : []),
+                                            ...(v.sanction !== 'aucune' && sanctions.find((s) => s.value === v.sanction)?.description
+                                                ? ([['Note de conduite', sanctions.find((s) => s.value === v.sanction)?.description ?? '']] as [string, string][])
+                                                : []),
                                         ]}
                                     />
                                 )}

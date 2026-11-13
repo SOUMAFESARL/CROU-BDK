@@ -101,6 +101,9 @@ class CriteresCampagne
     /** Bornes du seuil de rejet en admission selon le mérite retenu. */
     public const SEUIL_MAX_ADMISSION = ['moyenne_bac_desc' => 20, 'credits_desc' => 360];
 
+    /** Note de conduite minimale du modèle CROU en réadmission (sur la note initiale du paramétrage des sanctions, 20 par défaut). */
+    public const NOTE_CONDUITE_MIN_DEFAUT = 10;
+
     /** Modèle CROU de Bondoukou d'un jeu (compte rendu S/DAL, décisions Q1 et Q2). */
     public function modeleParDefaut(string $jeu, ?Campagne $campagne = null): array
     {
@@ -155,7 +158,9 @@ class CriteresCampagne
             'readmission' => [
                 'loyers' => ['actif' => true, 'mois_exiges' => 10],
                 'credits_actif' => true,
-                'conduite' => ['actif' => true, 'sanctions' => ['suspension', 'expulsion']],
+                // Conduite en cité : note de conduite (paramétrage des sanctions) au moins égale à `note_min`, sinon rejet
+                // (`NoteConduite::motifRejet`). Une sanction bloquante active (suspension, expulsion) bloque en outre le dossier.
+                'conduite' => ['actif' => true, 'note_min' => self::NOTE_CONDUITE_MIN_DEFAUT, 'sanctions' => ['suspension', 'expulsion']],
                 'age_actif' => true,
                 'report_places' => 'C6_puis_admission',
             ],
@@ -609,7 +614,11 @@ class CriteresCampagne
                     'mois_exiges' => (int) $saisie['readmission']['loyers']['mois_exiges'],
                 ],
                 'credits_actif' => (bool) $saisie['readmission']['credits_actif'],
-                'conduite' => ['actif' => (bool) $saisie['readmission']['conduite']['actif'], 'sanctions' => ['suspension', 'expulsion']],
+                'conduite' => [
+                    'actif' => (bool) $saisie['readmission']['conduite']['actif'],
+                    'note_min' => ($note = $saisie['readmission']['conduite']['note_min'] ?? null) === null || $note === '' ? null : round((float) $note, 2),
+                    'sanctions' => ['suspension', 'expulsion'],
+                ],
                 'age_actif' => (bool) $saisie['readmission']['age_actif'],
                 'report_places' => $saisie['readmission']['report_places'],
             ],

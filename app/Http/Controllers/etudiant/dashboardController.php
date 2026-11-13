@@ -200,7 +200,9 @@ class dashboardController extends Controller
         $onglet = (string) $request->query('onglet');
 
         return \Inertia\Inertia::render('Etudiant/Profil', [
-            'onglet' => in_array($onglet, ['identite', 'coordonnees', 'securite'], true) ? $onglet : 'identite',
+            'onglet' => in_array($onglet, ['identite', 'conduite', 'coordonnees', 'securite'], true) ? $onglet : 'identite',
+            // Note de conduite et historique des retraits de points (paramétrage des sanctions).
+            'conduite' => app(\App\Services\EtudiantConduite::class)->props($student),
             'etudiant' => [
                 'nom' => $student->name,
                 'initiales' => \App\Services\EtudiantMenu::initiales($student->name),

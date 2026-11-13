@@ -111,6 +111,12 @@ return [
         'admin.hebergement.parametrage-herb.document.update' => 'hebergement.parametrage.configure',
         'admin.hebergement.parametrage-herb.index' => 'hebergement.parametrage.view',
         'admin.hebergement.parametrage-herb.quotas-campagne.index' => 'hebergement.parametrage.view',
+        // Paramétrage des sanctions : consultation par la discipline et le paramétrage, modifications réservées au droit dédié.
+        'admin.hebergement.parametrage-herb.sanctions.index' => ['hebergement.discipline.view', 'hebergement.discipline.configure', 'hebergement.parametrage.view'],
+        'admin.hebergement.parametrage-herb.sanctions.note' => 'hebergement.discipline.configure',
+        'admin.hebergement.parametrage-herb.sanctions.store' => 'hebergement.discipline.configure',
+        'admin.hebergement.parametrage-herb.sanctions.update' => 'hebergement.discipline.configure',
+        'admin.hebergement.parametrage-herb.sanctions.destroy' => 'hebergement.discipline.configure',
         // Critères de la campagne : définition, application et consultation des niveaux admission et réadmission.
         'admin.hebergement.parametrage-herb.criteres-campagne.index' => ['hebergement.parametrage.view', 'hebergement.eligibilite.regles.view', 'hebergement.eligibilite.regles.configure', 'hebergement.eligibilite.quotas.view', 'hebergement.eligibilite.quotas.configure'],
         'admin.hebergement.parametrage-herb.type-chambre.create' => 'hebergement.parametrage.configure',

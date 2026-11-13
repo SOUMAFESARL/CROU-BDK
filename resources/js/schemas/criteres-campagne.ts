@@ -215,6 +215,8 @@ const blocReadmission = z.object({
     }),
     credits_actif: z.boolean(),
     conduite_actif: z.boolean(),
+    /** Bornée par la note initiale du paramétrage des sanctions : contrôlée dans `reglesCroisees`. */
+    conduite_note_min: z.string(),
     age_actif: z.boolean(),
     report_places: z.enum(["C6_puis_admission", "C6", "admission", "vacant"]),
 });
@@ -313,6 +315,7 @@ export function valeursInitiales(
                       },
                       credits_actif: r.credits_actif,
                       conduite_actif: r.conduite.actif,
+                      conduite_note_min: texte(r.conduite.note_min),
                       age_actif: r.age_actif,
                       report_places: r.report_places,
                   }
@@ -399,7 +402,10 @@ export function reglesAEnvoyer(volet: Volet, v: CriteresFormOutput) {
                 mois_exiges: n(r.loyers.mois_exiges),
             },
             credits_actif: r.credits_actif,
-            conduite: { actif: r.conduite_actif },
+            conduite: {
+                actif: r.conduite_actif,
+                note_min: nombre(r.conduite_note_min),
+            },
             age_actif: r.age_actif,
             report_places: r.report_places,
         },
@@ -452,6 +458,8 @@ type Contexte = {
     controlerPlaces: boolean;
     controlerRegles: boolean;
     general: ReglesGenerales | null;
+    /** Note de conduite initiale (réadmission) : maximum de la note minimale exigée. */
+    noteConduite?: number | null;
 };
 
 /**
@@ -470,6 +478,18 @@ export function reglesCroisees(
         if (ctx.cloture && liste && liste < ctx.cloture) {
             erreurs["calendrier.date_liste_provisoire"] =
                 `La liste provisoire ne peut pas précéder la clôture des dépôts (${jjmmaaaa(ctx.cloture)}).`;
+        }
+        const r = v.readmission;
+        if (ctx.volet === "readmission" && r?.conduite_actif) {
+            const resultat = nombreBorne(
+                "la note de conduite minimale",
+                0,
+                ctx.noteConduite ?? 100,
+                { decimal: true },
+            ).safeParse(r.conduite_note_min);
+            if (!resultat.success)
+                erreurs["readmission.conduite_note_min"] =
+                    resultat.error.issues[0]?.message ?? "Note invalide.";
         }
         if (
             new Set(v.classement.departage.map((item) => item.critere)).size !==

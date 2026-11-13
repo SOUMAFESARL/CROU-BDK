@@ -44,7 +44,8 @@ export type ReglesGenerales = {
 export type ReglesReadmission = {
     loyers: { actif: boolean; mois_exiges: number };
     credits_actif: boolean;
-    conduite: { actif: boolean; sanctions: string[] };
+    /** Conduite en cité : note de conduite (paramétrage des sanctions) d'au moins `note_min`, sinon rejet. */
+    conduite: { actif: boolean; note_min: number | null; sanctions: string[] };
     age_actif: boolean;
     report_places: "C6_puis_admission" | "C6" | "admission" | "vacant";
 };
@@ -168,6 +169,8 @@ type PageBase<J extends Jeu, R> = {
     versions: HistoriqueCriteres[];
     filieres: FiliereOption[];
     niveauxEtude: NiveauEtudeOption[];
+    /** Réadmission : note de conduite initiale du paramétrage des sanctions (maximum de la note minimale). */
+    noteConduite: number | null;
     urls: UrlsCriteres;
 };
 

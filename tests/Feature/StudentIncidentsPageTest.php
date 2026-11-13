@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
-/** Page React « Signaler un incident » de l'espace étudiant (Etudiant/Incidents, `?section=incidents`). */
+/** Page React « Conduite et signalements » de l'espace étudiant (Etudiant/Incidents, `?section=incidents`). */
 class StudentIncidentsPageTest extends TestCase
 {
     protected function setUp(): void
@@ -53,6 +53,7 @@ class StudentIncidentsPageTest extends TestCase
             '2026_08_17_000001_add_student_declaration_fields_to_disciplinary_reports.php',
             '2026_08_10_000001_create_sanctions_tables.php',
             '2026_08_10_000002_add_scope_to_sanctions_table.php',
+            '2026_11_13_000001_create_parametrage_sanctions_tables.php',
         ] as $migration) {
             (require database_path('migrations/'.$migration))->up();
         }
@@ -94,7 +95,11 @@ class StudentIncidentsPageTest extends TestCase
 
         $props = app(EtudiantIncidents::class)->props(Etudiant::findOrFail('student'));
 
-        $this->assertSame(['cle' => 'avertissement', 'libelle' => 'Avertissement'], $props['statutDisciplinaire']);
+        $this->assertSame(['cle' => 'avertissement', 'libelle' => 'Avertissement', 'effet' => 'aucun'], $props['statutDisciplinaire']);
+        // Sanctions qui visent l'étudiant et note de conduite (20 − 2 points de l'avertissement).
+        $this->assertSame([20.0, 2.0, 18.0], [$props['conduite']['initiale'], $props['conduite']['retires'], $props['conduite']['note']]);
+        $this->assertSame(['SAN-1'], array_column($props['conduite']['sanctions'], 'numero'));
+        $this->assertSame(['Avertissement', 2.0, true], [$props['conduite']['sanctions'][0]['type'], $props['conduite']['sanctions'][0]['points'], $props['conduite']['sanctions'][0]['compte']]);
         $this->assertSame(['cite' => 'Cité Nord', 'batiment' => 'Bâtiment A', 'chambre' => 'A12'], $props['residence']);
         $this->assertSame(['total' => 3, 'enCours' => 1, 'traites' => 1, 'retournes' => 1], $props['compteurs']);
         $this->assertSame(['transmis', 'cloture', 'retourne'], array_column(array_column($props['signalements'], 'statut'), 'cle'));
@@ -106,6 +111,22 @@ class StudentIncidentsPageTest extends TestCase
         $this->assertArrayNotHasKey('decision', $premier);
         $this->assertCount(count(EtudiantIncidents::NATURES), $props['natures']);
         $this->assertSame(3, $props['pagination']['total']);
+        $this->assertSame('conduite', $props['onglet']);
+    }
+
+    public function test_tab_comes_from_query_and_pagination_keeps_signalements_tab(): void
+    {
+        foreach (range(1, 11) as $i) {
+            $this->rapport('student', 'transmis', ['date_incident' => now()->subDays($i)]);
+        }
+
+        $this->app->instance('request', \Illuminate\Http\Request::create('/etudiant/dashboard', 'GET', ['section' => 'incidents', 'onglet' => 'signalements']));
+        $props = app(EtudiantIncidents::class)->props(Etudiant::findOrFail('student'));
+        $this->assertSame('signalements', $props['onglet']);
+        $this->assertStringContainsString('onglet=signalements', (string) $props['pagination']['suivant']);
+
+        $this->app->instance('request', \Illuminate\Http\Request::create('/etudiant/dashboard', 'GET', ['onglet' => 'inconnu']));
+        $this->assertSame('conduite', app(EtudiantIncidents::class)->props(Etudiant::findOrFail('student'))['onglet']);
     }
 
     public function test_props_without_active_room_or_sanction(): void
@@ -115,6 +136,24 @@ class StudentIncidentsPageTest extends TestCase
         $this->assertNull($props['statutDisciplinaire']);
         $this->assertNull($props['residence']);
         $this->assertSame([], $props['signalements']);
+        $this->assertSame([20.0, 0.0, []], [$props['conduite']['note'], $props['conduite']['retires'], $props['conduite']['sanctions']]);
+    }
+
+    public function test_menu_entry_is_renamed(): void
+    {
+        $this->assigner('student');
+        Schema::create('demande', function (Blueprint $t) {
+            $t->string('id_demande')->primary();
+            $t->string('etudiant_id');
+            $t->string('etat_dossier')->nullable();
+            $t->timestamps();
+            $t->softDeletes();
+        });
+        $requete = \Illuminate\Http\Request::create(route('etudiants.dashboard', ['section' => 'incidents']));
+        $requete->setUserResolver(fn () => Etudiant::findOrFail('student'));
+
+        $items = collect(app(EtudiantMenu::class)->groupes($requete))->flatMap(fn ($groupe) => $groupe['items']);
+        $this->assertSame('Conduite et signalements', $items->firstWhere('page', 'incidents')['label']);
     }
 
     public function test_store_creates_report_and_redirects_with_flash(): void
@@ -127,7 +166,7 @@ class StudentIncidentsPageTest extends TestCase
                 'nature' => 'vol', 'date_incident' => now()->subHour()->format('Y-m-d\TH:i'), 'lieu' => 'Salle d’étude',
                 'description' => 'Mon ordinateur a disparu de la salle d’étude.', 'gravite' => 'grave', 'confidentiel' => 1,
             ])
-            ->assertRedirect(route('etudiants.dashboard', ['section' => 'incidents']))
+            ->assertRedirect(route('etudiants.dashboard', ['section' => 'incidents', 'onglet' => 'signalements']))
             ->assertSessionHas('success');
 
         $rapport = DisciplinaryReport::firstOrFail();

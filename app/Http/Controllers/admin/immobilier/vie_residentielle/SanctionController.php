@@ -10,19 +10,23 @@ use App\Models\AssignationChambre;
 use App\Models\Etudiant;
 use App\Models\Sanction;
 use App\Models\SanctionHistory;
-use App\Http\Services\DisciplinaryImpactService;
+use App\Http\Services\CatalogueSanctions;
+use App\Http\Services\NoteConduite;
 use App\Services\AdminAccess;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class SanctionController extends Controller
 {
+    public function __construct(private CatalogueSanctions $catalogue, private NoteConduite $conduite) {}
+
     public function index(Request $request)
     {
         $filtres = [
-            'type' => in_array($request->query('type'), array_keys(DisciplinaryImpactService::LABELS), true) ? $request->query('type') : '',
+            'type' => $this->catalogue->type((string) $request->query('type')) ? $request->query('type') : '',
             'statut' => in_array($request->query('statut'), ['active', 'levee', 'annulee'], true) ? $request->query('statut') : '',
             'cite' => (string) $request->query('cite', ''),
         ];
@@ -49,7 +53,10 @@ class SanctionController extends Controller
                 default => ['titre' => $sanction->etudiant?->name ?? 'Résident inconnu', 'detail' => trim(($sanction->etudiant?->matricule ?? '').' · Chambre '.($sanction->chambre?->numero_chambre ?? '—'), ' ·')],
             },
             'type' => $sanction->type,
-            'type_label' => DisciplinaryImpactService::LABELS[$sanction->type] ?? ucfirst((string) $sanction->type),
+            'type_label' => $this->catalogue->libelle($sanction->type),
+            'effet' => $this->catalogue->effet($sanction->type),
+            // Une sanction collective ne modifie pas la note de conduite individuelle.
+            'points_retires' => $sanction->scope_type === 'etudiant' ? $this->conduite->pointsRetires($sanction) : null,
             'motif' => $sanction->motif,
             'faits' => $sanction->faits_reproches,
             'date_debut' => $sanction->date_debut?->toDateString(),
@@ -87,10 +94,13 @@ class SanctionController extends Controller
             'stats' => [
                 'total' => Sanction::count(),
                 'active' => Sanction::where('statut', 'active')->count(),
-                'avertissements' => Sanction::where('type', 'avertissement')->where('statut', 'active')->count(),
-                'suspensions' => Sanction::where('type', 'suspension')->where('statut', 'active')->count(),
+                'avertissements' => Sanction::whereIn('type', $this->catalogue->codesParEffet('aucun'))->where('statut', 'active')->count(),
+                'suspensions' => Sanction::whereIn('type', $this->catalogue->codesParEffet('suspension'))->where('statut', 'active')->count(),
             ],
             'filters' => $filtres,
+            // Types du paramétrage des sanctions : tous pour le filtre, actifs (hors expulsion) pour la saisie directe.
+            'types' => $this->catalogue->tous()->map(fn (array $type) => ['value' => $type['code'], 'label' => $type['libelle']])->values(),
+            'typesSaisie' => $this->catalogue->options(sansExpulsion: true),
             'structure' => [
                 'cites' => $cites->map(fn ($cite) => ['id' => $cite->id_cite, 'name' => $cite->name])->values(),
                 'batiments' => $buildings->map(fn ($batiment) => ['id' => $batiment->id_batiment, 'cite_id' => $batiment->cite_id, 'name' => $batiment->name])->values(),
@@ -114,12 +124,13 @@ class SanctionController extends Controller
             'batiment_id' => ['nullable', 'required_unless:scope_type,cite', 'exists:batiment,id_batiment'],
             'chambre_id' => ['nullable', 'required_if:scope_type,chambre,etudiant', 'exists:chambre,id_chambre'],
             'etudiant_id' => ['nullable', 'required_if:scope_type,etudiant', 'exists:etudiants,id_etudiant'],
-            'type' => ['required', 'in:avertissement,blame,suspension'],
+            // Types actifs du paramétrage ; l'expulsion passe par la décision d'un rapport disciplinaire.
+            'type' => ['required', Rule::in(array_column($this->catalogue->options(sansExpulsion: true), 'value'))],
             'motif' => ['required', 'string', 'max:2000'],
             'faits_reproches' => ['nullable', 'string', 'max:5000'],
             'date_decision' => ['required', 'date'],
-            'date_debut' => ['nullable', 'required_if:type,suspension', 'date'],
-            'date_fin' => ['nullable', 'required_if:type,suspension', 'date', 'after_or_equal:date_debut'],
+            'date_debut' => ['nullable', Rule::requiredIf(fn () => $this->catalogue->effet($request->input('type')) === 'suspension'), 'date'],
+            'date_fin' => ['nullable', Rule::requiredIf(fn () => $this->catalogue->effet($request->input('type')) === 'suspension'), 'date', 'after_or_equal:date_debut'],
             'commentaire' => ['nullable', 'string', 'max:2000'],
         ]);
         if ($data['scope_type'] !== 'cite' && !Batiment::where('id_batiment', $data['batiment_id'])->where('cite_id', $data['cite_id'])->exists()) {
@@ -148,13 +159,15 @@ class SanctionController extends Controller
 
         DB::transaction(function () use ($data, $author) {
             if ($data['etudiant_id'] ?? null) Etudiant::whereKey($data['etudiant_id'])->lockForUpdate()->firstOrFail();
-            $sanction = Sanction::create($data + ['statut' => 'active', 'created_by' => $author]);
+            // Points figés au barème du jour ; une sanction collective ne modifie pas la note individuelle.
+            $points = $data['scope_type'] === 'etudiant' ? $this->catalogue->points($data['type']) : null;
+            $sanction = Sanction::create($data + ['statut' => 'active', 'points_retires' => $points, 'created_by' => $author]);
             app(\App\Http\Services\DisciplinaryImpactService::class)->synchroniser($sanction, $author);
             SanctionHistory::create([
                 'sanction_id' => $sanction->id_sanction,
                 'action' => 'creation',
                 'nouveau_statut' => 'active',
-                'details' => 'Sanction '.$sanction->type.' enregistrée.',
+                'details' => 'Sanction « '.$this->catalogue->libelle($sanction->type).' » enregistrée.',
                 'auteur_id' => $author,
             ]);
         });

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Http\Middleware\EnforceSystemSecurity;
+use App\Http\Services\Eligibilite\CriteresCampagne;
 use App\Http\Middleware\LogUserActivity;
 use App\Models\ConfigApp;
 use App\Models\Role;
@@ -313,6 +314,27 @@ class CriteresCampagneTest extends TestCase
         $this->put(route(self::BASE.'update', ['k1', 'readmission']), $donnees)->assertSessionHasErrors('regles.classement.departage');
     }
 
+    public function test_note_de_conduite_minimale(): void
+    {
+        $this->admin();
+        $route = route(self::BASE.'update', ['k1', 'readmission']);
+
+        // Exigée quand « Conduite en cité » est actif, bornée par la note initiale (20 sans paramétrage enregistré).
+        $donnees = $this->readmission(['appliquer' => false]);
+        $donnees['regles']['readmission']['conduite']['note_min'] = null;
+        $this->put($route, $donnees)->assertSessionHasErrors('regles.readmission.conduite.note_min');
+        $donnees['regles']['readmission']['conduite']['note_min'] = 21;
+        $this->put($route, $donnees)->assertSessionHasErrors('regles.readmission.conduite.note_min');
+
+        // Facultative quand le critère est désactivé.
+        $donnees['regles']['readmission']['conduite'] = ['actif' => false, 'note_min' => null];
+        $this->put($route, $donnees)->assertSessionHasNoErrors();
+
+        // Modèle CROU : critère actif, 10 points minimum.
+        $modele = app(CriteresCampagne::class)->modeleParDefaut('readmission');
+        $this->assertSame(['actif' => true, 'note_min' => 10, 'sanctions' => ['suspension', 'expulsion']], $modele['readmission']['conduite']);
+    }
+
     public function test_chaque_jeu_s_applique_et_se_versionne_separement(): void
     {
         $this->appliquerGeneral();
@@ -345,6 +367,7 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame(['brouillon', 'readmission'], [$brouillon->statut, $brouillon->volet]);
         $parametres = json_decode($brouillon->parametres, true);
         $this->assertSame(['suspension', 'expulsion'], $parametres['readmission']['conduite']['sanctions']);
+        $this->assertEquals(12, $parametres['readmission']['conduite']['note_min']);
         $this->assertArrayNotHasKey('categories', $parametres['readmission']);
         $places = json_decode($brouillon->places, true);
         $this->assertSame(['filles', 'garcons'], array_column($places, 'cite_id'));
@@ -617,7 +640,7 @@ class CriteresCampagneTest extends TestCase
                 'readmission' => [
                     'loyers' => ['actif' => true, 'mois_exiges' => 10],
                     'credits_actif' => true,
-                    'conduite' => ['actif' => true],
+                    'conduite' => ['actif' => true, 'note_min' => 12],
                     'age_actif' => true,
                     'report_places' => 'C6_puis_admission',
                 ],

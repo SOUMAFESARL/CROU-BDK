@@ -4,7 +4,7 @@ namespace App\Http\Controllers\admin\immobilier\vie_residentielle;
 
 use Inertia\Inertia;
 use App\Services\AdminAccess;
-use App\Http\Services\DisciplinaryImpactService;
+use App\Http\Services\CatalogueSanctions;
 use App\Http\Controllers\Controller;
 use App\Models\AssignationChambre;
 use App\Models\Batiment;
@@ -71,7 +71,7 @@ class DisciplinaryReportController extends Controller
             'pris_en_charge_at' => $report->pris_en_charge_at?->format('Y-m-d H:i'),
             'decision' => $report->decision,
             'sanction' => $report->sanction ? [
-                'type' => DisciplinaryImpactService::LABELS[$report->sanction->type] ?? $report->sanction->type,
+                'type' => app(CatalogueSanctions::class)->libelle($report->sanction->type),
                 'etudiant' => $report->sanction->etudiant?->name,
                 'statut' => $report->sanction->statut,
                 'date_fin' => $report->sanction->date_fin?->toDateString(),
@@ -107,7 +107,8 @@ class DisciplinaryReportController extends Controller
                 'chambres' => $rooms->sortBy('numero_chambre')->map(fn ($chambre) => ['id' => $chambre->id_chambre, 'batiment_id' => $chambre->batiment_id, 'numero' => $chambre->numero_chambre])->values(),
                 'residents' => $residents,
             ],
-            'sanctions' => collect(DisciplinaryImpactService::LABELS)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values(),
+            // Décisions possibles : aucune sanction, ou un type actif du paramétrage des sanctions (points retirés, effet).
+            'sanctions' => app(CatalogueSanctions::class)->options(avecAucune: true),
             'urls' => [
                 'index' => route('admin.hebergement.vie_residentielle.incidents.index'),
                 'store' => $url('admin.hebergement.vie_residentielle.incidents.store'),

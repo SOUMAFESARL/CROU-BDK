@@ -24,6 +24,15 @@ Les critères d’une campagne se définissent en une fois, sur la page « Crit�
 | `admin.hebergement.eligibilite.criteres.update`, `.abandonner` (paramètre `{volet}` : `general`, `admission` ou `readmission`) | `regles.configure` ou `quotas.configure` ; à l’enregistrement, chaque bloc envoyé exige son propre droit (403 sinon) |
 | `admin.hebergement.eligibilite.criteres.appliquer` | `hebergement.eligibilite.regles.configure` |
 
+La migration `2026_11_13_000002_add_discipline_configure_permission.php` ajoute au module « Discipline » le droit **`hebergement.discipline.configure`** (« Paramétrer les sanctions et la note de conduite »), accordé au seul rôle 1. La page « Paramétrage des sanctions » (paramétrage hébergement, voir `docs/parametrage-sanctions.md`) se consulte avec le droit de consulter la discipline ou le paramétrage ; sans `configure`, elle s’affiche en lecture seule (aucune action envoyée au navigateur).
+
+| Route | Permission(s) |
+| --- | --- |
+| `admin.hebergement.parametrage-herb.sanctions.index` | `hebergement.discipline.view`, `hebergement.discipline.configure` ou `hebergement.parametrage.view` |
+| `admin.hebergement.parametrage-herb.sanctions.note`, `.store`, `.update`, `.destroy` | `hebergement.discipline.configure` |
+
+Les décisions disciplinaires (rapports d’incident, sanctions directes) gardent leurs droits (`hebergement.discipline.create`, `.update`) : elles proposent les types actifs du paramétrage.
+
 Attribuer les droits nécessaires dans **Paramètres → Rôles et permissions**. Créer un utilisateur exige `utilisateurs.create` et `parametrage.roles.assign`. Modifier son rôle exige aussi `parametrage.roles.assign`. Seul le rôle 1 peut affecter le rôle 1 ou modifier un compte qui le possède.
 
 Validation ciblée :

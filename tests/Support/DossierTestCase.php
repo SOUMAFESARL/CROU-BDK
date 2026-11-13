@@ -30,6 +30,7 @@ abstract class DossierTestCase extends TestCase
         Schema::create('config_app', fn (Blueprint $t) => $t->string('config_id')->primary());
         (require database_path('migrations/2026_08_10_000001_create_sanctions_tables.php'))->up();
         (require database_path('migrations/2026_08_10_000002_add_scope_to_sanctions_table.php'))->up();
+        (require database_path('migrations/2026_11_13_000001_create_parametrage_sanctions_tables.php'))->up();
         foreach (['cite' => 'id_cite', 'batiment' => 'id_batiment', 'chambre' => 'id_chambre',
             'etudiants' => 'id_etudiant', 'campagne' => 'id_campagne', 'type_cite' => 'id_type_cite'] as $name => $key) {
             Schema::create($name, function (Blueprint $t) use ($key) {

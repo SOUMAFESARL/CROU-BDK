@@ -220,7 +220,7 @@ class EtudiantRepository implements EtudiantRepositoryInterface
 {
     $regles = [];
     $discipline = app(\App\Http\Services\DisciplinaryImpactService::class)->statut($demande->getKey());
-    if (in_array($discipline, ['expulsion', 'suspension'], true)) {
+    if (app(\App\Http\Services\CatalogueSanctions::class)->estBloquant($discipline)) {
         return ['regles' => [['label' => 'Absence de sanction disciplinaire bloquante', 'ok' => false]],
             'score_global' => 0, 'conforme_count' => 0, 'total_regles' => 1,
             'eligible' => false, 'documents_ignores' => $ignorerDocuments];
