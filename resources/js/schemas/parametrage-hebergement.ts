@@ -51,8 +51,7 @@ export const typeChambreSchema = z.object({
     description,
     superficie: nombreSaisi('la superficie', { requis: false, max: 1000 }),
     montant: nombreSaisi('le loyer mensuel', { max: 10_000_000 }),
-    caution: nombreSaisi('le nombre de mois de caution', { max: 24 }),
-    avance: nombreSaisi('le nombre de mois d’avance', { max: 24 }),
+    // Caution et avance : paramétrées par volet dans les critères de la campagne (admission, réadmission).
     // Une liste vide n'est pas envoyée par le formulaire : elle ne viderait pas les équipements enregistrés.
     equipements: z.array(z.string()).min(1, 'Cochez au moins un équipement.'),
 });

@@ -76,6 +76,8 @@ export type Regles = {
         departage: CritereDepartage[];
         k_liste_elargie: number;
     };
+    /** Conditions financières du volet : caution et avance exigées à l'entrée, en mois de loyer. */
+    conditions: { caution_mois: number; avance_mois: number };
 };
 
 /**

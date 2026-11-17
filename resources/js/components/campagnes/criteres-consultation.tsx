@@ -5,6 +5,7 @@ import {
     ListChecks,
     ListOrdered,
     ShieldCheck,
+    Wallet,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -302,6 +303,19 @@ function Detail({ page, regles, places }: DetailProps) {
                                     "Liste élargie",
                                     `× ${v.classement.k_liste_elargie} (titulaires puis complémentaires)`,
                                 ],
+                            ]}
+                        />
+                    </Section>
+
+                    <Section
+                        valeur="conditions"
+                        titre="3. Conditions financières"
+                        icone={<Wallet {...ICON} />}
+                    >
+                        <Lignes
+                            lignes={[
+                                ["Caution", `${v.conditions.caution_mois} mois de loyer`],
+                                ["Avance", `${v.conditions.avance_mois} mois de loyer`],
                             ]}
                         />
                     </Section>

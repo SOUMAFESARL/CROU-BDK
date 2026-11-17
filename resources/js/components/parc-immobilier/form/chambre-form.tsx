@@ -734,7 +734,7 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
                                 ]}
                             />
                         )}
-                        <p className="text-xs text-muted">Le prix, la caution, l’avance et la superficie sont repris du type de chambre.</p>
+                        <p className="text-xs text-muted">Le prix et la superficie sont repris du type de chambre ; la caution et l’avance, des critères de la campagne.</p>
                     </div>
                 )}
             </Wizard>

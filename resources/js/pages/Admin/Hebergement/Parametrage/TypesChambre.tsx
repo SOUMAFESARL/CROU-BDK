@@ -33,8 +33,6 @@ type TypeChambre = {
     description: string | null;
     superficie: number | null;
     montant: number;
-    avance: number;
-    caution: number;
     equipements: string[];
     chambres: number;
     urls: { update: string | null; destroy: string | null };
@@ -47,8 +45,6 @@ type Props = {
     filters: { q: string };
     urls: { index: string; store: string | null };
 };
-
-const mois = (n: number) => `${nombre(n)} mois`;
 
 /** Types de chambre (remplace `parametrage-herb/type-chambre/index.blade.php`) ; actions `store`, `update`, `destroy` inchangées. */
 export default function TypesChambre({ types, stats, equipementsDisponibles, filters, urls }: Props) {
@@ -77,16 +73,6 @@ export default function TypesChambre({ types, stats, equipementsDisponibles, fil
             ),
         },
         { key: 'montant', header: 'Loyer mensuel', className: 'whitespace-nowrap tabular-nums', cell: (t) => fcfa(t.montant) },
-        {
-            key: 'conditions',
-            header: 'Caution · avance',
-            className: 'whitespace-nowrap text-sm',
-            cell: (t) => (
-                <>
-                    {mois(t.caution)} · {mois(t.avance)}
-                </>
-            ),
-        },
         { key: 'superficie', header: 'Superficie', className: 'whitespace-nowrap', cell: (t) => (t.superficie ? `${nombre(t.superficie)} m²` : <span className="text-gray-400">—</span>) },
         {
             key: 'equipements',
@@ -123,7 +109,7 @@ export default function TypesChambre({ types, stats, equipementsDisponibles, fil
         <AdminLayout title="Types de chambre">
             <PageHeader
                 title="Types de chambre"
-                description="Loyer, caution, avance et équipements de base proposés à la création des chambres."
+                description="Loyer et équipements de base proposés à la création des chambres. La caution et l’avance se paramètrent dans les critères de chaque campagne (admission, réadmission)."
                 actions={
                     urls.store && (
                         <Button size="sm" className="h-10" onClick={() => setEdition('nouveau')}>
@@ -186,7 +172,7 @@ export default function TypesChambre({ types, stats, equipementsDisponibles, fil
                 title={`Supprimer le type « ${suppression?.name ?? ''} » ?`}
                 description={
                     suppression && suppression.chambres > 0
-                        ? `${nombre(suppression.chambres)} chambre(s) utilisent ce type (loyer, caution, capacité). Changez leur type avant de le supprimer.`
+                        ? `${nombre(suppression.chambres)} chambre(s) utilisent ce type (loyer, capacité). Changez leur type avant de le supprimer.`
                         : 'Cette suppression est définitive.'
                 }
                 confirmLabel="Supprimer"
@@ -200,8 +186,8 @@ export default function TypesChambre({ types, stats, equipementsDisponibles, fil
     );
 }
 
-const ETAPES = ['Identification', 'Tarifs', 'Équipements', 'Vérification'];
-const CHAMPS: Path<TypeChambreValeurs>[][] = [['name', 'description', 'superficie'], ['montant', 'caution', 'avance'], ['equipements'], []];
+const ETAPES = ['Identification', 'Loyer', 'Équipements', 'Vérification'];
+const CHAMPS: Path<TypeChambreValeurs>[][] = [['name', 'description', 'superficie'], ['montant'], ['equipements'], []];
 
 function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | null; url: string | null; disponibles: string[]; onClose: () => void }) {
     const [erreur, setErreur] = useState<string | null>(null);
@@ -222,13 +208,20 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
             description: type?.description ?? '',
             superficie: type?.superficie ? String(type.superficie) : '',
             montant: type ? String(type.montant) : '',
-            caution: type ? String(type.caution) : '',
-            avance: type ? String(type.avance) : '',
             equipements: type?.equipements ?? [],
         },
     });
-    const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<TypeChambreValeurs>(CHAMPS, trigger, type !== null);
+    // Navigation libre entre les étapes : la saisie n'est vérifiée qu'à l'enregistrement.
+    const { etape, atteinte, aller, toutValider, derniere } = useAssistant<TypeChambreValeurs>(CHAMPS, trigger, true);
     const v = watch();
+    // Le bouton d'enregistrement reste grisé tant qu'un champ obligatoire est vide.
+    const manquants = {
+        name: !v.name.trim(),
+        montant: !v.montant.trim(),
+        equipements: v.equipements.length === 0,
+    };
+    const incomplet = Object.values(manquants).some(Boolean);
+    const aRenseigner = <span className="font-medium text-red-600">À renseigner</span>;
     // Équipements enregistrés hors de la liste proposée : affichés pour ne pas les perdre à l'enregistrement.
     const liste = [...disponibles, ...v.equipements.filter((e) => !disponibles.includes(e))];
 
@@ -240,8 +233,6 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
                 description: valeurs.description.trim(),
                 superficie: enNombre(valeurs.superficie),
                 montant: enNombre(valeurs.montant),
-                caution: enNombre(valeurs.caution),
-                avance: enNombre(valeurs.avance),
                 // Même forme que l'ancien formulaire : equipement[Chaise]=Chaise.
                 equipement: Object.fromEntries(valeurs.equipements.map((e) => [e, e])),
             },
@@ -267,7 +258,7 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
             onSubmit={async (event) => {
                 event.preventDefault();
                 setErreur(null);
-                if (!derniere) await allerA(etape + 1);
+                if (!derniere) aller(etape + 1);
                 else if (await toutValider()) await handleSubmit(enregistrer)();
             }}
         >
@@ -278,7 +269,7 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
                     {type && type.chambres > 0 && ` · ${nombre(type.chambres)} chambre(s) utilisent ce type`}
                 </DialogDescription>
             </DialogHeader>
-            <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={(index) => void allerA(index)} />
+            <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={aller} />
             <DialogBody className="space-y-4">
                 <ErreurGenerale message={erreur} />
 
@@ -303,40 +294,30 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
                 )}
 
                 {etape === 1 && (
-                    <>
-                        <Controller
-                            control={control}
-                            name="montant"
-                            render={({ field }) => (
-                                <Field id="tc-montant" label={`Loyer mensuel (${symboleDevise()})`} required error={errors.montant?.message}>
-                                    <Input
-                                        id="tc-montant"
-                                        inputMode="numeric"
-                                        placeholder="Ex. 6 000"
-                                        invalid={!!errors.montant}
-                                        value={saisieMilliers(field.value)}
-                                        onChange={(event) => field.onChange(event.target.value.replace(/\D/g, ''))}
-                                        onBlur={field.onBlur}
-                                        ref={field.ref}
-                                    />
-                                </Field>
-                            )}
-                        />
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <Field id="tc-caution" label="Caution (nombre de mois)" required error={errors.caution?.message}>
-                                <Input id="tc-caution" inputMode="numeric" placeholder="Ex. 1" invalid={!!errors.caution} {...register('caution')} />
+                    <Controller
+                        control={control}
+                        name="montant"
+                        render={({ field }) => (
+                            <Field
+                                id="tc-montant"
+                                label={`Loyer mensuel (${symboleDevise()})`}
+                                required
+                                error={errors.montant?.message}
+                                hint="La caution et l’avance se paramètrent dans les critères de chaque campagne (admission, réadmission)."
+                            >
+                                <Input
+                                    id="tc-montant"
+                                    inputMode="numeric"
+                                    placeholder="Ex. 6 000"
+                                    invalid={!!errors.montant}
+                                    value={saisieMilliers(field.value)}
+                                    onChange={(event) => field.onChange(event.target.value.replace(/\D/g, ''))}
+                                    onBlur={field.onBlur}
+                                    ref={field.ref}
+                                />
                             </Field>
-                            <Field id="tc-avance" label="Avance (nombre de mois)" required error={errors.avance?.message}>
-                                <Input id="tc-avance" inputMode="numeric" placeholder="Ex. 6" invalid={!!errors.avance} {...register('avance')} />
-                            </Field>
-                        </div>
-                        <Note icone={<Info />} ton={type && type.chambres > 0 ? 'attention' : 'info'}>
-                            <p>
-                                Le loyer mensuel sert au calcul des loyers de toutes les chambres de ce type, y compris celles déjà occupées. La caution et l’avance
-                                sont reprises à la création des chambres.
-                            </p>
-                        </Note>
-                    </>
+                        )}
+                    />
                 )}
 
                 {etape === 2 && (
@@ -394,17 +375,24 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
                     </fieldset>
                 )}
 
+                {etape === 3 && incomplet && (
+                    <Note icone={<Info />} ton="attention">
+                        <p>Renseignez les champs obligatoires signalés ci-dessous pour pouvoir enregistrer le type de chambre.</p>
+                    </Note>
+                )}
+
                 {etape === 3 && (
                     <Recap
                         lignes={[
-                            { label: 'Nom', valeur: <span className="font-medium">{v.name.trim()}</span> },
+                            { label: 'Nom', valeur: manquants.name ? aRenseigner : <span className="font-medium">{v.name.trim()}</span> },
                             { label: 'Description', valeur: v.description.trim() || <span className="text-muted">Aucune</span> },
                             { label: 'Superficie', valeur: v.superficie ? `${nombre(enNombre(v.superficie))} m²` : <span className="text-muted">Non renseignée</span> },
-                            { label: 'Loyer mensuel', valeur: <span className="font-medium">{fcfa(enNombre(v.montant) ?? 0)}</span> },
-                            { label: 'Caution · avance', valeur: `${mois(enNombre(v.caution) ?? 0)} · ${mois(enNombre(v.avance) ?? 0)}` },
+                            { label: 'Loyer mensuel', valeur: manquants.montant ? aRenseigner : <span className="font-medium">{fcfa(enNombre(v.montant) ?? 0)}</span> },
                             {
                                 label: `Équipements (${v.equipements.length})`,
-                                valeur: (
+                                valeur: manquants.equipements ? (
+                                    aRenseigner
+                                ) : (
                                     <span className="flex flex-wrap gap-1 sm:justify-end">
                                         {v.equipements.map((e) => (
                                             <Badge key={e} variant="success">
@@ -422,7 +410,7 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
                 etape={etape}
                 derniere={derniere}
                 envoi={isSubmitting}
-                desactive={!url}
+                desactive={!url || incomplet}
                 onAnnuler={onClose}
                 onPrecedent={() => aller(etape - 1)}
                 libelle={type ? 'Enregistrer les modifications' : 'Ajouter le type'}

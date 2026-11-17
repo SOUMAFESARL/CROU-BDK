@@ -2,6 +2,7 @@
 
 namespace App\Http\Services\Eligibilite;
 
+use App\Models\AssignationChambre;
 use App\Models\Campagne;
 use App\Models\CampagneRegles;
 use App\Models\Chambre;
@@ -31,6 +32,7 @@ use Illuminate\Validation\ValidationException;
  * Cycle, par jeu : modèle CROU par défaut → brouillon (modifications) → « en vigueur » (appliqué).
  * Une seule version en vigueur par campagne et par jeu ; appliquer un brouillon la modifie en place (rien n'est archivé).
  * Les critères d'une campagne active ou terminée sont figés : ils se paramètrent tant que la campagne est planifiée.
+ * Chaque volet porte aussi ses conditions financières (caution et avance, en mois de loyer : `conditionsFinancieres()`).
  * Ce service ne calcule pas la liste provisoire : il fournit le jeu de règles que le moteur lira.
  */
 class CriteresCampagne
@@ -101,6 +103,18 @@ class CriteresCampagne
     /** Bornes du seuil de rejet en admission selon le mérite retenu. */
     public const SEUIL_MAX_ADMISSION = ['moyenne_bac_desc' => 20, 'credits_desc' => 360];
 
+    /**
+     * Conditions financières du modèle CROU, par volet (en nombre de mois de loyer) : caution et avance exigées à
+     * l'entrée. Elles dépendent du type de demande (admission ou réadmission), pas du type de chambre.
+     */
+    public const CONDITIONS_DEFAUT = [
+        'admission' => ['caution_mois' => 3, 'avance_mois' => 2],
+        'readmission' => ['caution_mois' => 0, 'avance_mois' => 3],
+    ];
+
+    /** Borne du nombre de mois de caution ou d'avance. */
+    public const MOIS_CONDITIONS_MAX = 24;
+
     /** Note de conduite minimale du modèle CROU en réadmission (sur la note initiale du paramétrage des sanctions, 20 par défaut). */
     public const NOTE_CONDUITE_MIN_DEFAUT = 10;
 
@@ -143,6 +157,7 @@ class CriteresCampagne
                     'departage' => self::DEPARTAGE_DEFAUT['admission'],
                     'k_liste_elargie' => 2,
                 ],
+                'conditions' => self::CONDITIONS_DEFAUT['admission'],
             ];
         }
 
@@ -171,6 +186,7 @@ class CriteresCampagne
                 'departage' => self::DEPARTAGE_DEFAUT['readmission'],
                 'k_liste_elargie' => 2,
             ],
+            'conditions' => self::CONDITIONS_DEFAUT['readmission'],
         ];
     }
 
@@ -238,6 +254,40 @@ class CriteresCampagne
         return ! $admission && ! $readmission
             ? ['admission' => true, 'readmission' => true]
             : ['admission' => $admission, 'readmission' => $readmission];
+    }
+
+    /**
+     * Caution et avance (en mois de loyer) exigées à l'entrée pour un volet de la campagne : version en vigueur,
+     * sinon modèle CROU. Sans campagne, modèle CROU.
+     *
+     * @return array{caution_mois: int, avance_mois: int}
+     */
+    public function conditionsFinancieres(?Campagne $campagne, string $volet): array
+    {
+        $volet = array_key_exists($volet, self::VOLETS) ? $volet : 'admission';
+        $parametres = $campagne && Schema::hasTable('campagne_regles') ? ($this->enVigueur($campagne, $volet)?->parametres ?? []) : [];
+        $conditions = $this->completer($volet, $parametres, $campagne)['conditions'];
+
+        return ['caution_mois' => (int) $conditions['caution_mois'], 'avance_mois' => (int) $conditions['avance_mois']];
+    }
+
+    /**
+     * Volet d'un étudiant dans une campagne : celui de la campagne si elle n'en ouvre qu'un ; sinon réadmission
+     * pour un ancien résident (déjà logé hors de cette campagne), admission pour un nouvel étudiant.
+     * `$assignationExclue` : l'assignation en cours de traitement, qui ne compte pas comme un séjour antérieur.
+     */
+    public function voletEtudiant(?Campagne $campagne, ?string $etudiantId, ?string $assignationExclue = null): string
+    {
+        $volets = $campagne ? array_keys(array_filter($this->volets($campagne))) : ['admission', 'readmission'];
+        if (count($volets) === 1) {
+            return $volets[0];
+        }
+        $ancien = $etudiantId && AssignationChambre::where('etudiant_id', $etudiantId)
+            ->when($assignationExclue, fn ($q) => $q->where('id_assignation', '!=', $assignationExclue))
+            ->when($campagne, fn ($q) => $q->where(fn ($q) => $q->whereNull('campagne_id')->orWhere('campagne_id', '!=', $campagne->getKey())))
+            ->exists();
+
+        return $ancien ? 'readmission' : 'admission';
     }
 
     /** Le paramétrage général s'applique à toute campagne ; un volet, s'il est ouvert par la campagne. */
@@ -576,6 +626,10 @@ class CriteresCampagne
             'recevabilite' => [
                 'internationaux' => (bool) $saisie['recevabilite']['internationaux'],
                 'sanctions_bloquantes' => ['suspension', 'expulsion'],
+            ],
+            'conditions' => [
+                'caution_mois' => (int) $saisie['conditions']['caution_mois'],
+                'avance_mois' => (int) $saisie['conditions']['avance_mois'],
             ],
         ];
         $classement = [

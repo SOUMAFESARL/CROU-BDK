@@ -75,7 +75,7 @@ import {
 } from "@/schemas/criteres-campagne";
 
 type Bloc = "places" | "regles" | "final";
-type CleEtape = "places" | "rejet" | "classement" | "verification";
+type CleEtape = "places" | "rejet" | "classement" | "conditions" | "verification";
 type Etape = {
     cle: CleEtape;
     label: string;
@@ -118,6 +118,12 @@ function etapesDuVolet(volet: Volet, droits: PageCriteres["droits"]): Etape[] {
                 volet === "admission"
                     ? ["admission.ville_bac", "classement", "calendrier"]
                     : ["classement", "calendrier"],
+        });
+        liste.push({
+            cle: "conditions",
+            label: "3. Conditions financières",
+            bloc: "regles",
+            champs: ["conditions"],
         });
     }
     liste.push({
@@ -694,6 +700,25 @@ function Assistant({
                         </>
                     )}
 
+                    {courante.cle === "conditions" && (
+                        <>
+                            <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2">
+                                {champNombre(
+                                    "conditions.caution_mois",
+                                    "Caution",
+                                    "mois",
+                                    { requis: true, placeholder: "Ex. 3" },
+                                )}
+                                {champNombre(
+                                    "conditions.avance_mois",
+                                    "Avance",
+                                    "mois",
+                                    { requis: true, placeholder: "Ex. 2" },
+                                )}
+                            </div>
+                        </>
+                    )}
+
                     {courante.cle === "verification" && (
                         <div className="space-y-4">
                             {droits.voirPlaces && (
@@ -788,6 +813,10 @@ function Assistant({
                                         {
                                             label: "Liste élargie",
                                             valeur: `× ${valeurs.classement.k_liste_elargie}`,
+                                        },
+                                        {
+                                            label: "Caution · avance",
+                                            valeur: `${valeurs.conditions.caution_mois || "—"} mois · ${valeurs.conditions.avance_mois || "—"} mois`,
                                         },
                                     ]}
                                 />

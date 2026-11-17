@@ -3,8 +3,9 @@
 namespace Tests\Feature;
 
 use App\Http\Middleware\EnforceSystemSecurity;
-use App\Http\Services\Eligibilite\CriteresCampagne;
 use App\Http\Middleware\LogUserActivity;
+use App\Http\Services\Eligibilite\CriteresCampagne;
+use App\Models\Campagne;
 use App\Models\ConfigApp;
 use App\Models\Role;
 use App\Models\User;
@@ -189,7 +190,9 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame('modele', $criteres['source']);
         $this->assertNull($criteres['enVigueur']);
         // Rejet (loyers, crédits, conduite, âge) puis classement (boursiers, puis le plus jeune).
-        $this->assertSame(['calendrier', 'recevabilite', 'readmission', 'classement'], array_keys($criteres['regles']));
+        $this->assertSame(['calendrier', 'recevabilite', 'readmission', 'classement', 'conditions'], array_keys($criteres['regles']));
+        // Caution et avance du modèle CROU (en mois de loyer), propres au volet.
+        $this->assertSame(['caution_mois' => 0, 'avance_mois' => 3], $criteres['regles']['conditions']);
         $this->assertSame(['loyers', 'credits_actif', 'conduite', 'age_actif', 'report_places'], array_keys($criteres['regles']['readmission']));
         $this->assertSame(10, $criteres['regles']['readmission']['loyers']['mois_exiges']);
         $this->assertSame('categorie', $criteres['regles']['classement']['priorite_boursiers']);
@@ -214,7 +217,8 @@ class CriteresCampagneTest extends TestCase
         $criteres = $this->niveau('admission');
 
         $this->assertSame('admission', $criteres['volet']);
-        $this->assertSame(['calendrier', 'recevabilite', 'admission', 'classement'], array_keys($criteres['regles']));
+        $this->assertSame(['calendrier', 'recevabilite', 'admission', 'classement', 'conditions'], array_keys($criteres['regles']));
+        $this->assertSame(['caution_mois' => 3, 'avance_mois' => 2], $criteres['regles']['conditions']);
         $this->assertArrayNotHasKey('date_controle_prealables', $criteres['regles']['calendrier']);
         // Rejet : note du bac (seuil) et âge ; classement : mérite, bac hors Bondoukou, puis âge. Pas de priorité boursiers.
         $this->assertSame('moyenne_bac_desc', $criteres['regles']['admission']['merite']);
@@ -597,6 +601,47 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame('en_vigueur', $lignes['admission']->statut);
     }
 
+    public function test_caution_et_avance_propres_a_chaque_volet(): void
+    {
+        $this->appliquerGeneral();
+        $this->put(route(self::BASE.'update', ['k1', 'readmission']), $this->readmission(['appliquer' => true]))->assertSessionHasNoErrors();
+        $this->put(route(self::BASE.'update', ['k1', 'admission']), $this->admission(['appliquer' => true]))->assertSessionHasNoErrors();
+
+        $service = app(CriteresCampagne::class);
+        $campagne = Campagne::find('k1');
+        $this->assertSame(['caution_mois' => 1, 'avance_mois' => 3], $service->conditionsFinancieres($campagne, 'readmission'));
+        $this->assertSame(['caution_mois' => 2, 'avance_mois' => 6], $service->conditionsFinancieres($campagne, 'admission'));
+        // Sans campagne : modèle CROU.
+        $this->assertSame(['caution_mois' => 3, 'avance_mois' => 2], $service->conditionsFinancieres(null, 'admission'));
+        $this->assertSame(['caution_mois' => 0, 'avance_mois' => 3], $service->conditionsFinancieres(null, 'readmission'));
+
+        // Volet de l'étudiant : un ancien résident (logé hors de cette campagne) relève de la réadmission.
+        Schema::create('assignation_chambres', function (Blueprint $t) {
+            $t->string('id_assignation')->primary();
+            $t->string('etudiant_id');
+            $t->string('campagne_id')->nullable();
+            $t->timestamps();
+        });
+        DB::table('assignation_chambres')->insert([
+            ['id_assignation' => 'a-ancien', 'etudiant_id' => 'ancien', 'campagne_id' => 'k0'],
+            ['id_assignation' => 'a-ancien-k1', 'etudiant_id' => 'ancien', 'campagne_id' => 'k1'],
+            ['id_assignation' => 'a-nouveau-k1', 'etudiant_id' => 'nouveau', 'campagne_id' => 'k1'],
+        ]);
+        $this->assertSame('readmission', $service->voletEtudiant($campagne, 'ancien', 'a-ancien-k1'));
+        $this->assertSame('admission', $service->voletEtudiant($campagne, 'nouveau', 'a-nouveau-k1'));
+        // Une campagne qui n'ouvre qu'un volet le fixe.
+        DB::table('campagne')->where('id_campagne', 'k1')->update(['admission' => false]);
+        $this->assertSame('readmission', $service->voletEtudiant($campagne->fresh(), 'nouveau'));
+
+        // Bornes : de 0 à 24 mois, obligatoires.
+        $this->put(route(self::BASE.'update', ['k1', 'admission']), $this->admission())->assertSessionHasErrors('criteres');
+        DB::table('campagne')->where('id_campagne', 'k1')->update(['admission' => true]);
+        $invalide = $this->admission();
+        $invalide['regles']['conditions'] = ['caution_mois' => 25, 'avance_mois' => null];
+        $this->put(route(self::BASE.'update', ['k1', 'admission']), $invalide)
+            ->assertSessionHasErrors(['regles.conditions.caution_mois', 'regles.conditions.avance_mois']);
+    }
+
     public function test_les_baremes_de_score_sont_desactives(): void
     {
         DB::table('campaign_scorings')->insert([
@@ -637,6 +682,7 @@ class CriteresCampagneTest extends TestCase
             'regles' => [
                 'calendrier' => ['date_liste_provisoire' => '2026-11-10', 'delai_completude_jours' => 7],
                 'recevabilite' => ['internationaux' => true],
+                'conditions' => ['caution_mois' => 1, 'avance_mois' => 3],
                 'readmission' => [
                     'loyers' => ['actif' => true, 'mois_exiges' => 10],
                     'credits_actif' => true,
@@ -663,6 +709,7 @@ class CriteresCampagneTest extends TestCase
             'regles' => [
                 'calendrier' => ['date_liste_provisoire' => '2026-11-10', 'delai_completude_jours' => 7],
                 'recevabilite' => ['internationaux' => true],
+                'conditions' => ['caution_mois' => 2, 'avance_mois' => 6],
                 'admission' => [
                     'merite' => 'moyenne_bac_desc', 'seuil_actif' => true, 'seuil' => 12.5,
                     'age_actif' => true, 'ville_bac' => 'Abidjan',

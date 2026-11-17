@@ -35,8 +35,8 @@ class TypeChambreController extends Controller
                 'description' => $type->description === '—' ? null : $type->description,
                 'superficie' => $type->superficie !== null ? (int) $type->superficie : null,
                 'montant' => (int) $type->montant,
-                'avance' => (int) $type->avance,
-                'caution' => (int) $type->caution,
+                // Caution et avance ne dépendent plus du type de chambre mais du type de demande :
+                // elles se paramètrent dans les critères de la campagne (admission, réadmission).
                 // Stocké en JSON {"Chaise":"Chaise", …} : seules les clés cochées comptent.
                 'equipements' => array_values(array_keys(array_filter((array) (json_decode((string) $type->equipement, true) ?: [])))),
                 'chambres' => (int) ($chambres[$type->id_type_chambre] ?? 0),
@@ -70,8 +70,6 @@ class TypeChambreController extends Controller
             'description' => 'nullable|string',
             'montant' => 'nullable|integer',
             'superficie' => 'nullable|integer',
-            'avance' => 'nullable|integer',
-            'caution' => 'nullable|integer',
             'equipement' => 'sometimes|array',
         ]);
 
@@ -96,8 +94,6 @@ class TypeChambreController extends Controller
             'description' => 'nullable|string',
             'montant' => 'nullable|integer',
             'superficie' => 'nullable|integer',
-            'avance' => 'nullable|integer',
-            'caution' => 'nullable|integer',
             'equipement' => 'sometimes|array',
         ]);
 

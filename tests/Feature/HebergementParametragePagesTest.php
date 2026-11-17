@@ -188,10 +188,13 @@ class HebergementParametragePagesTest extends TestCase
         $this->assertSame(['Chaise', 'Table'], $double['equipements']);
         $this->assertSame(2, $double['chambres']);
         $this->assertContains('Ventilateur', $page['props']['equipementsDisponibles']);
+        // Caution et avance relèvent des critères de la campagne (par volet), plus du type de chambre.
+        $this->assertArrayNotHasKey('caution', $double);
+        $this->assertArrayNotHasKey('avance', $double);
 
         // Envoi identique à celui de la page React (equipement[Nom]=Nom).
         $this->put(route(self::BASE.'type-chambre.update', 'double'), [
-            'name' => 'Double', 'description' => 'Deux lits', 'montant' => 7000, 'caution' => 1, 'avance' => 3,
+            'name' => 'Double', 'description' => 'Deux lits', 'montant' => 7000,
             'equipement' => ['Matelas' => 'Matelas', 'WC' => 'WC'],
         ])->assertSessionHasNoErrors()->assertRedirect();
         $type = DB::table('type_chambre')->first();

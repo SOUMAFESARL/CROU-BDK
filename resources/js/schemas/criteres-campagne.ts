@@ -240,6 +240,11 @@ export const criteresSchema = z
             delai_completude_jours: entier("le délai de complétude", 0, 60),
         }),
         recevabilite: z.object({ internationaux: z.boolean() }),
+        // Caution et avance exigées à l'entrée, en mois de loyer (mêmes bornes que `CriteresCampagne::MOIS_CONDITIONS_MAX`).
+        conditions: z.object({
+            caution_mois: entier("le nombre de mois de caution", 0, 24),
+            avance_mois: entier("le nombre de mois d’avance", 0, 24),
+        }),
         readmission: blocReadmission.optional(),
         admission: blocAdmission.optional(),
         classement: z.object({
@@ -306,6 +311,10 @@ export function valeursInitiales(
             ),
         },
         recevabilite: { internationaux: regles.recevabilite.internationaux },
+        conditions: {
+            caution_mois: texte(regles.conditions?.caution_mois),
+            avance_mois: texte(regles.conditions?.avance_mois),
+        },
         readmission:
             volet === "readmission" && r
                 ? {
@@ -361,6 +370,10 @@ export function reglesAEnvoyer(volet: Volet, v: CriteresFormOutput) {
     const n = (valeur: string) => Number(valeur);
     const commun = {
         recevabilite: { internationaux: v.recevabilite.internationaux },
+        conditions: {
+            caution_mois: n(v.conditions.caution_mois),
+            avance_mois: n(v.conditions.avance_mois),
+        },
     };
     const classement = {
         departage: v.classement.departage

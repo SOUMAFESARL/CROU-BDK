@@ -8,6 +8,7 @@ use App\Models\Chambre;
 use App\Models\Etudiant;
 use App\Models\AssignationChambre;
 use App\Models\Cite;
+use App\Http\Services\Eligibilite\CriteresCampagne;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
@@ -55,8 +56,9 @@ class LoyerService
             $nombreEcheances = $this->calculerEcheances($periode);
             $montantEcheance = $nombreEcheances > 0 ? $montantTotal / $nombreEcheances : $montantTotal;
             
-            // 6. Calculer la caution
-            $caution = $this->calculerCaution($chambre, $montantTotal);
+            // 6. Calculer la caution (conditions financières du volet de la demande : admission ou réadmission)
+            $conditions = $this->conditionsFinancieres($assignation);
+            $caution = $this->calculerCaution($montantTotal, $conditions['caution_mois']);
             
             // 7. Créer le loyer
             $loyer = Loyer::create([
@@ -68,7 +70,7 @@ class LoyerService
                 'montant_base' => $montantBase,
                 'montant_total' => $montantTotal + $caution,
                 'caution' => $caution,
-                'frais_inscription' => $this->getFraisInscription($chambre),
+                'frais_inscription' => $this->getFraisInscription($chambre, $conditions['avance_mois']),
                 'annee_universitaire' => $this->getAnneeUniversitaire(),
                 'periode' => $periode,
                 'nombre_echeances' => $nombreEcheances,
@@ -293,10 +295,27 @@ public function estEnRetard(Loyer $loyer)
         return $supplements;
     }
 
-    private function calculerCaution(Chambre $chambre, $montantTotal)
+    /** Caution : nombre de mois fixé par les critères de la campagne pour le volet de la demande. */
+    private function calculerCaution($montantTotal, int $moisCaution)
     {
-        // La caution est généralement égale à un mois de loyer
-        return $chambre->caution_obligatoire ? $montantTotal / $this->calculerEcheances('annuel') : 0;
+        return $moisCaution * $montantTotal / $this->calculerEcheances('annuel');
+    }
+
+    /**
+     * Caution et avance (en mois de loyer) : elles dépendent du type de demande (admission ou réadmission) et se
+     * paramètrent dans les critères de la campagne, plus sur le type de chambre (docs/notes/eligibilite-criteres-campagne.md).
+     *
+     * @return array{caution_mois: int, avance_mois: int}
+     */
+    private function conditionsFinancieres(AssignationChambre $assignation): array
+    {
+        $criteres = app(CriteresCampagne::class);
+        $campagne = $assignation->campagne;
+
+        return $criteres->conditionsFinancieres(
+            $campagne,
+            $criteres->voletEtudiant($campagne, $assignation->etudiant_id, $assignation->getKey()),
+        );
     }
 
     private function determinerPeriode($assignation)
@@ -342,10 +361,10 @@ public function estEnRetard(Loyer $loyer)
         return round($montantEcheance * 0.02, 2);
     }
 
-    private function getFraisInscription($chambre)
+    /** Avance exigée à l'entrée : nombre de mois de loyer fixé par les critères de la campagne (volet de la demande). */
+    private function getFraisInscription($chambre, int $moisAvance)
     {
-       $montant = $this->calculerMontantBase($chambre);
-        return  $chambre->typeChambre?->avance * $montant; // Frais d'inscription standard
+        return $moisAvance * $this->calculerMontantBase($chambre);
     }
 
     private function getAnneeUniversitaire()
