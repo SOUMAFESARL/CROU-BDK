@@ -123,7 +123,7 @@ class DemandeHebergementPageTest extends TestCase
         $this->assertTrue($props['documents'][1]['requis']);
         $this->assertSame([['id' => '1', 'libelle' => 'Madame']], $props['genres']);
         $this->assertSame([['id' => '3', 'libelle' => 'Bondoukou', 'region' => '7']], $props['villes']);
-        $this->assertSame([['id' => 'l1', 'libelle' => 'Licence 1']], $props['niveaux']);
+        $this->assertSame([['id' => 'l1', 'libelle' => 'Licence 1', 'terminale' => false]], $props['niveaux']);
         $this->assertSame(route('register.post'), $props['liens']['envoyer']);
     }
 
@@ -168,6 +168,66 @@ class DemandeHebergementPageTest extends TestCase
             'extrait-de-naissance' => \Illuminate\Http\UploadedFile::fake()->create('extrait.pdf', 3000, 'application/pdf'),
         ])->assertSessionHasErrors(['extrait-de-naissance' => 'Le document Extrait de naissance ne doit pas dépasser 2 Mo.'])
             ->assertSessionDoesntHaveErrors('cmu');
+    }
+
+    public function test_matricule_facultatif_ville_du_bac_obligatoire_et_terminale_exclue_du_niveau_actuel(): void
+    {
+        $this->campagneOuverte();
+        DB::table('niveau_etude')->insert(['id_niveau_etude' => 'tle', 'name' => 'Terminale', 'ordre' => 1]);
+        DB::table('niveau_etude')->where('id_niveau_etude', 'l1')->update(['ordre' => 2]);
+        DB::table('niveau_etude')->insert(['id_niveau_etude' => 'l2', 'name' => 'Licence 2', 'ordre' => 3]);
+        Schema::create('etudiants', function (Blueprint $t) {
+            $t->string('id_etudiant')->primary();
+            $t->string('email1')->nullable();
+            $t->string('telephone1')->nullable();
+            $t->string('numero_piece')->nullable();
+            $t->string('matricule')->nullable();
+        });
+        $this->withoutMiddleware([EnforceSystemSecurity::class, LogUserActivity::class, \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class]);
+
+        $this->assertTrue($this->pageProps()['niveaux'][0]['terminale'] ?? false);
+
+        // Le niveau actuel ne peut pas être inférieur au niveau précédent ; redoubler (même niveau) reste possible.
+        $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'niveau_precedent' => 'l2', 'niveau' => 'l1'])
+            ->assertSessionHasErrors(['niveau' => 'Le niveau d’étude actuel ne peut pas être inférieur au niveau d’étude précédent.']);
+        $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'niveau_precedent' => 'l2', 'niveau' => 'l2'])
+            ->assertSessionDoesntHaveErrors('niveau');
+
+        $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'niveau_precedent' => 'tle', 'niveau' => 'tle'])
+            ->assertSessionHasErrors([
+                'niveau' => 'La Terminale ne peut pas être votre niveau d’étude actuel.',
+                'ville_bac' => 'La ville/commune d’obtention du bac est obligatoire.',
+            ])
+            ->assertSessionDoesntHaveErrors(['matricule', 'niveau_precedent', 'credit_valider']);
+
+        // Hors Terminale : ville du bac non demandée, moyenne sur 20.
+        $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'niveau_precedent' => 'l1', 'niveau' => 'l1', 'moyenne' => '25'])
+            ->assertSessionHasErrors(['moyenne' => 'La moyenne doit être comprise entre 1 et 20.'])
+            ->assertSessionDoesntHaveErrors(['niveau', 'ville_bac', 'matricule']);
+
+        // Après la Terminale : note au bac sur 400, ramenée sur 20 ; ni crédits ni matricule, ville du bac écartée sinon.
+        $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'niveau_precedent' => 'tle', 'niveau' => 'l1', 'moyenne' => '450'])
+            ->assertSessionHasErrors(['moyenne' => 'La note au bac doit être comprise entre 1 et 400.']);
+        $bachelier = \App\Http\Requests\DemandeHebergementRequest::create('/register', 'POST', [
+            'niveau_precedent' => 'tle', 'niveau' => 'l1', 'moyenne' => '250', 'matricule' => 'MAT-1', 'credit_valider' => '30',
+        ]);
+        (new \ReflectionMethod($bachelier, 'prepareForValidation'))->invoke($bachelier);
+        $this->assertNull($bachelier->input('matricule'));
+        $this->assertNull($bachelier->input('credit_valider'));
+        $this->app->instance(\App\Http\Services\ReferentielLibreService::class, \Mockery::mock(\App\Http\Services\ReferentielLibreService::class)->shouldIgnoreMissing());
+        (new \ReflectionMethod($bachelier, 'passedValidation'))->invoke($bachelier);
+        $this->assertSame(12.5, $bachelier->input('moyenne'));
+        $etudiant = \App\Http\Requests\DemandeHebergementRequest::create('/register', 'POST', ['niveau_precedent' => 'l1', 'niveau' => 'l1', 'ville_bac' => 'Bondoukou']);
+        (new \ReflectionMethod($etudiant, 'prepareForValidation'))->invoke($etudiant);
+        $this->assertNull($etudiant->input('ville_bac'));
+
+        // Redoublement et année précédente déduits par le serveur (plus de saisie).
+        $requete = \App\Http\Requests\DemandeHebergementRequest::create('/register', 'POST', [
+            'niveau_precedent' => 'l1', 'niveau' => 'l1', 'annee_academique_actuel' => '2026-2027', 'annee_academique_precedent' => '1999-2000',
+        ]);
+        (new \ReflectionMethod($requete, 'prepareForValidation'))->invoke($requete);
+        $this->assertSame(1, $requete->input('redoublement'));
+        $this->assertSame('2025-2026', $requete->input('annee_academique_precedent'));
     }
 
     public function test_le_mot_de_passe_est_envoye_a_l_email_saisi_dans_la_demande(): void

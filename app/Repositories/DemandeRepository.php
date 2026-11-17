@@ -45,6 +45,10 @@ class DemandeRepository implements DemandeRepositoryInterface
                 'campagne_id' => $datas['id_campagne'],
 
             ];
+            // Ville d'obtention du bac : envoyée par le formulaire public uniquement (pas par l'API mobile).
+            if (filled($datas['ville_bac'] ?? null)) {
+                $data['ville_bac'] = trim((string) $datas['ville_bac']);
+            }
             //dd( $data);
            // dd($datas);
 

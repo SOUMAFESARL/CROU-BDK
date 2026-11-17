@@ -15,7 +15,6 @@ import { FileDrop } from '@/components/ui/file-drop';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Stepper } from '@/components/ui/stepper';
-import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
 import { avecFormatTelephone, PROPS_TELEPHONE } from '@/lib/telephone';
 import { cn } from '@/lib/utils';
@@ -24,12 +23,13 @@ import {
     type DemandeHebergement,
     type DocumentDemande,
     ETAPES,
-    MAX_SITUATION,
+    NOTE_BAC_MAX,
     demandeHebergementSchema,
 } from '@/schemas/demande-hebergement';
 import type { SharedProps } from '@/types/global';
 
 type Option = { id: string; libelle: string };
+type Niveau = Option & { terminale: boolean };
 
 type DemandeProps = {
     campagne: { id: string; annee: string; dateLimite: string | null } | null;
@@ -37,7 +37,7 @@ type DemandeProps = {
     genres: Option[];
     typesPiece: Option[];
     groupesSanguins: Option[];
-    niveaux: Option[];
+    niveaux: Niveau[];
     filieres: Option[];
     regions: Option[];
     villes: (Option & { region: string })[];
@@ -62,12 +62,6 @@ const avecSaisieLibre = (options: { value: string; label: string }[], valeur: st
 const valeurLibre = (cle: string, valeur: string) =>
     valeur.startsWith(LIBRE) ? { [cle]: '', [`${cle}_autre`]: valeur.slice(LIBRE.length) } : { [cle]: valeur };
 
-/** « 2026-2027 » → « 2025-2026 » (valeur proposée pour l'année précédente). */
-const anneePrecedente = (annee: string) => {
-    const [debut, fin] = annee.split('-').map(Number);
-    return debut && fin ? `${debut - 1}-${fin - 1}` : '';
-};
-
 /** Page publique « Demande d'hébergement » : création du compte et du premier dossier pendant une campagne ouverte. */
 export default function Demande(props: DemandeProps) {
     const { flash, systeme } = usePage<SharedProps>().props;
@@ -89,7 +83,7 @@ export default function Demande(props: DemandeProps) {
             </Carte>
         );
     } else if (!demarre) {
-        contenu = <AvantDeCommencer campagne={props.campagne} documents={props.documents} onCommencer={() => setDemarre(true)} />;
+        contenu = <AvantDeCommencer documents={props.documents} onCommencer={() => setDemarre(true)} />;
     } else {
         contenu = <Formulaire {...props} campagne={props.campagne} />;
     }
@@ -132,16 +126,13 @@ export default function Demande(props: DemandeProps) {
     );
 }
 
-function AvantDeCommencer({ campagne, documents, onCommencer }: { campagne: NonNullable<DemandeProps['campagne']>; documents: DocumentDemande[]; onCommencer: () => void }) {
+function AvantDeCommencer({ documents, onCommencer }: { documents: DocumentDemande[]; onCommencer: () => void }) {
     const [pret, setPret] = useState(false);
 
     return (
-        <Carte surtitre={`Campagne ${campagne.annee}`} titre="Avant de commencer">
-            <p className="text-sm text-muted">
-                Le formulaire compte {ETAPES.length} étapes et prend une dizaine de minutes. Préparez les documents suivants (PDF ou image, 2 Mo maximum chacun) :
-            </p>
+        <Carte>
             {documents.length ? (
-                <ul className="mt-3 divide-y rounded-brand border">
+                <ul className="divide-y rounded-brand border">
                     {documents.map((document) => (
                         <li key={document.slug} className="flex items-center gap-3 px-3 py-2.5 text-sm">
                             <FileText {...ICON} className="shrink-0 text-primary" />
@@ -153,11 +144,9 @@ function AvantDeCommencer({ campagne, documents, onCommencer }: { campagne: NonN
                     ))}
                 </ul>
             ) : (
-                <Notice icone={Info} className="mt-3">
-                    Aucun document n’est demandé pour cette campagne.
-                </Notice>
+                <Notice icone={Info}>Aucun document n’est demandé pour cette campagne.</Notice>
             )}
-            <p className="mt-3 text-sm text-muted">Votre e-mail, votre numéro de téléphone, votre pièce d’identité et votre matricule doivent être uniques : si vous avez déjà un compte, connectez-vous pour faire une réadmission.</p>
+            <p className="mt-3 text-sm text-muted">Votre e-mail, votre numéro de téléphone, votre pièce d’identité et, s’il est renseigné, votre matricule doivent être uniques : si vous avez déjà un compte, connectez-vous pour faire une réadmission.</p>
 
             <label htmlFor="dh-pret" className="mt-4 flex cursor-pointer items-center gap-3 rounded-brand border border-gray-300 p-3 text-sm text-gray-900 hover:bg-surface">
                 <Checkbox id="dh-pret" checked={pret} onCheckedChange={(valeur) => setPret(valeur === true)} />
@@ -189,7 +178,15 @@ function Formulaire({
     const haut = useRef<HTMLFormElement>(null);
     const [etape, setEtape] = useState(0);
     const [atteinte, setAtteinte] = useState(0);
-    const schema = useMemo(() => demandeHebergementSchema(documents), [documents]);
+    const schema = useMemo(
+        () =>
+            demandeHebergementSchema(
+                documents,
+                niveaux.filter((item) => item.terminale).map((item) => item.id),
+                niveaux.map((item) => item.id),
+            ),
+        [documents, niveaux],
+    );
 
     const {
         register,
@@ -213,21 +210,18 @@ function Formulaire({
             num_piece: '',
             date_exp_piece: '',
             groupe_sanguin: '',
+            nationalite: 'IVOIRIENNE',
             matricule: '',
-            annee_academique_precedent: anneePrecedente(campagne.annee),
             niveau_precedent: '',
             niveau: '',
             filiere: '',
             moyenne: '',
             credit_valider: '',
-            redoublement: false,
+            ville_bac: '',
             boursier: false,
-            pmr: false,
-            cas_social: '',
             region: '',
             ville: '',
             adresse: '',
-            nationalite: 'IVOIRIENNE',
             distance: '',
             documents: Object.fromEntries(documents.map((document) => [document.slug, null])),
             certifie: false,
@@ -237,10 +231,42 @@ function Formulaire({
 
     const region = useWatch({ control, name: 'region' });
     const brouillon = useWatch({ control, name: 'save_as_draft' });
-    const longueur = (useWatch({ control, name: 'cas_social' }) ?? '').length;
     const filiere = useWatch({ control, name: 'filiere' });
     const ville = useWatch({ control, name: 'ville' });
+    const villeBac = useWatch({ control, name: 'ville_bac' });
+    const niveauPrecedent = useWatch({ control, name: 'niveau_precedent' });
     const villesRegion = useMemo(() => villes.filter((item) => item.region === region).map((item) => ({ value: item.id, label: item.libelle })), [villes, region]);
+    // Ville du bac enregistrée en clair : la liste propose les villes connues, une saisie libre reste possible.
+    const villesBac = useMemo(() => {
+        const noms = [...new Set(villes.map((item) => item.libelle))];
+        if (villeBac && !noms.includes(villeBac)) noms.push(villeBac);
+        return noms.map((nom) => ({ value: nom, label: nom }));
+    }, [villes, villeBac]);
+    // La Terminale ne peut pas être le niveau actuel. Le niveau précédent décide des autres champs de l'étape « Études » :
+    // Terminale → filière, note au bac (/400), ville du bac ; sinon → matricule, filière, moyenne (/20), crédits.
+    // Niveaux fournis dans l'ordre : le niveau actuel ne peut pas être inférieur au niveau précédent (redoublement possible).
+    const niveauxActuels = useMemo(() => {
+        const rangPrecedent = Math.max(0, niveaux.findIndex((item) => item.id === niveauPrecedent));
+        return niveaux.filter((item, rang) => !item.terminale && rang >= rangPrecedent);
+    }, [niveaux, niveauPrecedent]);
+    const niveauActuel = useWatch({ control, name: 'niveau' });
+    useEffect(() => {
+        if (niveauActuel !== '' && !niveauxActuels.some((item) => item.id === niveauActuel)) setValue('niveau', '');
+    }, [niveauActuel, niveauxActuels, setValue]);
+    const apresTerminale = niveaux.some((item) => item.id === niveauPrecedent && item.terminale);
+    const parcours = niveauPrecedent === '' ? null : apresTerminale ? 'bachelier' : 'etudiant';
+    // Changer de parcours vide les champs masqués et la note, qui ne se mesure plus sur la même échelle.
+    const parcoursPrecedent = useRef(parcours);
+    useEffect(() => {
+        if (parcoursPrecedent.current !== null && parcoursPrecedent.current !== parcours) setValue('moyenne', '');
+        parcoursPrecedent.current = parcours;
+        if (parcours === 'bachelier') {
+            setValue('credit_valider', '');
+            setValue('matricule', '');
+        } else if (parcours === 'etudiant') {
+            setValue('ville_bac', '');
+        }
+    }, [parcours, setValue]);
 
     // Changer de région invalide la ville choisie.
     const regionPrecedente = useRef(region);
@@ -281,9 +307,9 @@ function Formulaire({
                     moyenne: champs.moyenne.replace(',', '.'),
                     credit_valider: champs.credit_valider.replace(',', '.'),
                     distance: champs.distance.replace(',', '.'),
-                    redoublement: binaire(champs.redoublement),
+                    // Redoublant : niveau précédent identique au niveau actuel (recalculé par le serveur).
+                    redoublement: binaire(champs.niveau_precedent === champs.niveau),
                     boursier: binaire(champs.boursier),
-                    pmr: binaire(champs.pmr),
                     save_as_draft: binaire(champs.save_as_draft),
                     id_campagne: campagne.id,
                     annee_academique_actuel: campagne.annee,
@@ -347,6 +373,9 @@ function Formulaire({
                         <Field id="dh-lieu" label="Lieu de naissance" required error={errors.lieu_naissance?.message}>
                             <Input id="dh-lieu" placeholder="Ex. : Bondoukou" invalid={!!errors.lieu_naissance} {...register('lieu_naissance')} />
                         </Field>
+                        <Field id="dh-nationalite" label="Nationalité" required error={errors.nationalite?.message}>
+                            <Input id="dh-nationalite" placeholder="Ex. : IVOIRIENNE" invalid={!!errors.nationalite} {...register('nationalite')} />
+                        </Field>
                         <Field id="dh-telephone" label="Téléphone" required error={errors.telephone?.message} hint="Numéro à 10 chiffres, sans l’indicatif +225.">
                             <Input id="dh-telephone" {...PROPS_TELEPHONE} icon={<Phone />} invalid={!!errors.telephone} {...avecFormatTelephone(register('telephone'))} />
                         </Field>
@@ -365,71 +394,87 @@ function Formulaire({
                 {etape === 1 && (
                     <>
                         <Grille>
-                            <Field id="dh-matricule" label="Matricule" required error={errors.matricule?.message}>
-                                <Input id="dh-matricule" placeholder="Matricule universitaire" invalid={!!errors.matricule} {...register('matricule')} />
-                            </Field>
-                            <Field id="dh-annee-prec" label="Année académique précédente" required error={errors.annee_academique_precedent?.message}>
-                                <Input id="dh-annee-prec" inputMode="numeric" placeholder="Ex. : 2025-2026" invalid={!!errors.annee_academique_precedent} {...register('annee_academique_precedent')} />
-                            </Field>
                             <ChampListe control={control} name="niveau_precedent" id="dh-niveau-prec" label="Niveau d’étude précédent" options={niveaux} placeholder="Choisir un niveau" erreur={errors.niveau_precedent?.message} requis />
-                            <ChampListe control={control} name="niveau" id="dh-niveau" label="Niveau d’étude actuel" options={niveaux} placeholder="Choisir un niveau" erreur={errors.niveau?.message} requis />
-                            <Field id="dh-filiere" label="Filière" required error={errors.filiere?.message} hint="Absente de la liste ? Tapez son nom puis choisissez « Utiliser ».">
-                                <Controller
-                                    control={control}
-                                    name="filiere"
-                                    render={({ field }) => (
-                                        <Combobox
-                                            id="dh-filiere"
-                                            value={field.value}
-                                            onChange={field.onChange}
-                                            onBlur={field.onBlur}
-                                            options={avecSaisieLibre(
-                                                filieres.map((item) => ({ value: item.id, label: item.libelle })),
-                                                filiere,
+                            <ChampListe control={control} name="niveau" id="dh-niveau" label="Niveau d’étude actuel" options={niveauxActuels} placeholder="Choisir un niveau" erreur={errors.niveau?.message} requis />
+                            {parcours === 'etudiant' && (
+                                <Field id="dh-matricule" label="Matricule universitaire" error={errors.matricule?.message} hint="Facultatif · à renseigner si vous en avez déjà un.">
+                                    <Input id="dh-matricule" placeholder="Matricule universitaire" invalid={!!errors.matricule} {...register('matricule')} />
+                                </Field>
+                            )}
+                            {parcours !== null && (
+                                <>
+                                    <Field id="dh-filiere" label="Filière" required error={errors.filiere?.message}>
+                                        <Controller
+                                            control={control}
+                                            name="filiere"
+                                            render={({ field }) => (
+                                                <Combobox
+                                                    id="dh-filiere"
+                                                    value={field.value}
+                                                    onChange={field.onChange}
+                                                    onBlur={field.onBlur}
+                                                    options={avecSaisieLibre(
+                                                        filieres.map((item) => ({ value: item.id, label: item.libelle })),
+                                                        filiere,
+                                                    )}
+                                                    onCreate={(texte) => field.onChange(LIBRE + texte)}
+                                                    createLabel="Utiliser"
+                                                    emptyMessage="Saisissez le nom de votre filière."
+                                                    placeholder="Choisir une filière"
+                                                    searchPlaceholder="Rechercher une filière…"
+                                                    invalid={!!errors.filiere}
+                                                />
                                             )}
-                                            onCreate={(texte) => field.onChange(LIBRE + texte)}
-                                            createLabel="Utiliser"
-                                            emptyMessage="Saisissez le nom de votre filière."
-                                            placeholder="Choisir une filière"
-                                            searchPlaceholder="Rechercher une filière…"
-                                            invalid={!!errors.filiere}
                                         />
-                                    )}
-                                />
-                            </Field>
-                            <Field id="dh-moyenne" label="Moyenne générale ou note du bac" required error={errors.moyenne?.message} hint="Sur 20.">
-                                <Input id="dh-moyenne" inputMode="decimal" placeholder="Ex. : 12,50" invalid={!!errors.moyenne} {...register('moyenne')} />
-                            </Field>
-                            <Field id="dh-credits" label="Crédits validés" error={errors.credit_valider?.message} hint="Nombre de crédits validés l’année précédente, sur 60.">
-                                <Input id="dh-credits" inputMode="numeric" placeholder="Ex. : 48" invalid={!!errors.credit_valider} {...register('credit_valider')} />
-                            </Field>
+                                    </Field>
+                                    <Field
+                                        id="dh-moyenne"
+                                        label={apresTerminale ? 'Note obtenue au bac' : 'Moyenne générale'}
+                                        required
+                                        error={errors.moyenne?.message}
+                                        hint={apresTerminale ? `Sur ${NOTE_BAC_MAX}.` : 'Sur 20.'}
+                                    >
+                                        <Input id="dh-moyenne" inputMode="decimal" placeholder={apresTerminale ? 'Ex. : 245' : 'Ex. : 12,50'} invalid={!!errors.moyenne} {...register('moyenne')} />
+                                    </Field>
+                                </>
+                            )}
+                            {parcours === 'etudiant' && (
+                                <Field id="dh-credits" label="Crédits validés" error={errors.credit_valider?.message} hint="Nombre de crédits validés l’année précédente, sur 60.">
+                                    <Input id="dh-credits" inputMode="numeric" placeholder="Ex. : 48" invalid={!!errors.credit_valider} {...register('credit_valider')} />
+                                </Field>
+                            )}
+                            {parcours === 'bachelier' && (
+                                <Field id="dh-ville-bac" label="Ville/commune d’obtention du bac" required error={errors.ville_bac?.message}>
+                                    <Controller
+                                        control={control}
+                                        name="ville_bac"
+                                        render={({ field }) => (
+                                            <Combobox
+                                                id="dh-ville-bac"
+                                                value={field.value}
+                                                onChange={field.onChange}
+                                                onBlur={field.onBlur}
+                                                options={villesBac}
+                                                onCreate={(texte) => field.onChange(texte.trim())}
+                                                createLabel="Utiliser"
+                                                placeholder="Choisir une ville ou commune"
+                                                searchPlaceholder="Rechercher une ville ou commune…"
+                                                emptyMessage="Saisissez le nom de la ville ou commune."
+                                                invalid={!!errors.ville_bac}
+                                            />
+                                        )}
+                                    />
+                                </Field>
+                            )}
                         </Grille>
-                        <CaseACocher control={control} name="redoublement" id="dh-redoublement" libelle="Je redouble ce niveau" aide="Laissez décoché pour une première inscription à ce niveau." />
                     </>
                 )}
 
-                {etape === 2 && (
-                    <>
-                        <CaseACocher control={control} name="boursier" id="dh-boursier" libelle="Je suis boursier" />
-                        <CaseACocher control={control} name="pmr" id="dh-pmr" libelle="Je suis une personne à mobilité réduite (PMR)" aide="Un logement adapté sera recherché ; le service Logement pourra vous demander un justificatif." />
-                        <Field
-                            id="dh-situation"
-                            label="Situation particulière"
-                            error={errors.cas_social?.message}
-                            hint={
-                                <span className={cn(longueur > MAX_SITUATION - 50 && 'text-red-700')}>
-                                    Facultatif · {longueur} / {MAX_SITUATION}
-                                </span>
-                            }
-                        >
-                            <Textarea id="dh-situation" rows={4} maxLength={MAX_SITUATION} placeholder="Décrivez toute situation que nous devrions connaître (santé, famille, revenus…)." invalid={!!errors.cas_social} {...register('cas_social')} />
-                        </Field>
-                    </>
-                )}
+                {etape === 2 && <CaseACocher control={control} name="boursier" id="dh-boursier" libelle="Je suis boursier" />}
 
                 {etape === 3 && (
                     <Grille>
-                        <Field id="dh-region" label="Région" required error={errors.region?.message} hint="Absente de la liste ? Tapez son nom puis choisissez « Utiliser ».">
+                        <Field id="dh-region" label="Région" required error={errors.region?.message}>
                             <Controller
                                 control={control}
                                 name="region"
@@ -453,7 +498,7 @@ function Formulaire({
                                 )}
                             />
                         </Field>
-                        <Field id="dh-ville" label="Ville" required error={errors.ville?.message} hint={region ? 'Absente de la liste ? Tapez son nom puis choisissez « Utiliser ».' : 'Choisissez d’abord la région.'}>
+                        <Field id="dh-ville" label="Ville" required error={errors.ville?.message} hint={region ? undefined : 'Choisissez d’abord la région.'}>
                             <Controller
                                 control={control}
                                 name="ville"
@@ -477,9 +522,6 @@ function Formulaire({
                         </Field>
                         <Field id="dh-adresse" label="Adresse complète" required error={errors.adresse?.message}>
                             <Input id="dh-adresse" autoComplete="street-address" placeholder="Quartier, rue, repère…" invalid={!!errors.adresse} {...register('adresse')} />
-                        </Field>
-                        <Field id="dh-nationalite" label="Nationalité" required error={errors.nationalite?.message}>
-                            <Input id="dh-nationalite" placeholder="Ex. : IVOIRIENNE" invalid={!!errors.nationalite} {...register('nationalite')} />
                         </Field>
                         <Field id="dh-distance" label="Distance domicile – campus (km)" error={errors.distance?.message}>
                             <Input id="dh-distance" inputMode="decimal" placeholder="Ex. : 10" invalid={!!errors.distance} {...register('distance')} />
@@ -628,7 +670,7 @@ function CaseACocher({
     aide,
     requis,
     erreur,
-}: Omit<ChampProps, 'label'> & { name: 'redoublement' | 'boursier' | 'pmr' | 'certifie' | 'save_as_draft'; libelle: string; aide?: string; requis?: boolean }) {
+}: Omit<ChampProps, 'label'> & { name: 'boursier' | 'certifie' | 'save_as_draft'; libelle: string; aide?: string; requis?: boolean }) {
     return (
         <div>
             <label htmlFor={id} className={cn('flex cursor-pointer items-start gap-3 rounded-brand border border-gray-300 p-3 text-sm text-gray-900 hover:bg-surface', erreur && 'border-red-500')}>
@@ -656,18 +698,21 @@ function Grille({ children }: { children: ReactNode }) {
     return <div className="grid gap-4 sm:grid-cols-2">{children}</div>;
 }
 
-function Carte({ surtitre, titre, children }: { surtitre: string; titre: string; children: ReactNode }) {
+/** Carte de contenu ; sans titre, l'en-tête (icône, surtitre, titre) n'est pas affiché. */
+function Carte({ surtitre, titre, children }: { surtitre?: string; titre?: string; children: ReactNode }) {
     return (
         <section className="rounded-brand border bg-white p-4 md:p-5">
-            <div className="mb-3 flex items-center gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-brand bg-soft text-primary" aria-hidden>
-                    <ClipboardList {...ICON} />
-                </span>
-                <div className="min-w-0">
-                    <p className="text-xs text-muted">{surtitre}</p>
-                    <h2 className="text-base font-medium text-gray-900">{titre}</h2>
+            {titre && (
+                <div className="mb-3 flex items-center gap-3">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-brand bg-soft text-primary" aria-hidden>
+                        <ClipboardList {...ICON} />
+                    </span>
+                    <div className="min-w-0">
+                        {surtitre && <p className="text-xs text-muted">{surtitre}</p>}
+                        <h2 className="text-base font-medium text-gray-900">{titre}</h2>
+                    </div>
                 </div>
-            </div>
+            )}
             {children}
         </section>
     );

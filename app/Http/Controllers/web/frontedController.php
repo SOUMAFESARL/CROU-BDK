@@ -132,7 +132,14 @@ class  frontedController extends Controller
             'genres' => $options(Genre::all()),
             'typesPiece' => $options(TypePiece::all()),
             'groupesSanguins' => $options(groupeSanguin::all()),
-            'niveaux' => $options(NiveauEtude::ordonnes()->get(), 'id_niveau_etude'),
+            // `terminale` : retirée de la liste « niveau actuel » ; en niveau précédent, la moyenne devient la note au bac.
+            'niveaux' => NiveauEtude::ordonnes()->get()
+                ->map(fn ($niveau) => [
+                    'id' => (string) $niveau->id_niveau_etude,
+                    'libelle' => (string) $niveau->name,
+                    'terminale' => \App\Http\Services\Eligibilite\CriteresCampagne::niveauSansAgeMax($niveau->name, $niveau->abreviation ?? null),
+                ])
+                ->values(),
             'filieres' => $options(Filiere::orderBy('name')->get(), 'id_filiere'),
             'regions' => $options(Region::orderBy('name')->get()),
             // Toutes les villes d'un coup : la liste admin/list/city est réservée aux administrateurs.
