@@ -12,11 +12,14 @@ import {
     BASES_C4,
     CATEGORIES,
     CODES_CATEGORIES,
+    CODES_MERITE,
     DEPARTAGE,
     DEPARTAGE_VOLET,
+    ecolesSurConcours,
     GROUPES_C2,
     JEUX,
     lignesCredits,
+    libelleMerites,
     MERITE_ADMISSION,
     REPORT_PLACES,
     type PageNiveau,
@@ -118,13 +121,6 @@ function Detail({ page, regles, places }: DetailProps) {
         return (
             <>
                 <Section
-                    valeur="credits"
-                    titre="Crédits exigés"
-                    icone={<ShieldCheck {...ICON} />}
-                >
-                    <Lignes lignes={lignesCredits(g.credits, filieres)} />
-                </Section>
-                <Section
                     valeur="ages"
                     titre="Âge maximum par niveau"
                     icone={<ListChecks {...ICON} />}
@@ -135,6 +131,8 @@ function Detail({ page, regles, places }: DetailProps) {
                         className="p-4"
                     />
                 </Section>
+                {/* Rangs et quotas (C2 à C5) : réadmission seulement, sans objet pour une campagne d'admission seule. */}
+                {page.campagne.volets.readmission && (
                 <Section
                     valeur="rangs"
                     titre="Rangs et places réservées"
@@ -169,6 +167,7 @@ function Detail({ page, regles, places }: DetailProps) {
                         ]}
                     />
                 </Section>
+                )}
             </>
         );
     }
@@ -178,7 +177,13 @@ function Detail({ page, regles, places }: DetailProps) {
     const r = v?.readmission;
     const a = v?.admission;
     const categories = page.general?.categories ?? null;
-    const ageActif = r?.age_actif ?? a?.age_actif ?? false;
+    // C1 suit les écoles sur concours des crédits de la version consultée.
+    const categorieActive = (code: (typeof CODES_CATEGORIES)[number]) =>
+        code === "C1" && r
+            ? ecolesSurConcours(r.credits.filieres)
+            : !!categories?.[code].actif;
+    // En admission, l'âge maximum du paramétrage général s'applique toujours.
+    const ageActif = r ? r.age_actif : true;
 
     return (
         <>
@@ -205,8 +210,16 @@ function Detail({ page, regles, places }: DetailProps) {
                                           ],
                                           [
                                               "Crédits validés",
-                                              r.credits_actif
-                                                  ? SELON_GENERAL
+                                              r.credits.actif
+                                                  ? lignesCredits(
+                                                        r.credits,
+                                                        filieres,
+                                                    )
+                                                        .map(
+                                                            ([filiere, seuil]) =>
+                                                                `${filiere} : ${seuil}`,
+                                                        )
+                                                        .join(" · ")
                                                   : "Désactivé",
                                           ],
                                           [
@@ -218,14 +231,14 @@ function Detail({ page, regles, places }: DetailProps) {
                                       ] as [string, ReactNode][])
                                     : []),
                                 ...(a
-                                    ? ([
-                                          [
-                                              MERITE_ADMISSION[a.merite].seuil,
-                                              a.seuil_actif && a.seuil !== null
-                                                  ? `${a.seuil} ${MERITE_ADMISSION[a.merite].unite}`
-                                                  : "Désactivé",
-                                          ],
-                                      ] as [string, ReactNode][])
+                                    ? (CODES_MERITE.filter(
+                                          (code) => a.merite[code].actif,
+                                      ).map((code) => [
+                                          `${MERITE_ADMISSION[code].seuil} (${MERITE_ADMISSION[code].public})`,
+                                          a.merite[code].seuil !== null
+                                              ? `${String(a.merite[code].seuil).replace(".", ",")} ${MERITE_ADMISSION[code].unite}`
+                                              : "Aucun minimum",
+                                      ]) as [string, ReactNode][])
                                     : []),
                                 [
                                     "Âge maximum par niveau",
@@ -254,9 +267,7 @@ function Detail({ page, regles, places }: DetailProps) {
                                               "Catégories actives",
                                               categories
                                                   ? CODES_CATEGORIES.filter(
-                                                        (code) =>
-                                                            categories[code]
-                                                                .actif,
+                                                        categorieActive,
                                                     )
                                                         .map(
                                                             (code) =>
@@ -284,7 +295,7 @@ function Detail({ page, regles, places }: DetailProps) {
                                     ? ([
                                           [
                                               "Mérite",
-                                              MERITE_ADMISSION[a.merite].label,
+                                              libelleMerites(a.merite),
                                           ],
                                           [
                                               "Ville du bac",

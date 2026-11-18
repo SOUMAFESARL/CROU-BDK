@@ -174,8 +174,8 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame('readmission', $page['props']['niveau']);
 
         $general = $page['props']['niveaux']['general'];
-        $this->assertSame(['credits', 'rang_filiere', 'clubs', 'cas_sociaux', 'comite', 'age_max'], array_keys($general['regles']));
-        $this->assertSame(100, $general['regles']['credits']['seuil_defaut']);
+        // Les crédits par filière, propres à la réadmission, ne font pas partie du paramétrage général.
+        $this->assertSame(['rang_filiere', 'clubs', 'cas_sociaux', 'comite', 'age_max'], array_keys($general['regles']));
         $this->assertSame(5, $general['regles']['rang_filiere']['n']);
         $this->assertSame(3, $general['regles']['clubs']['n']);
         $this->assertSame(10, $general['regles']['cas_sociaux']['taux']);
@@ -184,7 +184,7 @@ class CriteresCampagneTest extends TestCase
         $this->assertFalse($general['droits']['voirPlaces']);
         $this->assertSame(['n1', 'n2'], array_column($general['niveauxEtude'], 'value'));
         $this->assertSame(['Licence 1', 'Licence 2'], array_column($general['niveauxEtude'], 'label'));
-        $this->assertNotEmpty($general['filieres']);
+        $this->assertSame([], $general['filieres']);
 
         $criteres = $page['props']['niveaux']['readmission'];
         $this->assertSame('modele', $criteres['source']);
@@ -193,8 +193,12 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame(['calendrier', 'recevabilite', 'readmission', 'classement', 'conditions'], array_keys($criteres['regles']));
         // Caution et avance du modèle CROU (en mois de loyer), propres au volet.
         $this->assertSame(['caution_mois' => 0, 'avance_mois' => 3], $criteres['regles']['conditions']);
-        $this->assertSame(['loyers', 'credits_actif', 'conduite', 'age_actif', 'report_places'], array_keys($criteres['regles']['readmission']));
+        $this->assertSame(['loyers', 'credits', 'conduite', 'age_actif', 'report_places'], array_keys($criteres['regles']['readmission']));
+        $this->assertSame(['actif' => true, 'seuil_defaut' => 100, 'filieres' => []], $criteres['regles']['readmission']['credits']);
+        $this->assertNotEmpty($criteres['filieres']);
         $this->assertSame(10, $criteres['regles']['readmission']['loyers']['mois_exiges']);
+        // Étudiants internationaux non acceptés par défaut, comme en admission.
+        $this->assertFalse($criteres['regles']['recevabilite']['internationaux']);
         $this->assertSame('categorie', $criteres['regles']['classement']['priorite_boursiers']);
         // Le statut de boursier déclaré suffit ; les préalables sont contrôlés à la clôture des dépôts.
         $this->assertSame('declare', $criteres['regles']['classement']['source_boursier']);
@@ -220,9 +224,15 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame(['calendrier', 'recevabilite', 'admission', 'classement', 'conditions'], array_keys($criteres['regles']));
         $this->assertSame(['caution_mois' => 3, 'avance_mois' => 2], $criteres['regles']['conditions']);
         $this->assertArrayNotHasKey('date_controle_prealables', $criteres['regles']['calendrier']);
-        // Rejet : note du bac (seuil) et âge ; classement : mérite, bac hors Bondoukou, puis âge. Pas de priorité boursiers.
-        $this->assertSame('moyenne_bac_desc', $criteres['regles']['admission']['merite']);
-        $this->assertTrue($criteres['regles']['admission']['seuil_actif']);
+        // Rejet : mérites cumulables (note du bac en L1 avec seuil, crédits de la L2 au doctorat) ; l'âge maximum du
+        // paramétrage général s'applique toujours. Classement : mérite, bac hors Bondoukou, puis âge. Pas de priorité boursiers.
+        $this->assertSame([
+            'moyenne_bac_desc' => ['actif' => true, 'seuil' => 200],
+            'credits_desc' => ['actif' => true, 'seuil' => null],
+        ], $criteres['regles']['admission']['merite']);
+        $this->assertArrayNotHasKey('age_actif', $criteres['regles']['admission']);
+        // Étudiants internationaux non acceptés par défaut en admission.
+        $this->assertFalse($criteres['regles']['recevabilite']['internationaux']);
         $this->assertSame('Bondoukou', $criteres['regles']['admission']['ville_bac']);
         $this->assertSame(['hors_ville_bac', 'age_plus_jeune'], $criteres['regles']['classement']['departage']);
         $this->assertArrayNotHasKey('priorite_boursiers', $criteres['regles']['classement']);
@@ -242,7 +252,7 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame('en_vigueur', $version->statut);
         $this->assertNull($version->places);
         $parametres = json_decode($version->parametres, true);
-        $this->assertSame([['filiere_id' => '1', 'seuil' => 80, 'concours' => true]], $parametres['credits']['filieres']);
+        $this->assertArrayNotHasKey('credits', $parametres);
         // Un niveau sans âge saisi n'a pas de limite.
         $this->assertSame([['niveau' => 'n1', 'age' => 25]], $parametres['age_max']);
 
@@ -256,14 +266,56 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame(4, $parametres['rang_filiere']['n']);
         $this->assertSame(10, $parametres['comite']['places']);
 
-        // La réadmission rappelle le paramétrage en vigueur : une école sur concours active C1.
+        // La réadmission rappelle le paramétrage en vigueur ; C1 suit les écoles sur concours de ses propres crédits.
         $readmission = $this->niveau('readmission');
         $this->assertSame('en_vigueur', $readmission['general']['etat']);
-        $this->assertTrue($readmission['general']['categories']['C1']['actif']);
+        $this->assertFalse($readmission['general']['categories']['C1']['actif']);
 
         // Le paramétrage général n'a pas de places.
         $this->put(route(self::BASE.'update', ['k1', 'general']), $this->general(['places' => [['cite_id' => 'filles', 'places' => 1]]]))
             ->assertSessionHasErrors('places');
+    }
+
+    public function test_credits_par_filiere_en_readmission(): void
+    {
+        $this->appliquerGeneral();
+
+        $this->put(route(self::BASE.'update', ['k1', 'readmission']), $this->readmission())->assertSessionHasNoErrors();
+        $parametres = json_decode(DB::table('campagne_regles')->where('volet', 'readmission')->value('parametres'), true);
+        $this->assertSame([
+            'actif' => true, 'seuil_defaut' => 100, 'filieres' => [['filiere_id' => '1', 'seuil' => 80, 'concours' => true]],
+        ], $parametres['readmission']['credits']);
+        $this->assertArrayNotHasKey('credits_actif', $parametres['readmission']);
+
+        // Une école sur concours dans les crédits de réadmission active C1.
+        $this->assertTrue($this->niveau('readmission')['general']['categories']['C1']['actif']);
+    }
+
+    public function test_anciennes_versions_reprennent_les_credits_du_parametrage_general(): void
+    {
+        $this->admin();
+        $credits = ['seuil_defaut' => 90, 'filieres' => [['filiere_id' => '1', 'seuil' => 70, 'concours' => true]]];
+        DB::table('campagne_regles')->insert([
+            [
+                'id' => 'g-ancien', 'campagne_id' => 'k1', 'volet' => 'general', 'version' => 1, 'statut' => 'en_vigueur',
+                'parametres' => json_encode(['credits' => $credits]), 'places' => null,
+            ],
+            [
+                'id' => 'r-ancien', 'campagne_id' => 'k1', 'volet' => 'readmission', 'version' => 1, 'statut' => 'brouillon',
+                'parametres' => json_encode(['readmission' => ['credits_actif' => false]]), 'places' => null,
+            ],
+        ]);
+
+        // À la lecture : le bloc des crédits est reconstitué avec les seuils de l'ancien paramétrage général.
+        $regles = $this->niveau('readmission')['regles']['readmission'];
+        $this->assertSame(['actif' => false] + $credits, $regles['credits']);
+        $this->assertArrayNotHasKey('credits_actif', $regles);
+
+        // La migration déplace les seuils dans la version de réadmission.
+        (require database_path('migrations/2026_11_18_000001_deplacer_credits_vers_readmission.php'))->up();
+        $parametres = json_decode(DB::table('campagne_regles')->where('id', 'r-ancien')->value('parametres'), true);
+        $this->assertSame(['actif' => false] + $credits, $parametres['readmission']['credits']);
+        $this->assertArrayNotHasKey('credits_actif', $parametres['readmission']);
     }
 
     public function test_les_volets_s_appliquent_apres_le_parametrage_general(): void
@@ -299,7 +351,7 @@ class CriteresCampagneTest extends TestCase
     {
         $this->appliquerGeneral();
         $donnees = $this->readmission(['appliquer' => true]);
-        $donnees['regles']['readmission']['credits_actif'] = false;
+        $donnees['regles']['readmission']['credits']['actif'] = false;
         $donnees['regles']['readmission']['conduite']['actif'] = false;
         $donnees['regles']['readmission']['loyers']['actif'] = false;
         $donnees['regles']['readmission']['age_actif'] = false;
@@ -307,7 +359,7 @@ class CriteresCampagneTest extends TestCase
 
         $this->put(route(self::BASE.'update', ['k1', 'readmission']), $donnees)->assertSessionHasNoErrors();
         $parametres = json_decode(DB::table('campagne_regles')->where('volet', 'readmission')->value('parametres'), true);
-        $this->assertFalse($parametres['readmission']['credits_actif']);
+        $this->assertFalse($parametres['readmission']['credits']['actif']);
         $this->assertFalse($parametres['readmission']['conduite']['actif']);
         $this->assertFalse($parametres['readmission']['loyers']['actif']);
         $this->assertFalse($parametres['readmission']['age_actif']);
@@ -397,7 +449,8 @@ class CriteresCampagneTest extends TestCase
         $version = DB::table('campagne_regles')->where('volet', 'admission')->first();
         $this->assertSame('en_vigueur', $version->statut);
         $parametres = json_decode($version->parametres, true);
-        $this->assertEquals(12.5, $parametres['admission']['seuil']);
+        $this->assertEquals(250.5, $parametres['admission']['merite']['moyenne_bac_desc']['seuil']);
+        $this->assertEquals(['actif' => true, 'seuil' => 45], $parametres['admission']['merite']['credits_desc']);
         $this->assertSame('Abidjan', $parametres['admission']['ville_bac']);
         $this->assertSame(['age_plus_jeune', 'hors_ville_bac'], $parametres['classement']['departage']);
         $this->assertArrayNotHasKey('readmission', $parametres);
@@ -454,30 +507,42 @@ class CriteresCampagneTest extends TestCase
     {
         $this->admin();
         $admission = $this->admission();
-        $admission['regles']['admission']['seuil'] = 25; // note du bac sur 20
+        $admission['regles']['admission']['merite']['moyenne_bac_desc']['seuil'] = 450; // note du bac sur 400
+        $admission['regles']['admission']['merite']['credits_desc']['seuil'] = 70; // crédits sur 60
         // Le comportement ne départage pas les nouveaux étudiants.
         $admission['regles']['classement']['departage'] = ['comportement'];
         $this->put(route(self::BASE.'update', ['k1', 'admission']), $admission)->assertSessionHasErrors([
-            'regles.admission.seuil', 'regles.classement.departage.0',
+            'regles.admission.merite.moyenne_bac_desc.seuil', 'regles.admission.merite.credits_desc.seuil', 'regles.classement.departage.0',
         ]);
-        // Un seuil actif doit être renseigné.
-        $admission['regles']['admission']['merite'] = 'credits_desc';
-        $admission['regles']['admission']['seuil'] = null;
-        $this->put(route(self::BASE.'update', ['k1', 'admission']), $admission)->assertSessionHasErrors('regles.admission.seuil');
+        // Le seuil d'un mérite retenu est obligatoire ; celui d'un mérite non retenu ne l'est pas.
+        $admission = $this->admission();
+        $admission['regles']['admission']['merite']['credits_desc']['seuil'] = null;
+        $this->put(route(self::BASE.'update', ['k1', 'admission']), $admission)->assertSessionHasErrors('regles.admission.merite.credits_desc.seuil');
+        $admission['regles']['admission']['merite']['credits_desc']['actif'] = false;
+        $admission['regles']['admission']['ville_bac'] = ''; // garde la saisie invalide : rien n'est enregistré
+        $this->put(route(self::BASE.'update', ['k1', 'admission']), $admission)
+            ->assertSessionHasErrors('regles.admission.ville_bac')
+            ->assertSessionDoesntHaveErrors('regles.admission.merite.credits_desc.seuil');
+        // Au moins un mérite est retenu.
+        $admission = $this->admission();
+        $admission['regles']['admission']['merite']['moyenne_bac_desc']['actif'] = false;
+        $admission['regles']['admission']['merite']['credits_desc']['actif'] = false;
+        $this->put(route(self::BASE.'update', ['k1', 'admission']), $admission)->assertSessionHasErrors('regles.admission.merite');
 
         $readmission = $this->readmission();
         $readmission['regles']['classement']['departage'] = ['excellence', 'excellence', 'age_plus_jeune'];
         $readmission['regles']['readmission']['loyers']['mois_exiges'] = 13;
+        $readmission['regles']['readmission']['credits']['seuil_defaut'] = 120;
+        $readmission['regles']['readmission']['credits']['filieres'][] = ['filiere_id' => '99', 'seuil' => 50, 'concours' => false];
         $this->put(route(self::BASE.'update', ['k1', 'readmission']), $readmission)->assertSessionHasErrors([
             'regles.classement.departage.0', 'regles.readmission.loyers.mois_exiges',
+            'regles.readmission.credits.seuil_defaut', 'regles.readmission.credits.filieres.1.filiere_id',
         ]);
 
         $general = $this->general();
-        $general['regles']['credits']['seuil_defaut'] = 120;
-        $general['regles']['credits']['filieres'][] = ['filiere_id' => '99', 'seuil' => 50, 'concours' => false];
         $general['regles']['age_max'] = [['niveau' => 'n1', 'age' => 10], ['niveau' => 'X9', 'age' => 30]];
         $this->put(route(self::BASE.'update', ['k1', 'general']), $general)->assertSessionHasErrors([
-            'regles.credits.seuil_defaut', 'regles.credits.filieres.1.filiere_id', 'regles.age_max.0.age', 'regles.age_max.1.niveau',
+            'regles.age_max.0.age', 'regles.age_max.1.niveau',
         ]);
         $this->assertSame(0, DB::table('campagne_regles')->count());
     }
@@ -564,6 +629,22 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame(0, DB::table('campagne_regles')->count());
     }
 
+    public function test_ancien_merite_unique_converti(): void
+    {
+        $this->admin();
+        DB::table('campagne_regles')->insert([
+            'id' => 'v-merite', 'campagne_id' => 'k1', 'volet' => 'admission', 'version' => 1, 'statut' => 'en_vigueur',
+            'parametres' => json_encode(['admission' => ['merite' => 'credits_desc', 'seuil_actif' => true, 'seuil' => 30, 'age_actif' => false, 'ville_bac' => 'Bouna']]),
+            'places' => json_encode([]),
+        ]);
+
+        $admission = $this->niveau('admission')['regles']['admission'];
+        $this->assertSame(['actif' => true, 'seuil' => 30], $admission['merite']['credits_desc']);
+        $this->assertSame(['actif' => true, 'seuil' => 200], $admission['merite']['moyenne_bac_desc']);
+        $this->assertSame(['merite', 'ville_bac'], array_keys($admission));
+        $this->assertSame('Bouna', $admission['ville_bac']);
+    }
+
     public function test_anciennes_versions_completees_par_le_modele(): void
     {
         $this->admin();
@@ -575,7 +656,8 @@ class CriteresCampagneTest extends TestCase
         ]);
 
         $regles = $this->niveau('admission')['regles'];
-        $this->assertSame('moyenne_bac_desc', $regles['admission']['merite']);
+        $this->assertTrue($regles['admission']['merite']['moyenne_bac_desc']['actif']);
+        $this->assertTrue($regles['admission']['merite']['credits_desc']['actif']);
         $this->assertArrayNotHasKey('handicap_visible', $regles['admission']);
         $this->assertSame(['hors_ville_bac', 'age_plus_jeune'], $regles['classement']['departage']);
         $this->assertArrayNotHasKey('priorite_boursiers', $regles['classement']);
@@ -658,7 +740,6 @@ class CriteresCampagneTest extends TestCase
     {
         return array_merge([
             'regles' => [
-                'credits' => ['seuil_defaut' => 100, 'filieres' => [['filiere_id' => '1', 'seuil' => 80, 'concours' => true]]],
                 'rang_filiere' => ['actif' => true, 'n' => 4, 'groupe' => 'filiere_niveau'],
                 'clubs' => ['actif' => true, 'n' => 3],
                 'cas_sociaux' => ['actif' => true, 'taux' => 10, 'base' => 'places_readmission_cite'],
@@ -685,7 +766,7 @@ class CriteresCampagneTest extends TestCase
                 'conditions' => ['caution_mois' => 1, 'avance_mois' => 3],
                 'readmission' => [
                     'loyers' => ['actif' => true, 'mois_exiges' => 10],
-                    'credits_actif' => true,
+                    'credits' => ['actif' => true, 'seuil_defaut' => 100, 'filieres' => [['filiere_id' => '1', 'seuil' => 80, 'concours' => true]]],
                     'conduite' => ['actif' => true, 'note_min' => 12],
                     'age_actif' => true,
                     'report_places' => 'C6_puis_admission',
@@ -711,8 +792,11 @@ class CriteresCampagneTest extends TestCase
                 'recevabilite' => ['internationaux' => true],
                 'conditions' => ['caution_mois' => 2, 'avance_mois' => 6],
                 'admission' => [
-                    'merite' => 'moyenne_bac_desc', 'seuil_actif' => true, 'seuil' => 12.5,
-                    'age_actif' => true, 'ville_bac' => 'Abidjan',
+                    'merite' => [
+                        'moyenne_bac_desc' => ['actif' => true, 'seuil' => 250.5],
+                        'credits_desc' => ['actif' => true, 'seuil' => 45],
+                    ],
+                    'ville_bac' => 'Abidjan',
                 ],
                 'classement' => ['departage' => ['age_plus_jeune', 'hors_ville_bac'], 'k_liste_elargie' => 2],
             ],

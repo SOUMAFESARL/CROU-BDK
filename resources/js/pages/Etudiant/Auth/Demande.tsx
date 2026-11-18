@@ -1,6 +1,6 @@
 import { Head, usePage } from '@inertiajs/react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, FileText, Info, Loader2, LogIn, Mail, Phone, Save, Send } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, FileText, Info, Loader2, LogIn, Mail, Phone, Send } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { type Control, Controller, type FieldPath, useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -225,12 +225,10 @@ function Formulaire({
             distance: '',
             documents: Object.fromEntries(documents.map((document) => [document.slug, null])),
             certifie: false,
-            save_as_draft: false,
         },
     });
 
     const region = useWatch({ control, name: 'region' });
-    const brouillon = useWatch({ control, name: 'save_as_draft' });
     const filiere = useWatch({ control, name: 'filiere' });
     const ville = useWatch({ control, name: 'ville' });
     const villeBac = useWatch({ control, name: 'ville_bac' });
@@ -250,6 +248,8 @@ function Formulaire({
         return niveaux.filter((item, rang) => !item.terminale && rang >= rangPrecedent);
     }, [niveaux, niveauPrecedent]);
     const niveauActuel = useWatch({ control, name: 'niveau' });
+    // Envoi possible seulement une fois l'exactitude des informations certifiée.
+    const certifie = useWatch({ control, name: 'certifie' });
     useEffect(() => {
         if (niveauActuel !== '' && !niveauxActuels.some((item) => item.id === niveauActuel)) setValue('niveau', '');
     }, [niveauActuel, niveauxActuels, setValue]);
@@ -310,7 +310,6 @@ function Formulaire({
                     // Redoublant : niveau précédent identique au niveau actuel (recalculé par le serveur).
                     redoublement: binaire(champs.niveau_precedent === champs.niveau),
                     boursier: binaire(champs.boursier),
-                    save_as_draft: binaire(champs.save_as_draft),
                     id_campagne: campagne.id,
                     annee_academique_actuel: campagne.annee,
                     // Chaque pièce est envoyée sous le slug du document, comme l'attend le serveur.
@@ -564,13 +563,6 @@ function Formulaire({
 
                         <div className="flex flex-col gap-2 border-t pt-4">
                             <CaseACocher control={control} name="certifie" id="dh-certifie" libelle="Je certifie l’exactitude des informations fournies" requis erreur={errors.certifie?.message} />
-                            <CaseACocher
-                                control={control}
-                                name="save_as_draft"
-                                id="dh-brouillon"
-                                libelle="Enregistrer en brouillon"
-                                aide="Le dossier sera créé sans être soumis ; vous pourrez le compléter et le soumettre depuis votre espace étudiant."
-                            />
                         </div>
                     </>
                 )}
@@ -589,9 +581,16 @@ function Formulaire({
                 )}
                 {/* Clés distinctes : sans elles, React transforme le bouton « Suivant » cliqué en bouton d'envoi pendant le clic, ce qui soumettait le formulaire à l'arrivée sur l'étape Documents. */}
                 {derniere ? (
-                    <Button key="envoyer" type="submit" variant="accent" disabled={isSubmitting} className="font-medium">
-                        {isSubmitting ? <Loader2 {...ICON} className="animate-spin" /> : brouillon ? <Save {...ICON} /> : <Send {...ICON} />}
-                        {brouillon ? 'Enregistrer le brouillon' : 'Soumettre ma demande'}
+                    <Button
+                        key="envoyer"
+                        type="submit"
+                        variant="accent"
+                        disabled={isSubmitting || !certifie}
+                        title={certifie ? undefined : 'Cochez « Je certifie l’exactitude des informations fournies » pour soumettre votre demande'}
+                        className="font-medium"
+                    >
+                        {isSubmitting ? <Loader2 {...ICON} className="animate-spin" /> : <Send {...ICON} />}
+                        Soumettre ma demande
                     </Button>
                 ) : (
                     <Button key="suivant" variant="accent" onClick={() => allerA(etape + 1)} className="font-medium">
@@ -670,7 +669,7 @@ function CaseACocher({
     aide,
     requis,
     erreur,
-}: Omit<ChampProps, 'label'> & { name: 'boursier' | 'certifie' | 'save_as_draft'; libelle: string; aide?: string; requis?: boolean }) {
+}: Omit<ChampProps, 'label'> & { name: 'boursier' | 'certifie'; libelle: string; aide?: string; requis?: boolean }) {
     return (
         <div>
             <label htmlFor={id} className={cn('flex cursor-pointer items-start gap-3 rounded-brand border border-gray-300 p-3 text-sm text-gray-900 hover:bg-surface', erreur && 'border-red-500')}>

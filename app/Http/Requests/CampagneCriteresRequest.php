@@ -40,11 +40,6 @@ class CampagneCriteresRequest extends FormRequest
 
             return $actions + [
                 'places' => 'prohibited',
-                $r.'credits.seuil_defaut' => 'required_with:regles|integer|min:0|max:100',
-                $r.'credits.filieres' => 'sometimes|array',
-                $r.'credits.filieres.*.filiere_id' => 'required|distinct|exists:filiere,id_filiere',
-                $r.'credits.filieres.*.seuil' => 'required|integer|min:0|max:100',
-                $r.'credits.filieres.*.concours' => 'sometimes|boolean',
                 $r.'rang_filiere.actif' => 'required_with:regles|boolean',
                 $r.'rang_filiere.n' => 'required_with:regles|integer|min:1|max:100',
                 $r.'rang_filiere.groupe' => ['required_with:regles', Rule::in(C::GROUPES_C2)],
@@ -76,13 +71,18 @@ class CampagneCriteresRequest extends FormRequest
         ];
 
         if ($jeu === 'admission') {
-            $max = C::SEUIL_MAX_ADMISSION[$this->input('regles.admission.merite')] ?? 360;
+            // Un mérite par public (note du bac sur 400 en Licence 1, crédits sur 60 de la Licence 2 au doctorat), chacun
+            // avec son seuil de rejet, obligatoire quand le mérite est retenu.
+            $merites = [];
+            foreach (C::MERITE_ADMISSION as $code) {
+                $m = "regles.admission.merite.{$code}.";
+                $merites += [
+                    $m.'actif' => 'required_with:regles|boolean',
+                    $m.'seuil' => "nullable|required_if_accepted:{$m}actif|numeric|min:0|max:".C::SEUIL_MAX_ADMISSION[$code],
+                ];
+            }
 
-            return $communes + [
-                'regles.admission.merite' => ['required_with:regles', Rule::in(C::MERITE_ADMISSION)],
-                'regles.admission.seuil_actif' => 'required_with:regles|boolean',
-                'regles.admission.seuil' => "nullable|required_if_accepted:regles.admission.seuil_actif|numeric|min:0|max:{$max}",
-                'regles.admission.age_actif' => 'required_with:regles|boolean',
+            return $communes + $merites + [
                 'regles.admission.ville_bac' => 'required_with:regles|string|max:100',
             ];
         }
@@ -92,7 +92,13 @@ class CampagneCriteresRequest extends FormRequest
         return $communes + [
             $r.'loyers.actif' => 'required_with:regles|boolean',
             $r.'loyers.mois_exiges' => 'required_with:regles|integer|min:1|max:12',
-            $r.'credits_actif' => 'required_with:regles|boolean',
+            // Crédits exigés : pourcentage pour toutes les filières, seuil propre à une filière (école sur concours : C1).
+            $r.'credits.actif' => 'required_with:regles|boolean',
+            $r.'credits.seuil_defaut' => 'required_with:regles|integer|min:0|max:100',
+            $r.'credits.filieres' => 'sometimes|array',
+            $r.'credits.filieres.*.filiere_id' => 'required|distinct|exists:filiere,id_filiere',
+            $r.'credits.filieres.*.seuil' => 'required|integer|min:0|max:100',
+            $r.'credits.filieres.*.concours' => 'sometimes|boolean',
             $r.'conduite.actif' => 'required_with:regles|boolean',
             // Note de conduite minimale, bornée par la note initiale du paramétrage des sanctions.
             $r.'conduite.note_min' => 'nullable|required_if_accepted:'.$r.'conduite.actif|numeric|decimal:0,2|min:0|max:'.app(\App\Http\Services\CatalogueSanctions::class)->noteInitiale(),
@@ -108,6 +114,10 @@ class CampagneCriteresRequest extends FormRequest
             if (! $this->has('regles') && ! $this->has('places')) {
                 $validator->errors()->add('criteres', 'Aucun critère à enregistrer.');
             }
+            if ($this->jeu() === 'admission' && $this->has('regles')
+                && ! collect(C::MERITE_ADMISSION)->contains(fn ($code) => $this->boolean("regles.admission.merite.{$code}.actif"))) {
+                $validator->errors()->add('regles.admission.merite', 'Retenez au moins un critère de mérite.');
+            }
         });
     }
 
@@ -118,16 +128,17 @@ class CampagneCriteresRequest extends FormRequest
         return [
             'regles.calendrier.date_liste_provisoire' => 'date de génération de la liste provisoire',
             'regles.calendrier.delai_completude_jours' => 'délai de complétude',
-            'regles.credits.seuil_defaut' => 'pourcentage de crédits exigé',
-            'regles.credits.filieres.*.filiere_id' => 'filière',
-            'regles.credits.filieres.*.seuil' => 'pourcentage de crédits de la filière',
+            $r.'credits.seuil_defaut' => 'pourcentage de crédits exigé',
+            $r.'credits.filieres.*.filiere_id' => 'filière',
+            $r.'credits.filieres.*.seuil' => 'pourcentage de crédits de la filière',
             'regles.rang_filiere.n' => 'nombre de premiers par filière',
             'regles.clubs.n' => 'nombre de premiers des clubs et associations',
             'regles.cas_sociaux.taux' => 'part des cas sociaux',
             'regles.comite.places' => 'places du comité des résidents',
             'regles.age_max.*.niveau' => 'niveau d’études',
             'regles.age_max.*.age' => 'âge maximum',
-            'regles.admission.seuil' => 'seuil minimum',
+            'regles.admission.merite.moyenne_bac_desc.seuil' => 'note minimale au baccalauréat',
+            'regles.admission.merite.credits_desc.seuil' => 'nombre minimum de crédits',
             'regles.conditions.caution_mois' => 'nombre de mois de caution',
             'regles.conditions.avance_mois' => 'nombre de mois d’avance',
             'regles.admission.ville_bac' => 'ville de référence du baccalauréat',

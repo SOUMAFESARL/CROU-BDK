@@ -14,12 +14,11 @@ import { Input } from '@/components/ui/input';
 import { Stepper } from '@/components/ui/stepper';
 import { aujourdhui, Encadre, repartirErreurs } from '@/components/vie-residentielle/shared';
 import { envoyer } from '@/lib/inertia-form';
-import { avecFormatTelephone, formatTelephone, PROPS_TELEPHONE, telephoneFacultatif, telephoneObligatoire } from '@/lib/telephone';
+import { avecFormatTelephone, formatTelephone, PROPS_TELEPHONE, telephoneObligatoire } from '@/lib/telephone';
 
 const requis = (message: string) => z.string().trim().min(1, message);
 const optionnel = (max: number) => z.string().trim().max(max, `${max} caractères au maximum.`);
 const email = z.string().trim().max(255, '255 caractères au maximum.').refine((valeur) => valeur === '' || z.email().safeParse(valeur).success, 'Adresse e-mail invalide.');
-const annee = z.string().trim().refine((valeur) => valeur === '' || /^\d{4}-\d{4}$/.test(valeur), 'Format attendu : 2025-2026.');
 /** Nombre facultatif saisi en texte : vide accepté, sinon borné (le serveur revérifie). */
 const nombre = (min: number, max: number | null, message: string, entier = false) =>
     z
@@ -31,6 +30,7 @@ const nombre = (min: number, max: number | null, message: string, entier = false
             return Number.isFinite(n) && n >= min && (max === null || n <= max) && (!entier || Number.isInteger(n));
         }, message);
 
+/** Uniquement les informations saisies dans le formulaire de demande initiale (`EtudiantEditionService`). */
 const schema = z
     .object({
         // Identité
@@ -45,33 +45,21 @@ const schema = z
         numero_piece: optionnel(50),
         date_expiration: z.string(),
         // Coordonnées
-        telephone1: telephoneObligatoire('Le téléphone principal est obligatoire.'),
-        telephone2: telephoneFacultatif(),
+        telephone1: telephoneObligatoire('Le téléphone est obligatoire.'),
         email1: email,
-        email2: email,
         regions_id: z.string(),
         ville_id: z.string(),
         adresse: optionnel(255),
         distance: nombre(0, null, 'La distance doit être un nombre entier positif.', true),
         // Études
         matricule: requis('Le matricule est obligatoire.').max(100, '100 caractères au maximum.'),
-        numero_etudiant: optionnel(100),
-        annee_academique_actuel: annee,
-        annee_academique_precedent: annee,
         niveau_etude_precedent_code: z.string(),
         niveau_etude_actuel_code: z.string(),
         filiere_code: z.string(),
         moyenne: nombre(0, 20, 'La moyenne doit être comprise entre 0 et 20.'),
         credit_valider: nombre(0, 60, 'Le nombre de crédits doit être un entier entre 0 et 60.', true),
-        // Situation et tuteur
+        // Situation
         boursier: z.boolean(),
-        type_bourse: optionnel(100),
-        allergies: z.boolean(),
-        maladies_chroniques: z.boolean(),
-        autiste: z.boolean(),
-        name_tuteur: optionnel(255),
-        telephone_tuteur: telephoneFacultatif(),
-        adresse_tuteur: optionnel(255),
     });
 
 export type ValeursEtudiant = z.infer<typeof schema> & {
@@ -95,11 +83,10 @@ type Champ = FieldPath<z.infer<typeof schema>>;
 const CHAMPS_ETAPES: Champ[][] = [
     ['name', 'genre_id', 'date_naissance', 'lieu_naissance', 'nationalite', 'groupe_sanguin_id'],
     ['type_piece_id', 'numero_piece', 'date_expiration'],
-    ['telephone1', 'telephone2', 'email1', 'email2', 'regions_id', 'ville_id', 'adresse', 'distance'],
-    ['matricule', 'numero_etudiant', 'annee_academique_actuel', 'annee_academique_precedent', 'niveau_etude_precedent_code', 'niveau_etude_actuel_code', 'filiere_code', 'moyenne', 'credit_valider'],
-    ['boursier', 'type_bourse', 'allergies', 'maladies_chroniques', 'autiste', 'name_tuteur', 'telephone_tuteur', 'adresse_tuteur'],
+    ['telephone1', 'email1', 'regions_id', 'ville_id', 'adresse', 'distance'],
+    ['matricule', 'niveau_etude_precedent_code', 'niveau_etude_actuel_code', 'filiere_code', 'moyenne', 'credit_valider', 'boursier'],
 ];
-const ETAPES = ['Identité', 'Pièce d’identité', 'Coordonnées', 'Études', 'Situation & tuteur'];
+const ETAPES = ['Identité', 'Pièce d’identité', 'Coordonnées', 'Études & situation'];
 
 type Props = {
     /** Étudiant à modifier (fenêtre fermée si `null`). */
@@ -109,7 +96,7 @@ type Props = {
 };
 
 /**
- * Modification de toutes les informations d'un étudiant par l'administration (`EtudiantEditionService`) :
+ * Modification par l'administration des informations d'un étudiant issues du formulaire de demande initiale (`EtudiantEditionService`) :
  * fiche étudiant et informations académiques de sa dernière demande. Utilisée par les résidents et le traitement d'une demande.
  */
 export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
@@ -126,18 +113,12 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
         formState: { errors, isSubmitting },
     } = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema), mode: 'onTouched' });
     const region = useWatch({ control, name: 'regions_id' });
-    const boursier = useWatch({ control, name: 'boursier' });
     const avecDemande = etudiant?.valeurs.avec_demande ?? false;
 
     useEffect(() => {
         if (etudiant) {
             const { avec_demande: _, ...valeurs } = etudiant.valeurs;
-            reset({
-                ...valeurs,
-                telephone1: formatTelephone(valeurs.telephone1),
-                telephone2: formatTelephone(valeurs.telephone2),
-                telephone_tuteur: formatTelephone(valeurs.telephone_tuteur),
-            });
+            reset({ ...valeurs, telephone1: formatTelephone(valeurs.telephone1) });
             setEtape(0);
             setErreurServeur(null);
         }
@@ -174,7 +155,7 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
         </Field>
     );
 
-    const telephone = (nom: 'telephone1' | 'telephone2' | 'telephone_tuteur', label: string, required = false) => (
+    const telephone = (nom: 'telephone1', label: string, required = false) => (
         <Field id={`ed-${nom}`} label={label} required={required} error={errors[nom]?.message}>
             <Input id={`ed-${nom}`} {...PROPS_TELEPHONE} invalid={!!errors[nom]} className="h-11" {...avecFormatTelephone(register(nom))} />
         </Field>
@@ -271,10 +252,8 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
 
                         {etape === 2 && (
                             <Grille>
-                                {telephone('telephone1', 'Téléphone principal', true)}
-                                {telephone('telephone2', 'Téléphone secondaire')}
-                                {champ('email1', 'E-mail principal', { type: 'email' })}
-                                {champ('email2', 'E-mail secondaire', { type: 'email' })}
+                                {telephone('telephone1', 'Téléphone', true)}
+                                {champ('email1', 'E-mail', { type: 'email' })}
                                 {liste('regions_id', 'Région d’origine', options.regions, {
                                     // Une ville d'une autre région n'est plus valable.
                                     onChange: () => setValue('ville_id', ''),
@@ -288,37 +267,18 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
                         {etape === 3 && (
                             <>
                                 <Grille>
-                                    {champ('matricule', 'Matricule', { required: true })}
-                                    {champ('numero_etudiant', 'Numéro étudiant')}
-                                    {champ('annee_academique_actuel', 'Année académique actuelle', { placeholder: 'Ex. 2025-2026' })}
-                                    {avecDemande && champ('annee_academique_precedent', 'Année académique précédente', { placeholder: 'Ex. 2024-2025' })}
+                                    <div className="sm:col-span-2">{champ('matricule', 'Matricule', { required: true })}</div>
                                     {avecDemande && liste('niveau_etude_precedent_code', 'Niveau précédent', options.niveaux)}
                                     {avecDemande && liste('niveau_etude_actuel_code', 'Niveau actuel', options.niveaux)}
                                     {avecDemande && <div className="sm:col-span-2">{liste('filiere_code', 'Filière', options.filieres)}</div>}
                                     {avecDemande && champ('moyenne', 'Moyenne (sur 20)', { inputMode: 'decimal' })}
                                     {avecDemande && champ('credit_valider', 'Crédits validés (sur 60)', { inputMode: 'numeric' })}
+                                    {caseACocher('boursier', 'Boursier')}
                                 </Grille>
                                 {!avecDemande && <Encadre ton="info">Aucune demande : niveau, filière, moyenne et crédits ne sont pas modifiables.</Encadre>}
                             </>
                         )}
 
-                        {etape === 4 && (
-                            <>
-                                <Grille>
-                                    {caseACocher('boursier', 'Boursier')}
-                                    {boursier ? champ('type_bourse', 'Type de bourse') : <div className="hidden sm:block" />}
-                                    {caseACocher('allergies', 'Allergies')}
-                                    {caseACocher('maladies_chroniques', 'Maladies chroniques')}
-                                    {caseACocher('autiste', 'Trouble du spectre autistique')}
-                                </Grille>
-                                <h3 className="pt-2 text-sm font-medium text-gray-900">Tuteur</h3>
-                                <Grille>
-                                    <div className="sm:col-span-2">{champ('name_tuteur', 'Nom du tuteur')}</div>
-                                    {telephone('telephone_tuteur', 'Téléphone du tuteur')}
-                                    {champ('adresse_tuteur', 'Adresse du tuteur')}
-                                </Grille>
-                            </>
-                        )}
                     </DialogBody>
                     <DialogFooter className="sm:justify-between">
                         <Button variant="outline" size="sm" className="h-10" onClick={onClose} disabled={isSubmitting}>

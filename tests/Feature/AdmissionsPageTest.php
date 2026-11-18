@@ -153,6 +153,122 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('soumis', $demande->etat_dossier);
     }
 
+    public function test_informations_saisies_regroupees_par_etape_du_formulaire(): void
+    {
+        $this->agentLimite(['hebergement.admissions.personal']);
+        Schema::table('demande', function (Blueprint $t) {
+            $t->string('ville_bac')->nullable();
+        });
+        DB::table('niveau_etude')->insert(['id_niveau_etude' => 'TLE', 'name' => 'Terminale']);
+        DB::table('etudiants')->where('id_etudiant', 'student')->update(['regions_id' => 1, 'ville_id' => 10, 'distance' => 35, 'nationalite' => 'IVOIRIENNE']);
+        $demande = DB::table('demande')->where('etudiant_id', 'student');
+
+        // Étudiant : moyenne sur 20 et crédits validés.
+        $demande->update(['niveau_etude_precedent_code' => 'L1', 'niveau_etude_actuel_code' => 'L2', 'filiere_code' => 1, 'moyenne' => 12.5, 'credit_valider' => 48, 'commentaires' => 'Orphelin.']);
+        $profil = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['profil'];
+        $this->assertSame(['identite', 'etudes', 'situation', 'adresse'], array_keys($profil));
+        $this->assertSame('Licence 1', $profil['etudes']['niveau_precedent']);
+        $this->assertSame('Licence 2', $profil['etudes']['niveau']);
+        $this->assertFalse($profil['etudes']['redoublant']);
+        $this->assertFalse($profil['etudes']['bachelier']);
+        $this->assertSame('Informatique', $profil['etudes']['filiere']);
+        $this->assertEquals(12.5, $profil['etudes']['moyenne']);
+        $this->assertSame(48, $profil['etudes']['credits']);
+        $this->assertNull($profil['etudes']['note_bac']);
+        $this->assertSame('Orphelin.', $profil['situation']['observations']);
+        $this->assertSame('Gontougo', $profil['adresse']['region']);
+        $this->assertSame('Bondoukou', $profil['adresse']['ville']);
+        $this->assertEquals(35, $profil['adresse']['distance']);
+
+        // Nouveau bachelier : la moyenne enregistrée (sur 20) est restituée en note au bac sur 400.
+        $demande->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12.25, 'credit_valider' => null, 'ville_bac' => 'Bouaké']);
+        $etudes = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['profil']['etudes'];
+        $this->assertTrue($etudes['bachelier']);
+        $this->assertEquals(245, $etudes['note_bac']);
+        $this->assertNull($etudes['credits']);
+        $this->assertSame('Bouaké', $etudes['ville_bac']);
+    }
+
+    /** Agent qui voit l'étude d'éligibilité (données personnelles, documents et historique). */
+    private function agentEligibilite(array $permissions = []): void
+    {
+        $this->agentLimite(['hebergement.admissions.personal', 'hebergement.admissions.documents', 'hebergement.admissions.history', ...$permissions]);
+        foreach (['2026_11_11_000001_create_campagne_regles_table.php', '2026_11_11_000002_add_volet_to_campagne_regles.php'] as $migration) {
+            (require database_path('migrations/'.$migration))->up();
+        }
+        Schema::create('document_etudiant', function (Blueprint $t) {
+            $t->string('id_document')->primary();
+            $t->string('etudiant_id');
+            $t->timestamps();
+        });
+        Schema::table('niveau_etude', fn (Blueprint $t) => $t->string('abreviation')->nullable());
+        DB::table('niveau_etude')->insert(['id_niveau_etude' => 'TLE', 'name' => 'Terminale', 'abreviation' => 'TLE']);
+        DB::table('etudiants')->where('id_etudiant', 'student')->update(['nationalite' => 'IVOIRIENNE', 'date_naissance' => now()->subYears(25)->toDateString()]);
+    }
+
+    private function enVigueur(string $volet, array $parametres): void
+    {
+        \App\Models\CampagneRegles::create(['campagne_id' => 'campaign', 'volet' => $volet, 'version' => 1, 'statut' => 'en_vigueur', 'parametres' => $parametres]);
+    }
+
+    private function eligibilite(): array
+    {
+        return $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['eligibilite'];
+    }
+
+    public function test_criteres_d_admission_compares_aux_valeurs_saisies(): void
+    {
+        $this->agentEligibilite();
+        // Nouveau bachelier : 9/20 enregistré = 180/400.
+        DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 9]);
+
+        // Sans critères appliqués : modèle CROU (note du bac ≥ 200/400, internationaux non acceptés, aucun âge maximum).
+        $eligibilite = $this->eligibilite();
+        $this->assertSame('admission', $eligibilite['volet']);
+        $this->assertSame('modele', $eligibilite['origine']);
+        // Pas de sanction à l'admission : la discipline ne concerne que les anciens résidents (réadmission).
+        $this->assertSame(['Note du baccalauréat', 'Étudiants internationaux'], array_column($eligibilite['regles'], 'label'));
+        $this->assertSame(['≥ 200/400', '180/400', 'nok'], [$eligibilite['regles'][0]['campagne'], $eligibilite['regles'][0]['etudiant'], $eligibilite['regles'][0]['etat']]);
+        $this->assertSame('ok', $eligibilite['regles'][1]['etat']);
+        $this->assertSame(1, $eligibilite['non_conformes']);
+
+        // Critères en vigueur : seuil du bac abaissé, âge maximum de la Licence 1 dépassé ; crédits ignorés (autre public).
+        $this->enVigueur('admission', ['admission' => ['merite' => ['moyenne_bac_desc' => ['actif' => true, 'seuil' => 150], 'credits_desc' => ['actif' => true, 'seuil' => 30]]]]);
+        $this->enVigueur('general', ['age_max' => [['niveau' => 'L1', 'age' => 22]]]);
+        $eligibilite = $this->eligibilite();
+        $this->assertSame('en_vigueur', $eligibilite['origine']);
+        $regles = collect($eligibilite['regles'])->keyBy('label');
+        $this->assertSame('ok', $regles['Note du baccalauréat']['etat']);
+        $this->assertFalse($regles->has('Crédits validés'));
+        $this->assertSame(['≤ 22 ans', '25 ans', 'nok'], array_values(collect($regles['Âge maximum (Licence 1)'])->only(['campagne', 'etudiant', 'etat'])->all()));
+    }
+
+    public function test_criteres_de_readmission_pour_un_ancien_resident(): void
+    {
+        $this->agentEligibilite(['hebergement.discipline.view']);
+        // Ancien résident : logé lors d'une autre campagne.
+        DB::table('assignation_chambres')->insert(['id_assignation' => 'ancienne', 'etudiant_id' => 'student', 'chambre_id' => 'room', 'campagne_id' => 'autre', 'statut' => 'terminee']);
+        DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'L1', 'niveau_etude_actuel_code' => 'L2', 'filiere_code' => '1', 'credit_valider' => 48]);
+        $this->enVigueur('readmission', ['readmission' => [
+            'loyers' => ['actif' => false, 'mois_exiges' => 10],
+            'credits' => ['actif' => true, 'seuil_defaut' => 100, 'filieres' => [['filiere_id' => '1', 'seuil' => 80, 'concours' => true]]],
+            'conduite' => ['actif' => true, 'note_min' => 10, 'sanctions' => ['suspension', 'expulsion']],
+            'age_actif' => true,
+        ]]);
+
+        $eligibilite = $this->eligibilite();
+
+        $this->assertSame('readmission', $eligibilite['volet']);
+        $regles = collect($eligibilite['regles'])->keyBy('label');
+        $this->assertSame(['Demande de réadmission', 'Crédits validés', 'Note de conduite', 'Étudiants internationaux', 'Sanction bloquante'], $regles->keys()->all());
+        // Seuil propre à la filière (école sur concours) : 48/60 = 80 %.
+        $this->assertSame('≥ 80 % des crédits (filière Informatique, école sur concours)', $regles['Crédits validés']['campagne']);
+        $this->assertSame(['48/60 (80 %)', 'ok'], [$regles['Crédits validés']['etudiant'], $regles['Crédits validés']['etat']]);
+        $this->assertSame('ok', $regles['Note de conduite']['etat']);
+        $this->assertSame('ok', $regles['Sanction bloquante']['etat']);
+        $this->assertSame(0, $eligibilite['non_conformes']);
+    }
+
     public function test_modification_refusee_sans_le_droit_de_modifier_les_admissions(): void
     {
         $this->agentLimite();

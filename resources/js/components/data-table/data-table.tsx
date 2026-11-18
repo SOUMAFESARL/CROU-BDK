@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { router } from '@inertiajs/react';
+import type { MouseEvent, ReactNode } from 'react';
 import { DataTablePagination } from '@/components/data-table/data-table-pagination';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
@@ -19,13 +20,28 @@ type DataTableProps<T> = {
     /** Barre au-dessus du tableau (recherche, filtres, bouton d'ajout). */
     toolbar?: ReactNode;
     emptyMessage?: ReactNode;
+    /** Page ouverte au clic sur la ligne (null : ligne non cliquable). */
+    rowHref?: (row: T) => string | null;
 };
+
+/** Éléments de la ligne qui gardent leur propre action (case à cocher, bouton, lien, champ). */
+const INTERACTIF = 'a, button, input, select, textarea, label, [role="checkbox"], [role="button"], [role="menuitem"]';
+
+/** Clic sur une ligne : ouvre `href` (nouvel onglet avec Ctrl/Cmd ou clic molette), sauf sur un élément interactif ou une sélection de texte. */
+function ouvrirLigne(event: MouseEvent<HTMLTableRowElement>, href: string) {
+    if ((event.target as HTMLElement).closest(INTERACTIF) || window.getSelection()?.toString()) return;
+    if (event.ctrlKey || event.metaKey || event.button === 1) {
+        window.open(href, '_blank', 'noopener');
+        return;
+    }
+    router.visit(href);
+}
 
 /**
  * Tableau paginé commun à tout l'espace admin : shadcn `Table` + `Pagination`,
  * pagination côté serveur (10 lignes par page, `->paginate(10)->withQueryString()`).
  */
-export function DataTable<T>({ columns, data, rowKey, toolbar, emptyMessage = 'Aucun résultat.' }: DataTableProps<T>) {
+export function DataTable<T>({ columns, data, rowKey, toolbar, emptyMessage = 'Aucun résultat.', rowHref }: DataTableProps<T>) {
     return (
         <div className="overflow-hidden rounded-brand border bg-white">
             {toolbar && <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center">{toolbar}</div>}
@@ -48,15 +64,24 @@ export function DataTable<T>({ columns, data, rowKey, toolbar, emptyMessage = 'A
                             </TableCell>
                         </TableRow>
                     ) : (
-                        data.data.map((row) => (
-                            <TableRow key={rowKey(row)}>
-                                {columns.map((column) => (
-                                    <TableCell key={column.key} className={cn(column.className)}>
-                                        {column.cell(row)}
-                                    </TableCell>
-                                ))}
-                            </TableRow>
-                        ))
+                        data.data.map((row) => {
+                            const href = rowHref?.(row) ?? null;
+
+                            return (
+                                <TableRow
+                                    key={rowKey(row)}
+                                    className={cn(href && 'cursor-pointer')}
+                                    onClick={href ? (event) => ouvrirLigne(event, href) : undefined}
+                                    onAuxClick={href ? (event) => event.button === 1 && ouvrirLigne(event, href) : undefined}
+                                >
+                                    {columns.map((column) => (
+                                        <TableCell key={column.key} className={cn(column.className)}>
+                                            {column.cell(row)}
+                                        </TableCell>
+                                    ))}
+                                </TableRow>
+                            );
+                        })
                     )}
                 </TableBody>
             </Table>

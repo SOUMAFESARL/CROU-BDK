@@ -23,9 +23,15 @@ export type CreditsFiliere = {
 };
 export type AgeNiveau = { niveau: string; age: number };
 
+/** Crédits exigés en réadmission : pourcentage pour toutes les filières, seuil propre à une filière (école sur concours : C1). */
+export type CreditsReadmission = {
+    actif: boolean;
+    seuil_defaut: number;
+    filieres: CreditsFiliere[];
+};
+
 /** Paramétrage général de la campagne. */
 export type ReglesGenerales = {
-    credits: { seuil_defaut: number; filieres: CreditsFiliere[] };
     rang_filiere: {
         actif: boolean;
         n: number;
@@ -43,7 +49,7 @@ export type ReglesGenerales = {
 
 export type ReglesReadmission = {
     loyers: { actif: boolean; mois_exiges: number };
-    credits_actif: boolean;
+    credits: CreditsReadmission;
     /** Conduite en cité : note de conduite (paramétrage des sanctions) d'au moins `note_min`, sinon rejet. */
     conduite: { actif: boolean; note_min: number | null; sanctions: string[] };
     age_actif: boolean;
@@ -52,11 +58,18 @@ export type ReglesReadmission = {
 
 export type MeriteAdmission = "moyenne_bac_desc" | "credits_desc";
 
-export type ReglesAdmission = {
-    merite: MeriteAdmission;
-    seuil_actif: boolean;
+/** Un mérite d'admission : retenu ou non, avec son seuil de rejet (`null` : aucun minimum). */
+export type MeriteRegle = {
+    actif: boolean;
     seuil: number | null;
-    age_actif: boolean;
+};
+
+/**
+ * Mérites cumulables (note du bac en Licence 1, crédits de la Licence 2 au doctorat) ; l'âge maximum par niveau
+ * vient toujours du paramétrage général.
+ */
+export type ReglesAdmission = {
+    merite: Record<MeriteAdmission, MeriteRegle>;
     ville_bac: string;
 };
 
@@ -278,6 +291,10 @@ export const CATEGORIES: Record<
 
 export const CODES_CATEGORIES = Object.keys(CATEGORIES) as CodeCategorie[];
 
+/** C1 (écoles sur concours) est active dès qu'une filière des crédits de réadmission est une école sur concours. */
+export const ecolesSurConcours = (filieres: { concours: boolean }[]) =>
+    filieres.some((ligne) => ligne.concours);
+
 export const DEPARTAGE: Record<
     CritereDepartage,
     { label: string; description: string }
@@ -331,24 +348,51 @@ export const BASES_C4: Record<ReglesGenerales["cas_sociaux"]["base"], string> =
         capacite_cite: "de la capacité de la cité",
     };
 
-/** Mérite des nouveaux étudiants : sert au seuil de rejet et au classement. */
+/** Mérites des nouveaux étudiants, un par public : servent au seuil de rejet et au classement. */
 export const MERITE_ADMISSION: Record<
     MeriteAdmission,
-    { label: string; seuil: string; unite: string; max: number }
+    {
+        label: string;
+        public: string;
+        description: string;
+        seuil: string;
+        unite: string;
+        max: number;
+    }
 > = {
     moyenne_bac_desc: {
         label: "Note du baccalauréat",
+        public: "Licence 1",
+        description: "Nouveaux bacheliers venant de la Terminale : note du bac, sur 400.",
         seuil: "Note minimale au baccalauréat",
-        unite: "/ 20",
-        max: 20,
+        unite: "/ 400",
+        max: 400,
     },
     credits_desc: {
         label: "Nombre de crédits",
+        public: "Licence 2 au doctorat",
+        description: "Étudiants déjà inscrits à l’université : crédits validés, sur 60.",
         seuil: "Crédits minimum",
-        unite: "crédits",
-        max: 360,
+        unite: "/ 60",
+        max: 60,
     },
 };
+
+export const CODES_MERITE = Object.keys(MERITE_ADMISSION) as MeriteAdmission[];
+
+/** Mérites retenus, « Note du baccalauréat (Licence 1) · Nombre de crédits (Licence 2 au doctorat) ». */
+export function libelleMerites(
+    merite: Record<MeriteAdmission, { actif: boolean }>,
+): string {
+    return (
+        CODES_MERITE.filter((code) => merite[code].actif)
+            .map(
+                (code) =>
+                    `${MERITE_ADMISSION[code].label} (${MERITE_ADMISSION[code].public})`,
+            )
+            .join(" · ") || "—"
+    );
+}
 
 /** `aaaa-mm-jj hh:mm` → `jj/mm/aaaa à hh:mm`. */
 export const formatDateHeure = (valeur: string | null) => {

@@ -334,7 +334,7 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                     />
                                 </Field>
                             </div>
-                            <Field id="libelle" label="Libellé" required error={errors.libelle?.message} hint="150 caractères au maximum.">
+                            <Field id="libelle" label="Libellé" required error={errors.libelle?.message}>
                                 <Input
                                     id="libelle"
                                     autoFocus

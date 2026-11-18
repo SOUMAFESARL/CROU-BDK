@@ -263,6 +263,8 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
                     columns={colonnesTableau}
                     data={dossiers}
                     rowKey={(d) => d.id}
+                    // Clic sur la ligne = « Suivre le dossier ».
+                    rowHref={(d) => d.url}
                     toolbar={
                         <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                             <div className="w-full sm:max-w-sm">

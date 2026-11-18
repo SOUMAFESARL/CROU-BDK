@@ -4,14 +4,14 @@ import {
     ArrowDown,
     ArrowUp,
     CheckCheck,
-    GraduationCap,
+    Plus,
     ShieldCheck,
     Trash2,
-    TriangleAlert,
 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import {
     Controller,
+    useFieldArray,
     useForm,
     type Control,
     type Path,
@@ -21,14 +21,17 @@ import { AppliquerCriteresDialog } from "@/components/campagnes/appliquer-criter
 import {
     CATEGORIES,
     CODES_CATEGORIES,
+    CODES_MERITE,
     DEPARTAGE,
+    ecolesSurConcours,
     JEUX,
+    libelleMerites,
+    lignesCredits,
     MERITE_ADMISSION,
     placesCasSociaux,
     type CampagneCriteres,
     type GeneralApplique,
     type Jeu,
-    type MeriteAdmission,
     type PageCriteres,
     type PlacesCite,
     type Regles,
@@ -36,20 +39,17 @@ import {
 } from "@/components/campagnes/criteres";
 import { nomCampagne } from "@/components/campagnes/types";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
-import { ICON } from "@/components/layout/app-sidebar";
 import {
     ErreurGenerale,
     Note,
     PiedAssistant,
     Recap,
 } from "@/components/parametrage-hebergement/shared";
-import {
-    ChoiceCard,
-    ToggleCard,
-} from "@/components/parc-immobilier/form/inputs";
+import { ToggleCard } from "@/components/parc-immobilier/form/inputs";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -107,8 +107,8 @@ function etapesDuVolet(volet: Volet, droits: PageCriteres["droits"]): Etape[] {
             bloc: "regles",
             champs:
                 volet === "admission"
-                    ? ["recevabilite", "admission.merite", "admission.seuil_actif", "admission.seuil", "admission.age_actif"]
-                    : ["recevabilite", "readmission.loyers", "readmission.credits_actif", "readmission.conduite_actif", "readmission.conduite_note_min", "readmission.age_actif"],
+                    ? ["recevabilite", "admission.merite"]
+                    : ["recevabilite", "readmission.loyers", "readmission.credits", "readmission.conduite_actif", "readmission.conduite_note_min", "readmission.age_actif"],
         });
         liste.push({
             cle: "classement",
@@ -138,7 +138,9 @@ function etapesDuVolet(volet: Volet, droits: PageCriteres["droits"]): Etape[] {
 /**
  * Définition des critères d'un volet (admission ou réadmission) d'une campagne, en deux niveaux : critères de rejet
  * (un candidat qui n'en remplit pas un n'est pas classé), puis critères de classement de la liste provisoire.
- * Les crédits par filière, les rangs, les quotas et l'âge maximum par niveau viennent du paramétrage général.
+ * Les crédits par filière (et écoles sur concours) sont propres à la réadmission et se règlent dans ses critères de
+ * rejet. Les rangs, les quotas et l'âge maximum par niveau viennent du paramétrage général (en admission, l'âge
+ * maximum s'applique toujours ; il n'a pas de case propre).
  * L'enregistrement crée un brouillon, appliqué ou non.
  */
 export function CriteresFormulaire(props: PageCriteres) {
@@ -186,10 +188,28 @@ function Assistant({
         handleSubmit,
         formState: { errors, isSubmitting },
     } = useForm<CriteresFormInput, unknown, CriteresFormOutput>({
-        resolver: zodResolver(criteresSchema),
+        // Seul le bloc du volet est validé : l'autre peut exister partiellement dans les valeurs (voir `exceptions`).
+        resolver: (valeurs, contexteResolver, options) =>
+            zodResolver(criteresSchema)(
+                volet === "admission"
+                    ? { ...valeurs, readmission: undefined }
+                    : { ...valeurs, admission: undefined },
+                contexteResolver,
+                options,
+            ),
         mode: "onTouched",
         defaultValues: valeursDepart,
     });
+    // Seuils de crédits propres à une filière (réadmission) ; sans objet en admission.
+    const exceptions = useFieldArray({
+        control,
+        name: "readmission.credits.filieres",
+    });
+    // Libellé seul : le code de la filière n'est pas affiché sous son nom.
+    const optionsFilieres = useMemo(
+        () => filieres.map(({ value, label }) => ({ value, label })),
+        [filieres],
+    );
 
     const capacites = useMemo(
         () =>
@@ -308,9 +328,11 @@ function Assistant({
                     (objet as Record<string, unknown> | undefined)?.[cle],
                 errors,
             ) as { message?: string } | undefined;
-    const readmission = valeurs.readmission;
-    const admission = valeurs.admission;
-    const merite: MeriteAdmission = admission?.merite ?? "moyenne_bac_desc";
+    // Bloc du volet uniquement : en admission, le tableau des filières (`useFieldArray`) crée
+    // `readmission.credits.filieres` dans les valeurs dès la première validation, sans le reste du bloc.
+    const readmission =
+        volet === "readmission" ? valeurs.readmission : undefined;
+    const admission = volet === "admission" ? valeurs.admission : undefined;
 
     /** Champ numérique avec unité, enregistré dans le formulaire. */
     const champNombre = (
@@ -415,15 +437,6 @@ function Assistant({
                             : "Les critères sont paramétrés par la S/DAL : vous les consultez en lecture seule."}
                     </Note>
                 )}
-                {general && general.etat !== "en_vigueur" && courante.bloc === "regles" && (
-                    <Note icone={<TriangleAlert />} ton="attention">
-                        Le paramétrage général n’est pas encore appliqué : les
-                        valeurs rappelées ci-dessous sont celles{" "}
-                        {general.etat === "brouillon" ? "du brouillon" : "du modèle CROU"}.
-                        Appliquez-le avant ces critères.
-                    </Note>
-                )}
-
                 <fieldset
                     disabled={!editable(courante.bloc) || isSubmitting}
                     className="min-w-0 space-y-6"
@@ -459,9 +472,120 @@ function Assistant({
                                 </div>
                             )}
                             {interrupteur(
-                                "readmission.credits_actif",
+                                "readmission.credits.actif",
                                 "Pourcentage de crédits validés",
-                                "Pourcentages définis dans le paramétrage général.",
+                            )}
+                            {readmission.credits.actif && (
+                                <div className="space-y-3">
+                                    <div className="md:max-w-xs">
+                                        {champNombre(
+                                            "readmission.credits.seuil_defaut",
+                                            "Pourcentage de crédits par filière",
+                                            "%",
+                                            {
+                                                requis: true,
+                                                aide: "100 % = 60 crédits sur 60.",
+                                            },
+                                        )}
+                                    </div>
+                                    {exceptions.fields.length > 0 && (
+                                        <ul className="space-y-3">
+                                            {exceptions.fields.map(
+                                                (ligne, index) => {
+                                                    const idFiliere = `cr-${volet}-filiere-${index}`;
+                                                    const messageFiliere = erreur(
+                                                        `readmission.credits.filieres.${index}.filiere_id`,
+                                                    )?.message;
+                                                    return (
+                                                        <li
+                                                            key={ligne.id}
+                                                            className="grid grid-cols-1 items-start gap-x-4 gap-y-3 rounded-brand border p-3 md:grid-cols-[minmax(0,1fr)_160px_auto]"
+                                                        >
+                                                            <Field
+                                                                id={idFiliere}
+                                                                label="Filière"
+                                                                required
+                                                                error={
+                                                                    messageFiliere
+                                                                }
+                                                            >
+                                                                <Controller
+                                                                    control={
+                                                                        control
+                                                                    }
+                                                                    name={`readmission.credits.filieres.${index}.filiere_id`}
+                                                                    render={({
+                                                                        field,
+                                                                    }) => (
+                                                                        <Combobox
+                                                                            id={
+                                                                                idFiliere
+                                                                            }
+                                                                            value={
+                                                                                field.value ??
+                                                                                ""
+                                                                            }
+                                                                            onChange={
+                                                                                field.onChange
+                                                                            }
+                                                                            onBlur={
+                                                                                field.onBlur
+                                                                            }
+                                                                            options={
+                                                                                optionsFilieres
+                                                                            }
+                                                                            placeholder="Choisir une filière…"
+                                                                            searchPlaceholder="Rechercher une filière…"
+                                                                            emptyMessage="Aucune filière trouvée."
+                                                                            invalid={
+                                                                                !!messageFiliere
+                                                                            }
+                                                                        />
+                                                                    )}
+                                                                />
+                                                            </Field>
+                                                            {champNombre(
+                                                                `readmission.credits.filieres.${index}.seuil`,
+                                                                "Crédits exigés",
+                                                                "%",
+                                                                { requis: true },
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                aria-label="Retirer cette filière"
+                                                                onClick={() =>
+                                                                    exceptions.remove(
+                                                                        index,
+                                                                    )
+                                                                }
+                                                                className="inline-flex size-10 cursor-pointer items-center justify-center self-end rounded-brand text-red-600 transition-colors hover:bg-red-50"
+                                                            >
+                                                                <Trash2
+                                                                    className="size-4"
+                                                                    aria-hidden
+                                                                />
+                                                            </button>
+                                                        </li>
+                                                    );
+                                                },
+                                            )}
+                                        </ul>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            exceptions.append({
+                                                filiere_id: "",
+                                                seuil: "80",
+                                                concours: true,
+                                            })
+                                        }
+                                        className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-brand border border-dashed px-4 text-sm text-primary transition-colors hover:bg-soft"
+                                    >
+                                        <Plus className="size-4" aria-hidden />{" "}
+                                        Ajouter un seuil propre à une filière
+                                    </button>
+                                </div>
                             )}
                             {interrupteur(
                                 "readmission.conduite_actif",
@@ -478,7 +602,6 @@ function Assistant({
                                             requis: true,
                                             decimal: true,
                                             placeholder: "Ex. 10",
-                                            aide: "En dessous de cette note, la demande est rejetée.",
                                         },
                                     )}
                                 </div>
@@ -500,65 +623,58 @@ function Assistant({
                             <Titre aide="Un candidat qui ne remplit pas l’un de ces critères est rejeté : il n’est pas classé.">
                                 Critères de rejet de l’admission
                             </Titre>
-                            <Field
-                                id={`cr-${volet}-merite`}
-                                label="Critère de mérite"
-                                hint="Sert au seuil de rejet et au classement."
-                            >
-                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                    {(
-                                        Object.keys(
-                                            MERITE_ADMISSION,
-                                        ) as MeriteAdmission[]
-                                    ).map((valeur) => (
-                                        <ChoiceCard
-                                            key={valeur}
-                                            name="merite_admission"
-                                            value={valeur}
-                                            selected={merite === valeur}
-                                            onSelect={() =>
-                                                setValue(
-                                                    "admission.merite",
-                                                    valeur,
-                                                    { shouldDirty: true },
-                                                )
-                                            }
-                                            title={MERITE_ADMISSION[valeur].label}
-                                            description={
-                                                valeur === "moyenne_bac_desc"
-                                                    ? "Note obtenue au baccalauréat, sur 20."
-                                                    : "Crédits validés à l’université."
-                                            }
-                                            icon={
-                                                <GraduationCap
-                                                    {...ICON}
-                                                    aria-hidden
+                            <div className="space-y-2">
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                    {CODES_MERITE.map((code) => {
+                                        const info = MERITE_ADMISSION[code];
+                                        const m = admission.merite[code];
+                                        return (
+                                            <div
+                                                key={code}
+                                                className="space-y-3"
+                                            >
+                                                <Controller
+                                                    control={control}
+                                                    name={`admission.merite.${code}.actif`}
+                                                    render={({ field }) => (
+                                                        <ToggleCard
+                                                            checked={!!field.value}
+                                                            onChange={(coche) => {
+                                                                field.onChange(coche);
+                                                                void trigger("admission.merite");
+                                                            }}
+                                                            label={info.label}
+                                                            description={info.description}
+                                                        />
+                                                    )}
                                                 />
-                                            }
-                                        />
-                                    ))}
+                                                {m.actif &&
+                                                    champNombre(
+                                                        `admission.merite.${code}.seuil`,
+                                                        info.seuil,
+                                                        info.unite,
+                                                        {
+                                                            requis: true,
+                                                            decimal: true,
+                                                        },
+                                                    )}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
-                            </Field>
-                            {interrupteur(
-                                "admission.seuil_actif",
-                                `Exiger un minimum (${MERITE_ADMISSION[merite].label.toLowerCase()})`,
-                                "Sinon : « Non recevable – seuil minimum non atteint ».",
-                            )}
-                            {admission.seuil_actif && (
-                                <div className="md:max-w-xs">
-                                    {champNombre(
-                                        "admission.seuil",
-                                        MERITE_ADMISSION[merite].seuil,
-                                        MERITE_ADMISSION[merite].unite,
-                                        { requis: true, decimal: true },
-                                    )}
-                                </div>
-                            )}
-                            {interrupteur(
-                                "admission.age_actif",
-                                "Âge maximum par niveau",
-                                "Âges définis dans le paramétrage général.",
-                            )}
+                                {(erreur("admission.merite")?.message ??
+                                    erreur("admission.merite.root")
+                                        ?.message) && (
+                                    <p
+                                        role="alert"
+                                        className="text-xs font-medium text-red-600"
+                                    >
+                                        {erreur("admission.merite")?.message ??
+                                            erreur("admission.merite.root")
+                                                ?.message}
+                                    </p>
+                                )}
+                            </div>
                             {interrupteur(
                                 "recevabilite.internationaux",
                                 "Ouvert aux étudiants internationaux",
@@ -572,7 +688,12 @@ function Assistant({
                             <Titre>
                                 Catégories prioritaires
                             </Titre>
-                            <CategoriesAppliquees general={general} />
+                            <CategoriesAppliquees
+                                general={general}
+                                ecolesConcours={ecolesSurConcours(
+                                    readmission.credits.filieres,
+                                )}
+                            />
                             {interrupteur(
                                 "classement.priorite_boursiers",
                                 "Priorité aux boursiers",
@@ -590,21 +711,12 @@ function Assistant({
                             <Titre aide="Clé de classement des recevables : mérite, puis départage dans l’ordre ci-dessous.">
                                 Critères de classement de l’admission
                             </Titre>
-                            <Recap
-                                lignes={[
-                                    {
-                                        label: "1. Mérite",
-                                        valeur: `${MERITE_ADMISSION[merite].label} (décroissant)`,
-                                    },
-                                ]}
-                            />
                             <div className="md:max-w-xs">
                                 <Field
                                     id={`cr-${volet}-ville_bac`}
                                     label="Ville de référence du baccalauréat"
                                     required
                                     error={erreur("admission.ville_bac")?.message}
-                                    hint="Un bac obtenu hors de cette ville est prioritaire."
                                 >
                                     <Input
                                         id={`cr-${volet}-ville_bac`}
@@ -634,10 +746,9 @@ function Assistant({
                                         [
                                             "date_liste_provisoire",
                                             "Génération de la liste provisoire",
-                                            "Défaut : à la clôture des dépôts.",
                                         ],
                                     ] as const
-                                ).map(([cle, label, aide]) => (
+                                ).map(([cle, label]) => (
                                     <Field
                                         key={cle}
                                         id={`cr-${volet}-${cle}`}
@@ -645,7 +756,6 @@ function Assistant({
                                         error={
                                             erreur(`calendrier.${cle}`)?.message
                                         }
-                                        hint={aide}
                                     >
                                         <Controller
                                             control={control}
@@ -742,7 +852,7 @@ function Assistant({
                                                       valeur: [
                                                           readmission.loyers.actif &&
                                                               `${readmission.loyers.mois_exiges} mois de loyer soldés`,
-                                                          readmission.credits_actif &&
+                                                          readmission.credits.actif &&
                                                               "crédits validés",
                                                           readmission.conduite_actif &&
                                                               `conduite ≥ ${readmission.conduite_note_min || "—"} pts`,
@@ -753,6 +863,17 @@ function Assistant({
                                                           .join(" · ") ||
                                                           "Aucun critère",
                                                   },
+                                                  ...(readmission.credits.actif
+                                                      ? lignesCredits(
+                                                            readmission.credits,
+                                                            filieres,
+                                                        ).map(
+                                                            ([filiere, seuil]) => ({
+                                                                label: `Crédits · ${filiere}`,
+                                                                valeur: seuil,
+                                                            }),
+                                                        )
+                                                      : []),
                                                   {
                                                       label: "Priorité boursiers",
                                                       valeur: valeurs.classement
@@ -767,20 +888,22 @@ function Assistant({
                                                   {
                                                       label: "Rejet",
                                                       valeur: [
-                                                          admission.seuil_actif &&
-                                                              `${MERITE_ADMISSION[merite].seuil.toLowerCase()} : ${admission.seuil} ${MERITE_ADMISSION[merite].unite}`,
-                                                          admission.age_actif &&
-                                                              "âge maximum",
-                                                      ]
-                                                          .filter(Boolean)
-                                                          .join(" · ") ||
-                                                          "Aucun critère",
+                                                          ...CODES_MERITE.filter(
+                                                              (code) =>
+                                                                  admission.merite[code].actif &&
+                                                                  admission.merite[code].seuil.trim() !== "",
+                                                          ).map(
+                                                              (code) =>
+                                                                  `${MERITE_ADMISSION[code].seuil.toLowerCase()} : ${admission.merite[code].seuil} ${MERITE_ADMISSION[code].unite}`,
+                                                          ),
+                                                          "âge maximum (paramétrage général)",
+                                                      ].join(" · "),
                                                   },
                                                   {
                                                       label: "Mérite",
-                                                      valeur: MERITE_ADMISSION[
-                                                          merite
-                                                      ].label,
+                                                      valeur: libelleMerites(
+                                                          admission.merite,
+                                                      ),
                                                   },
                                                   {
                                                       label: "Ville du bac",
@@ -884,13 +1007,25 @@ export function ApplicationCriteres({
     );
 }
 
-/** Catégories de réadmission déduites du paramétrage général (lecture seule). */
-function CategoriesAppliquees({ general }: { general: GeneralApplique | null }) {
+/**
+ * Catégories de réadmission (lecture seule) : C2 à C5 selon le paramétrage général, C1 selon les écoles sur concours
+ * saisies dans les crédits de réadmission.
+ */
+function CategoriesAppliquees({
+    general,
+    ecolesConcours,
+}: {
+    general: GeneralApplique | null;
+    ecolesConcours: boolean;
+}) {
     if (!general) return null;
     return (
         <ol className="divide-y rounded-brand border">
             {CODES_CATEGORIES.map((code) => {
-                const actif = general.categories[code].actif;
+                const actif =
+                    code === "C1"
+                        ? ecolesConcours
+                        : general.categories[code].actif;
                 return (
                     <li
                         key={code}

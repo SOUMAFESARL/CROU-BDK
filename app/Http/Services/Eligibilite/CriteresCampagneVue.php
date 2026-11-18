@@ -78,7 +78,7 @@ class CriteresCampagneVue
     /**
      * Niveau d'un jeu (general, admission, readmission) : assistant prérempli (brouillon, version en vigueur
      * ou modèle CROU), version en vigueur détaillée et historique des versions. Un volet reçoit aussi le paramétrage
-     * général qu'il applique (crédits, âges, catégories).
+     * général qu'il applique (âges, catégories).
      */
     public function page(Campagne $campagne, string $volet, User $admin): array
     {
@@ -126,7 +126,8 @@ class CriteresCampagneVue
                 'motif' => $regles->motif,
             ])->values()->all(),
             'general' => $volet !== 'general' && $droits['voirRegles'] ? $this->general($campagne) : null,
-            'filieres' => $volet === 'admission' ? [] : $this->filieres(),
+            // Filières : seuils de crédits propres à une filière (réadmission seulement).
+            'filieres' => $volet === 'readmission' ? $this->filieres() : [],
             'niveauxEtude' => $this->niveauxEtude(),
             // Réadmission : note de conduite initiale (paramétrage des sanctions), maximum de la note minimale exigée.
             'noteConduite' => $volet === 'readmission' ? app(\App\Http\Services\CatalogueSanctions::class)->noteInitiale() : null,
@@ -188,7 +189,8 @@ class CriteresCampagneVue
         return [
             'etat' => $vigueur ? 'en_vigueur' : ($this->criteres->brouillon($campagne, 'general') ? 'brouillon' : 'a_parametrer'),
             'regles' => $regles,
-            'categories' => $this->criteres->categories($regles),
+            // C1 dépend des écoles sur concours des crédits de réadmission (brouillon, sinon en vigueur).
+            'categories' => $this->criteres->categories($regles, $this->criteres->reglesCourantes($campagne, 'readmission')),
         ];
     }
 

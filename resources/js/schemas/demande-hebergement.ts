@@ -23,7 +23,7 @@ const nombre = (min: number, max: number | null, message: string, obligatoire?: 
 const extension = (nom: string) => nom.split('.').pop()?.toLowerCase() ?? '';
 
 /** Pièce jointe : présence (si requise), taille et format attendus par la campagne. */
-const fichier = (document: DocumentDemande) =>
+export const fichier = (document: DocumentDemande) =>
     z
         .custom<File | null>((valeur) => valeur === null || valeur instanceof File)
         .refine((valeur) => !document.requis || valeur !== null, 'Ce document est obligatoire.')
@@ -82,7 +82,6 @@ export const demandeHebergementSchema = (documents: DocumentDemande[], terminale
         // Documents et engagement
         documents: z.object(Object.fromEntries(documents.map((document) => [document.slug, fichier(document)]))),
         certifie: z.boolean().refine((valeur) => valeur, "Vous devez certifier l'exactitude des informations."),
-        save_as_draft: z.boolean(),
     }).superRefine((donnees, ctx) => {
         // Rien à contrôler tant que le niveau précédent n'est pas choisi (les champs ne sont pas encore affichés).
         if (donnees.niveau_precedent === '') return;
@@ -116,5 +115,5 @@ export const CHAMPS_ETAPE: (keyof DemandeHebergement)[][] = [
     ['matricule', 'niveau_precedent', 'niveau', 'filiere', 'moyenne', 'credit_valider', 'ville_bac'],
     ['boursier'],
     ['region', 'ville', 'adresse', 'distance'],
-    ['documents', 'certifie', 'save_as_draft'],
+    ['documents', 'certifie'],
 ];

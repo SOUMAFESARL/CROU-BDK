@@ -1,17 +1,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
-import {
-    Controller,
-    useFieldArray,
-    useForm,
-    type Control,
-    type Path,
-} from "react-hook-form";
-import {
-    lignesCredits,
-    type PageGeneral,
-} from "@/components/campagnes/criteres";
+import { Controller, useForm, type Control, type Path } from "react-hook-form";
+import { type PageGeneral } from "@/components/campagnes/criteres";
 import { CartesAges } from "@/components/campagnes/cartes-ages";
 import {
     ApplicationCriteres,
@@ -26,7 +17,6 @@ import {
     Recap,
 } from "@/components/parametrage-hebergement/shared";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Combobox } from "@/components/ui/combobox";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Stepper } from "@/components/ui/stepper";
@@ -35,28 +25,38 @@ import { cn } from "@/lib/utils";
 import {
     generalAEnvoyer,
     generalSchema,
-    reglesCroiseesGenerales,
     valeursGenerales,
     type GeneralFormInput,
     type GeneralFormOutput,
 } from "@/schemas/criteres-campagne";
 
-type Etape = { label: string; champs: Path<GeneralFormInput>[] };
+type Etape = {
+    cle: "rangs" | "ages" | "verification";
+    label: string;
+    champs: Path<GeneralFormInput>[];
+};
 
 const ETAPES: Etape[] = [
-    { label: "Crédits par filière", champs: ["credits"] },
     {
+        cle: "rangs",
         label: "Rangs et quotas",
         champs: ["rang_filiere", "clubs", "cas_sociaux", "comite"],
     },
-    { label: "Âge maximum", champs: ["age_max"] },
-    { label: "Vérification", champs: [] },
+    { cle: "ages", label: "Âge maximum", champs: ["age_max"] },
+    { cle: "verification", label: "Vérification", champs: [] },
 ];
 
 /**
- * Paramétrage général de la campagne, préalable aux critères d'admission et de réadmission : pourcentage de crédits
- * par filière (et écoles sur concours), rang par filière, rang des clubs et associations, cas sociaux, comité des
- * résidents et âge maximum par niveau d'études.
+ * Étapes selon les volets de la campagne : les rangs et quotas (catégories C2 à C5) ne concernent que la réadmission
+ * et sont sans objet pour une campagne d'admission seule (leurs valeurs enregistrées sont conservées, non affichées).
+ */
+const etapesDe = (readmission: boolean) =>
+    readmission ? ETAPES : ETAPES.filter((e) => e.cle !== "rangs");
+
+/**
+ * Paramétrage général de la campagne, préalable aux critères d'admission et de réadmission : rang par filière, rang
+ * des clubs et associations, cas sociaux, comité des résidents et âge maximum par niveau d'études. Les crédits par
+ * filière, propres à la réadmission, se règlent dans ses critères de rejet.
  */
 export function CriteresGenerauxFormulaire(props: PageGeneral) {
     const { campagne, etat, source } = props;
@@ -73,12 +73,14 @@ function Assistant({
     droits,
     regles,
     source,
-    filieres,
     niveauxEtude,
     urls,
 }: PageGeneral) {
     const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
     const [etape, setEtape] = useState(0);
+    const readmission = campagne.volets.readmission;
+    const etapes = useMemo(() => etapesDe(readmission), [readmission]);
+    const courante = etapes[etape];
     const valeursDepart = useMemo(
         () => valeursGenerales(regles, niveauxEtude, droits.configurerRegles),
         [regles, niveauxEtude, droits.configurerRegles],
@@ -89,7 +91,6 @@ function Assistant({
         trigger,
         watch,
         setValue,
-        getValues,
         setError,
         reset,
         handleSubmit,
@@ -99,7 +100,6 @@ function Assistant({
         mode: "onTouched",
         defaultValues: valeursDepart,
     });
-    const exceptions = useFieldArray({ control, name: "credits.filieres" });
     const editable = !!urls.submit && droits.configurerRegles;
     const couvre = (e: Etape, cle: string) =>
         e.champs.some(
@@ -108,20 +108,7 @@ function Assistant({
 
     const validerEtape = async (index: number) => {
         if (!editable) return true;
-        const e = ETAPES[index];
-        let ok = await trigger(e.champs, { shouldFocus: true });
-        Object.entries(reglesCroiseesGenerales(getValues())).forEach(
-            ([cle, message]) => {
-                if (couvre(e, cle)) {
-                    setError(cle as Path<GeneralFormInput>, {
-                        type: "croisee",
-                        message,
-                    });
-                    ok = false;
-                }
-            },
-        );
-        return ok;
+        return trigger(etapes[index].champs, { shouldFocus: true });
     };
 
     const allerA = async (cible: number) => {
@@ -135,11 +122,11 @@ function Assistant({
     };
 
     const repartirErreurs = (erreurs: Record<string, string>) => {
-        let premiere = ETAPES.length;
+        let premiere = etapes.length;
         const autres: string[] = [];
         Object.entries(erreurs).forEach(([cle, message]) => {
             const champ = cle.replace(/^regles\./, "");
-            const index = ETAPES.findIndex((e) => couvre(e, champ));
+            const index = etapes.findIndex((e) => couvre(e, champ));
             if (index >= 0) {
                 setError(champ as Path<GeneralFormInput>, {
                     type: "server",
@@ -151,7 +138,7 @@ function Assistant({
             }
         });
         setErreurGenerale(autres[0] ?? null);
-        if (premiere < ETAPES.length) setEtape(premiere);
+        if (premiere < etapes.length) setEtape(premiere);
     };
 
     const enregistrer = async (valeurs: GeneralFormOutput) => {
@@ -167,7 +154,7 @@ function Assistant({
     };
 
     const valeurs = watch();
-    const derniere = etape === ETAPES.length - 1;
+    const derniere = etape === etapes.length - 1;
     const erreur = (chemin: string) =>
         chemin
             .split(".")
@@ -176,11 +163,6 @@ function Assistant({
                     (objet as Record<string, unknown> | undefined)?.[cle],
                 errors,
             ) as { message?: string } | undefined;
-    // Libellé seul : le code de la filière n'est pas affiché sous son nom.
-    const optionsFilieres = useMemo(
-        () => filieres.map(({ value, label }) => ({ value, label })),
-        [filieres],
-    );
     const nomNiveau = (code: string) =>
         niveauxEtude.find((n) => n.value === code)?.label ?? code;
 
@@ -223,7 +205,7 @@ function Assistant({
                     await allerA(etape + 1);
                     return;
                 }
-                for (let index = 0; index < ETAPES.length - 1; index++) {
+                for (let index = 0; index < etapes.length - 1; index++) {
                     if (!(await validerEtape(index))) {
                         setEtape(index);
                         return;
@@ -237,9 +219,9 @@ function Assistant({
             }}
         >
             <Stepper
-                steps={ETAPES.map((e) => e.label)}
+                steps={etapes.map((e) => e.label)}
                 current={etape}
-                reached={ETAPES.length - 1}
+                reached={etapes.length - 1}
                 onStepClick={(index) => void allerA(index)}
                 className="overflow-x-auto"
             />
@@ -265,107 +247,7 @@ function Assistant({
                     disabled={!editable || isSubmitting}
                     className="min-w-0 space-y-6"
                 >
-                    {etape === 0 && (
-                        <>
-                            <div className="md:max-w-xs">
-                                {champNombre(
-                                    "credits.seuil_defaut",
-                                    "Pourcentage de crédits par filière",
-                                    "%",
-                                    {
-                                        requis: true,
-                                        aide: "100 % = 60 crédits sur 60.",
-                                    },
-                                )}
-                            </div>
-                            {exceptions.fields.length > 0 && (
-                                <ul className="space-y-3">
-                                    {exceptions.fields.map((ligne, index) => {
-                                        const idFiliere = `cr-general-filiere-${index}`;
-                                        const messageFiliere = erreur(
-                                            `credits.filieres.${index}.filiere_id`,
-                                        )?.message;
-                                        return (
-                                            <li
-                                                key={ligne.id}
-                                                className="grid grid-cols-1 items-start gap-x-4 gap-y-3 rounded-brand border p-3 md:grid-cols-[minmax(0,1fr)_160px_auto]"
-                                            >
-                                                <Field
-                                                    id={idFiliere}
-                                                    label="Filière"
-                                                    required
-                                                    error={messageFiliere}
-                                                >
-                                                    <Controller
-                                                        control={control}
-                                                        name={`credits.filieres.${index}.filiere_id`}
-                                                        render={({ field }) => (
-                                                            <Combobox
-                                                                id={idFiliere}
-                                                                value={
-                                                                    field.value
-                                                                }
-                                                                onChange={
-                                                                    field.onChange
-                                                                }
-                                                                onBlur={
-                                                                    field.onBlur
-                                                                }
-                                                                options={
-                                                                    optionsFilieres
-                                                                }
-                                                                placeholder="Choisir une filière…"
-                                                                searchPlaceholder="Rechercher une filière…"
-                                                                emptyMessage="Aucune filière trouvée."
-                                                                invalid={
-                                                                    !!messageFiliere
-                                                                }
-                                                            />
-                                                        )}
-                                                    />
-                                                </Field>
-                                                {champNombre(
-                                                    `credits.filieres.${index}.seuil`,
-                                                    "Crédits exigés",
-                                                    "%",
-                                                    { requis: true },
-                                                )}
-                                                <button
-                                                    type="button"
-                                                    aria-label="Retirer cette filière"
-                                                    onClick={() =>
-                                                        exceptions.remove(index)
-                                                    }
-                                                    className="inline-flex size-10 cursor-pointer items-center justify-center self-end rounded-brand text-red-600 transition-colors hover:bg-red-50"
-                                                >
-                                                    <Trash2
-                                                        className="size-4"
-                                                        aria-hidden
-                                                    />
-                                                </button>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            )}
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    exceptions.append({
-                                        filiere_id: "",
-                                        seuil: "80",
-                                        concours: true,
-                                    })
-                                }
-                                className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-brand border border-dashed px-4 text-sm text-primary transition-colors hover:bg-soft"
-                            >
-                                <Plus className="size-4" aria-hidden /> Ajouter
-                                un seuil propre à une filière
-                            </button>
-                        </>
-                    )}
-
-                    {etape === 1 && (
+                    {courante.cle === "rangs" && (
                         <>
                             <Titre aide="Catégories prioritaires de la réadmission. Décochez une catégorie pour la désactiver.">
                                 Rangs et places réservées
@@ -439,7 +321,7 @@ function Assistant({
                         </>
                     )}
 
-                    {etape === 2 && (
+                    {courante.cle === "ages" && (
                         <>
                             <Titre>
                                 Âge maximum par niveau d’études
@@ -467,20 +349,7 @@ function Assistant({
 
                     {derniere && (
                         <div className="space-y-4">
-                            <div className="space-y-2">
-                                <p className="text-sm text-muted">
-                                    Crédits exigés
-                                </p>
-                                <Recap
-                                    lignes={lignesCredits(
-                                        valeurs.credits,
-                                        filieres,
-                                    ).map(([label, valeur]) => ({
-                                        label,
-                                        valeur,
-                                    }))}
-                                />
-                            </div>
+                            {readmission && (
                             <Recap
                                 lignes={[
                                     {
@@ -509,6 +378,7 @@ function Assistant({
                                     },
                                 ]}
                             />
+                            )}
                             <div className="space-y-2">
                                 <p className="text-sm text-muted">
                                     Âge maximum par niveau

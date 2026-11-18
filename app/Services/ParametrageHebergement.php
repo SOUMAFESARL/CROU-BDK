@@ -86,11 +86,12 @@ class ParametrageHebergement
         return $campagnes->first(fn (Campagne $c) => (string) $c->getKey() === $id) ?? $campagnes->first();
     }
 
-    /** @return list<array{id: string, annee: string|null, description: string|null, statut: string|null}> */
+    /** @return list<array{id: string, libelle: string|null, annee: string|null, description: string|null, statut: string|null}> */
     public function options(Collection $campagnes): array
     {
         return $campagnes->map(fn (Campagne $c) => [
             'id' => (string) $c->getKey(),
+            'libelle' => $c->libelle,
             'annee' => $c->annee_campagne,
             'description' => $c->description,
             'statut' => $c->statut,

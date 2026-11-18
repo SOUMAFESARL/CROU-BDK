@@ -20,11 +20,10 @@ use Illuminate\Validation\ValidationException;
 /**
  * Critères d'une campagne, en trois jeux versionnés séparément (docs/notes/eligibilite-criteres-campagne.md) :
  *
- * 1. le **paramétrage général** (`general`), commun aux deux volets et préalable à leur application : crédits exigés
- *    par filière (et écoles sur concours), rang par filière, rang des clubs et associations, cas sociaux, comité des
- *    résidents, âge maximum par niveau d'études ;
+ * 1. le **paramétrage général** (`general`), commun aux deux volets et préalable à leur application : rang par
+ *    filière, rang des clubs et associations, cas sociaux, comité des résidents, âge maximum par niveau d'études ;
  * 2. les critères d'**admission** (nouveaux étudiants) ;
- * 3. les critères de **réadmission** (anciens résidents).
+ * 3. les critères de **réadmission** (anciens résidents), dont les crédits exigés par filière (et écoles sur concours).
  *
  * Chaque volet a deux niveaux : critères de **rejet** (un candidat qui n'en remplit pas un n'est pas classé) puis
  * critères de **classement** de la liste provisoire.
@@ -48,6 +47,9 @@ class CriteresCampagne
 
     /** Identifiants des niveaux sans âge maximum, calculés une fois par requête. */
     private ?array $niveauxSansAgeMax = null;
+
+    /** Crédits enregistrés dans le paramétrage général par les anciennes versions, par campagne (lus une fois par requête). */
+    private array $creditsGenerauxAnciens = [];
 
     /** Catégories de réadmission, dans l'ordre de la cascade (un candidat est retenu dans la première qui le retient). */
     public const CATEGORIES = [
@@ -97,11 +99,18 @@ class CriteresCampagne
 
     public const BASES_C4 = ['places_readmission_cite', 'capacite_cite'];
 
-    /** Mérite des nouveaux étudiants : note du baccalauréat (sur 20) ou nombre de crédits. */
+    /**
+     * Mérites des nouveaux étudiants, cumulables : note du baccalauréat (sur 400) pour les nouveaux bacheliers
+     * (Licence 1, venant de la Terminale), nombre de crédits validés (sur 60) de la Licence 2 au doctorat. Chacun a
+     * son seuil de rejet, obligatoire quand le mérite est retenu.
+     */
     public const MERITE_ADMISSION = ['moyenne_bac_desc', 'credits_desc'];
 
-    /** Bornes du seuil de rejet en admission selon le mérite retenu. */
-    public const SEUIL_MAX_ADMISSION = ['moyenne_bac_desc' => 20, 'credits_desc' => 360];
+    /** Bornes du seuil de rejet en admission selon le mérite. */
+    public const SEUIL_MAX_ADMISSION = ['moyenne_bac_desc' => 400, 'credits_desc' => 60];
+
+    /** Les anciennes versions notaient le bac sur 20 : facteur de conversion vers la note sur 400. */
+    private const FACTEUR_BAC_ANCIEN = 20;
 
     /**
      * Conditions financières du modèle CROU, par volet (en nombre de mois de loyer) : caution et avance exigées à
@@ -123,9 +132,6 @@ class CriteresCampagne
     {
         if ($jeu === 'general') {
             return [
-                // Pourcentage des crédits de l'année exigé ; une filière peut avoir son propre seuil
-                // et être une école sur concours (réadmission d'office au-delà du seuil : catégorie C1).
-                'credits' => ['seuil_defaut' => 100, 'filieres' => []],
                 'rang_filiere' => ['actif' => true, 'n' => 5, 'groupe' => 'filiere_niveau'],
                 'clubs' => ['actif' => true, 'n' => 3],
                 'cas_sociaux' => ['actif' => true, 'taux' => 10, 'base' => 'places_readmission_cite'],
@@ -136,7 +142,8 @@ class CriteresCampagne
         }
 
         $recevabilite = [
-            'internationaux' => $campagne?->internationnaux === null ? true : (bool) $campagne->internationnaux,
+            // Les étudiants internationaux ne sont pas acceptés par défaut, dans les deux volets (case à cocher).
+            'internationaux' => false,
             'sanctions_bloquantes' => ['suspension', 'expulsion'],
         ];
 
@@ -145,11 +152,13 @@ class CriteresCampagne
                 'calendrier' => ['date_liste_provisoire' => null, 'delai_completude_jours' => 7],
                 'recevabilite' => $recevabilite,
                 'admission' => [
-                    'merite' => 'moyenne_bac_desc',
-                    // Rejet : note du bac (ou crédits) inférieure au seuil ; âge au-delà du maximum de son niveau.
-                    'seuil_actif' => true,
-                    'seuil' => 10,
-                    'age_actif' => true,
+                    // Mérites cumulables, chacun avec son seuil de rejet (à saisir quand il est vide) : note du bac sur 400
+                    // (Licence 1) et crédits validés sur 60 (Licence 2 au doctorat). L'âge maximum par niveau du paramétrage général
+                    // s'applique toujours (un niveau sans âge n'a pas de limite).
+                    'merite' => [
+                        'moyenne_bac_desc' => ['actif' => true, 'seuil' => 200],
+                        'credits_desc' => ['actif' => true, 'seuil' => null],
+                    ],
                     // Classement : un bac obtenu hors de cette ville est prioritaire.
                     'ville_bac' => 'Bondoukou',
                 ],
@@ -172,7 +181,9 @@ class CriteresCampagne
             // conduite et âge. Chacun de ces critères est désactivable.
             'readmission' => [
                 'loyers' => ['actif' => true, 'mois_exiges' => 10],
-                'credits_actif' => true,
+                // Pourcentage des crédits de l'année exigé ; une filière peut avoir son propre seuil
+                // et être une école sur concours (réadmission d'office au-delà du seuil : catégorie C1).
+                'credits' => ['actif' => true, 'seuil_defaut' => 100, 'filieres' => []],
                 // Conduite en cité : note de conduite (paramétrage des sanctions) au moins égale à `note_min`, sinon rejet
                 // (`NoteConduite::motifRejet`). Une sanction bloquante active (suspension, expulsion) bloque en outre le dossier.
                 'conduite' => ['actif' => true, 'note_min' => self::NOTE_CONDUITE_MIN_DEFAUT, 'sanctions' => ['suspension', 'expulsion']],
@@ -455,6 +466,12 @@ class CriteresCampagne
      */
     public function completer(string $jeu, array $parametres, ?Campagne $campagne = null): array
     {
+        if ($jeu === 'admission') {
+            $parametres = $this->meritesAnciens($parametres);
+        }
+        if ($jeu === 'readmission') {
+            $parametres = $this->creditsAnciens($parametres, $campagne);
+        }
         $resultat = $this->fusionner($this->modeleParDefaut($jeu, $campagne), $parametres);
 
         if ($jeu === 'general') {
@@ -462,8 +479,12 @@ class CriteresCampagne
 
             return $resultat;
         }
-        if ($jeu === 'admission' && ! in_array($resultat['admission']['merite'], self::MERITE_ADMISSION, true)) {
-            $resultat['admission']['merite'] = 'moyenne_bac_desc';
+        if ($jeu === 'admission') {
+            // Au moins un mérite reste actif.
+            $merites = $resultat['admission']['merite'];
+            if (! collect($merites)->contains(fn ($merite) => ! empty($merite['actif']))) {
+                $resultat['admission']['merite'] = $this->modeleParDefaut('admission', $campagne)['admission']['merite'];
+            }
         }
         if ($jeu === 'readmission') {
             // Priorité aux boursiers : oui (toujours devant les non-boursiers) ou non ; l'ancien « à mérite égal » vaut oui.
@@ -475,6 +496,95 @@ class CriteresCampagne
         $resultat['classement']['departage'] = $departage ?: self::DEPARTAGE_DEFAUT[$jeu];
 
         return $resultat;
+    }
+
+    /**
+     * Anciens formats de l'admission → un mérite par public `{actif, seuil}` :
+     * - un seul mérite `merite` + `seuil_actif` / `seuil` : le mérite choisi garde son seuil, l'autre prend le modèle
+     *   (un code inconnu laisse le modèle) ;
+     * - mérites avec `seuil_actif` : un seuil désactivé devient « aucun minimum ».
+     * Dans ces deux formats, la note du bac était sur 20 : elle est ramenée sur 400.
+     */
+    private function meritesAnciens(array $parametres): array
+    {
+        $ancien = $parametres['admission']['merite'] ?? null;
+        if (! isset($parametres['admission'])) {
+            return $parametres;
+        }
+        if (is_array($ancien)) {
+            foreach ($ancien as $code => $merite) {
+                if (is_array($merite) && array_key_exists('seuil_actif', $merite)) {
+                    $parametres['admission']['merite'][$code] = [
+                        'actif' => $merite['actif'] ?? true,
+                        'seuil' => $this->seuilAncien($code, $merite['seuil_actif'] ? ($merite['seuil'] ?? null) : null),
+                    ];
+                }
+            }
+
+            return $parametres;
+        }
+        $admission = $parametres['admission'];
+        unset($admission['merite'], $admission['seuil_actif'], $admission['seuil'], $admission['age_actif']);
+        if (in_array($ancien, self::MERITE_ADMISSION, true)) {
+            $admission['merite'] = [$ancien => [
+                'actif' => true,
+                'seuil' => $this->seuilAncien($ancien, ($parametres['admission']['seuil_actif'] ?? false) ? ($parametres['admission']['seuil'] ?? null) : null),
+            ]];
+        }
+        $parametres['admission'] = $admission;
+
+        return $parametres;
+    }
+
+    /**
+     * Anciennes versions : les crédits exigés par filière étaient dans le paramétrage général et la réadmission ne
+     * portait que `credits_actif`. Le bloc `readmission.credits {actif, seuil_defaut, filieres}` est reconstitué avec
+     * les seuils du paramétrage général enregistré de la campagne (version en vigueur, sinon brouillon).
+     */
+    private function creditsAnciens(array $parametres, ?Campagne $campagne): array
+    {
+        if (is_array($parametres['readmission']['credits'] ?? null)) {
+            return $parametres;
+        }
+        $credits = $this->creditsGenerauxAnciens($campagne) ?? [];
+        if (array_key_exists('credits_actif', $parametres['readmission'] ?? [])) {
+            $credits['actif'] = (bool) $parametres['readmission']['credits_actif'];
+        }
+        if ($credits === []) {
+            return $parametres;
+        }
+        unset($parametres['readmission']['credits_actif']);
+        $parametres['readmission']['credits'] = $credits;
+
+        return $parametres;
+    }
+
+    /** Seuils de crédits d'un paramétrage général enregistré à l'ancien format (null s'il n'y en a pas). */
+    private function creditsGenerauxAnciens(?Campagne $campagne): ?array
+    {
+        if (! $campagne || ! Schema::hasTable('campagne_regles')) {
+            return null;
+        }
+        $cle = (string) $campagne->getKey();
+        if (! array_key_exists($cle, $this->creditsGenerauxAnciens)) {
+            $general = $this->enVigueur($campagne, 'general') ?? $this->brouillon($campagne, 'general');
+            $credits = $general?->parametres['credits'] ?? null;
+            $this->creditsGenerauxAnciens[$cle] = is_array($credits)
+                ? Arr::only($credits, ['seuil_defaut', 'filieres'])
+                : null;
+        }
+
+        return $this->creditsGenerauxAnciens[$cle];
+    }
+
+    /** Seuil d'une ancienne version : la note du bac passe de 20 à 400. */
+    private function seuilAncien(string $code, $seuil): int|float|null
+    {
+        if ($seuil === null || $seuil === '') {
+            return null;
+        }
+
+        return $code === 'moyenne_bac_desc' ? round((float) $seuil * self::FACTEUR_BAC_ANCIEN, 2) : $seuil;
     }
 
     /** Vrai si ce niveau d'études n'a pas d'âge maximum (Terminale). */
@@ -502,13 +612,13 @@ class CriteresCampagne
     }
 
     /**
-     * Catégories de réadmission en cascade, déduites du paramétrage général : C1 si au moins une filière est une école
-     * sur concours, C2 à C5 selon leur activation, C6 toujours.
+     * Catégories de réadmission en cascade : C1 si au moins une filière des crédits de réadmission est une école sur
+     * concours, C2 à C5 selon leur activation dans le paramétrage général, C6 toujours.
      */
-    public function categories(array $general): array
+    public function categories(array $general, array $readmission = []): array
     {
         $actif = [
-            'C1' => collect($general['credits']['filieres'] ?? [])->contains(fn ($f) => (bool) ($f['concours'] ?? false)),
+            'C1' => collect($readmission['readmission']['credits']['filieres'] ?? [])->contains(fn ($f) => (bool) ($f['concours'] ?? false)),
             'C2' => (bool) ($general['rang_filiere']['actif'] ?? false),
             'C3' => (bool) ($general['clubs']['actif'] ?? false),
             'C4' => (bool) ($general['cas_sociaux']['actif'] ?? false),
@@ -594,15 +704,6 @@ class CriteresCampagne
 
         if ($jeu === 'general') {
             return $this->completer($jeu, [
-                'credits' => [
-                    'seuil_defaut' => (int) $saisie['credits']['seuil_defaut'],
-                    'filieres' => collect($saisie['credits']['filieres'] ?? [])
-                        ->map(fn ($ligne) => [
-                            'filiere_id' => (string) $ligne['filiere_id'],
-                            'seuil' => (int) $ligne['seuil'],
-                            'concours' => (bool) ($ligne['concours'] ?? false),
-                        ])->unique('filiere_id')->values()->all(),
-                ],
                 'rang_filiere' => [
                     'actif' => (bool) $saisie['rang_filiere']['actif'],
                     'n' => (int) $saisie['rang_filiere']['n'],
@@ -639,7 +740,7 @@ class CriteresCampagne
         ];
 
         if ($jeu === 'admission') {
-            $seuil = $saisie['admission']['seuil'] ?? null;
+            $nombre = fn ($valeur) => $valeur === null || $valeur === '' ? null : round((float) $valeur, 2);
 
             return $this->completer($jeu, $commun + [
                 'calendrier' => [
@@ -647,10 +748,10 @@ class CriteresCampagne
                     'delai_completude_jours' => (int) $saisie['calendrier']['delai_completude_jours'],
                 ],
                 'admission' => [
-                    'merite' => $saisie['admission']['merite'],
-                    'seuil_actif' => (bool) $saisie['admission']['seuil_actif'],
-                    'seuil' => $seuil === null || $seuil === '' ? null : round((float) $seuil, 2),
-                    'age_actif' => (bool) $saisie['admission']['age_actif'],
+                    'merite' => collect(self::MERITE_ADMISSION)->mapWithKeys(fn (string $code) => [$code => [
+                        'actif' => (bool) $saisie['admission']['merite'][$code]['actif'],
+                        'seuil' => $nombre($saisie['admission']['merite'][$code]['seuil'] ?? null),
+                    ]])->all(),
                     'ville_bac' => trim((string) $saisie['admission']['ville_bac']),
                 ],
                 'classement' => $classement,
@@ -667,7 +768,16 @@ class CriteresCampagne
                     'actif' => (bool) $saisie['readmission']['loyers']['actif'],
                     'mois_exiges' => (int) $saisie['readmission']['loyers']['mois_exiges'],
                 ],
-                'credits_actif' => (bool) $saisie['readmission']['credits_actif'],
+                'credits' => [
+                    'actif' => (bool) $saisie['readmission']['credits']['actif'],
+                    'seuil_defaut' => (int) $saisie['readmission']['credits']['seuil_defaut'],
+                    'filieres' => collect($saisie['readmission']['credits']['filieres'] ?? [])
+                        ->map(fn ($ligne) => [
+                            'filiere_id' => (string) $ligne['filiere_id'],
+                            'seuil' => (int) $ligne['seuil'],
+                            'concours' => (bool) ($ligne['concours'] ?? false),
+                        ])->unique('filiere_id')->values()->all(),
+                ],
                 'conduite' => [
                     'actif' => (bool) $saisie['readmission']['conduite']['actif'],
                     'note_min' => ($note = $saisie['readmission']['conduite']['note_min'] ?? null) === null || $note === '' ? null : round((float) $note, 2),

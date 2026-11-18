@@ -53,11 +53,60 @@ type Derogation = {
     decider: string | null;
 };
 
+/** Informations saisies par l'étudiant, par étape du formulaire de demande (`CampagnesAdmissionController::profilDemande`). */
+type ProfilDemande = {
+    identite: {
+        civilite: string | null;
+        date_naissance: string | null;
+        lieu_naissance: string | null;
+        nationalite: string | null;
+        telephone1: string | null;
+        telephone2: string | null;
+        email1: string | null;
+        email2: string | null;
+        type_piece: string | null;
+        numero_piece: string | null;
+        date_expiration: string | null;
+        groupe_sanguin: string | null;
+    };
+    etudes: {
+        campagne: string | null;
+        niveau_precedent: string | null;
+        niveau: string | null;
+        redoublant: boolean | null;
+        /** Niveau précédent = Terminale : note au bac (/400) et ville du bac au lieu de la moyenne et des crédits. */
+        bachelier: boolean;
+        matricule: string | null;
+        filiere: string | null;
+        /** Moyenne enregistrée, sur 20 (note au bac ramenée sur 20 pour un nouveau bachelier). */
+        moyenne: number | null;
+        note_bac: number | null;
+        credits: number | null;
+        credits_max: number;
+        ville_bac: string | null;
+    };
+    situation: { boursier: boolean; observations: string | null };
+    adresse: { region: string | null; ville: string | null; adresse: string | null; distance: number | null };
+};
+
 type Props = {
     etudiant: { id: string; name: string; matricule: string | null; statut_inscription: string | null; is_validation: boolean; is_rejet: boolean };
     demande: { id: string; numero: string | null; etat: string | null; date: string | null } | null;
     discipline: { label: string; bloquant: boolean } | null;
-    eligibilite: { campagne: string | null; regles: Regle[]; conformes: number; score: number } | null;
+    /** Critères de rejet du volet de la demande, comparés aux valeurs saisies (`ConformiteDemande`). */
+    eligibilite: {
+        volet: 'admission' | 'readmission';
+        volet_libelle: string;
+        campagne: string | null;
+        /** `en_vigueur` : critères appliqués de la campagne ; `modele` : modèle CROU (critères pas encore appliqués). */
+        origine: 'en_vigueur' | 'modele';
+        version: number | null;
+        regles: Regle[];
+        conformes: number;
+        non_conformes: number;
+        score: number;
+        lien: string | null;
+    } | null;
     /** Score du barème de scoring actif (seul score comparé au minimum de la décision automatique). */
     bareme: Bareme | null;
     documents: Document[] | null;
@@ -74,7 +123,7 @@ type Props = {
         assignation_id: string | null;
         historique: { date: string | null; etat: string; auteur: string | null; motif: string | null }[] | null;
     } | null;
-    profil: Record<string, string | boolean | null> | null;
+    profil: ProfilDemande | null;
     historique: { id: string; numero: string | null; campagne_id: string | null; annee: string | null; date: string | null; etat: string | null }[] | null;
     /** Valeurs et référentiels du formulaire de modification (`null` sans le droit de modifier). */
     edition: ValeursEtudiant | null;
@@ -88,7 +137,7 @@ const ETATS_REGLE = {
     ok: { label: 'Conforme', variant: 'success', icone: CircleCheck },
     nok: { label: 'Non conforme', variant: 'danger', icone: CircleX },
     nd: { label: 'Non renseigné', variant: 'warning', icone: TriangleAlert },
-    nv: { label: 'Non vérifié', variant: 'warning', icone: Clock },
+    nv: { label: 'Non vérifiable', variant: 'warning', icone: Clock },
     rejete: { label: 'Rejeté', variant: 'danger', icone: CircleX },
 } as const;
 
@@ -188,7 +237,7 @@ export default function AdmissionShow(props: Props) {
                 </div>
 
                 <aside className="flex flex-col gap-6">
-                    {profil && <Profil etudiant={etudiant} profil={profil} />}
+                    {profil && <Profil etudiant={etudiant} profil={profil} documents={documents} />}
                     {historique && <Historique demandes={historique} />}
                 </aside>
             </div>
@@ -276,12 +325,31 @@ function ScoreBareme({ score, minimum, volets, erreur, score_decision }: Bareme)
     );
 }
 
-function Eligibilite({ campagne, regles, conformes, score }: NonNullable<Props['eligibilite']>) {
-    const couleur = score >= 80 ? '#067647' : score >= 50 ? '#B54708' : '#B42318';
+function Eligibilite({ volet_libelle, campagne, origine, regles, conformes, non_conformes, score, lien }: NonNullable<Props['eligibilite']>) {
+    const couleur = non_conformes > 0 ? '#B42318' : score === 100 ? '#067647' : '#B54708';
     const circonference = 2 * Math.PI * 26;
+    const aVerifier = regles.length - conformes - non_conformes;
 
     return (
-        <Carte icone={<ListChecks size={18} strokeWidth={1.25} />} teinte="bg-soft text-primary" titre="Critères d’éligibilité" meta={`Campagne ${campagne ?? 'N/D'}`}>
+        <Carte
+            icone={<ListChecks size={18} strokeWidth={1.25} />}
+            teinte="bg-soft text-primary"
+            titre="Critères d’éligibilité"
+            meta={
+                <span className="flex flex-wrap items-center gap-2">
+                    <Badge variant={volet_libelle === 'Réadmission' ? 'info' : 'neutral'}>{volet_libelle}</Badge>
+                    Campagne {campagne ?? 'N/D'}
+                </span>
+            }
+        >
+            {origine === 'modele' && (
+                <p className="mb-4 flex items-start gap-2 text-sm text-muted">
+                    <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+                    <span className="min-w-0 flex-1">
+                        Les critères {volet_libelle === 'Réadmission' ? 'de réadmission' : 'd’admission'} de la campagne ne sont pas encore appliqués : comparaison avec le modèle CROU par défaut.
+                    </span>
+                </p>
+            )}
             <div className="mb-4 flex items-center gap-4">
                 <div className="relative size-16 shrink-0" role="img" aria-label={`${score} % des critères conformes`}>
                     <svg viewBox="0 0 64 64" className="size-16 -rotate-90">
@@ -303,14 +371,14 @@ function Eligibilite({ campagne, regles, conformes, score }: NonNullable<Props['
                 </div>
                 <div>
                     <p className="font-medium text-gray-900">
-                        {score === 100
-                            ? 'Tous les critères sont conformes — étudiant éligible.'
-                            : score >= 60
-                              ? 'Quelques critères non conformes — vérification recommandée avant décision.'
-                              : 'Plusieurs critères non conformes — étudiant probablement non éligible.'}
+                        {non_conformes > 0
+                            ? `${non_conformes} critère${non_conformes > 1 ? 's' : ''} non conforme${non_conformes > 1 ? 's' : ''} : la demande serait rejetée de la liste provisoire.`
+                            : aVerifier > 0
+                              ? 'Aucun critère non conforme, mais des informations sont manquantes ou à vérifier.'
+                              : 'Tous les critères de recevabilité sont conformes : la demande est recevable.'}
                     </p>
                     <p className="text-sm text-muted">
-                        {conformes} critère(s) conforme(s) sur {regles.length}. Les critères sont indicatifs : seule une sanction disciplinaire bloquante empêche de rendre le dossier éligible.
+                        {conformes} critère(s) conforme(s) sur {regles.length}.
                     </p>
                 </div>
             </div>
@@ -319,8 +387,8 @@ function Eligibilite({ campagne, regles, conformes, score }: NonNullable<Props['
                     <TableHeader>
                         <TableRow className="hover:bg-transparent">
                             <TableHead>Critère</TableHead>
-                            <TableHead>Règle de la campagne</TableHead>
-                            <TableHead>Valeur de l’étudiant</TableHead>
+                            <TableHead>Exigence de la campagne</TableHead>
+                            <TableHead>Saisie de l’étudiant</TableHead>
                             <TableHead className="text-right">Statut</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -343,6 +411,13 @@ function Eligibilite({ campagne, regles, conformes, score }: NonNullable<Props['
                     </TableBody>
                 </Table>
             </div>
+            {lien && (
+                <div className="mt-3 flex justify-end">
+                    <a href={lien} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+                        <ExternalLink className="size-3.5" aria-hidden /> Voir les critères
+                    </a>
+                </div>
+            )}
         </Carte>
     );
 }
@@ -756,12 +831,15 @@ function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: stri
     );
 }
 
-function Profil({ etudiant, profil }: { etudiant: Props['etudiant']; profil: NonNullable<Props['profil']> }) {
+/** Texte saisi, ou mention « non renseigné » en gris. */
+const valeur = (texte: string | null | undefined, vide = 'Non renseigné') => (texte != null && texte !== '' ? texte : <span className="text-muted">{vide}</span>);
+const ouiNon = (oui: boolean | null) => (oui === null ? valeur(null) : oui ? 'Oui' : 'Non');
+
+/** Informations saisies par l'étudiant, regroupées dans l'ordre des étapes du formulaire de demande. */
+function Profil({ etudiant, profil, documents }: { etudiant: Props['etudiant']; profil: ProfilDemande; documents: Document[] | null }) {
     const [libelle, variante] = STATUTS_INSCRIPTION[etudiant.statut_inscription ?? ''] ?? ['Non défini', 'neutral' as const];
-    const valeur = (cle: string, vide = 'Non renseigné') => {
-        const v = profil[cle];
-        return typeof v === 'string' && v !== '' ? v : <span className="text-muted">{vide}</span>;
-    };
+    const { identite, etudes, situation, adresse } = profil;
+    const valides = documents?.filter((document) => document.statut === 'valide').length ?? 0;
 
     return (
         <section className="rounded-brand border bg-white p-4">
@@ -789,42 +867,103 @@ function Profil({ etudiant, profil }: { etudiant: Props['etudiant']; profil: Non
                         <Clock className="size-3.5" aria-hidden /> Validation en cours
                     </Badge>
                 )}
-                {profil.boursier && <Badge variant="info">Boursier</Badge>}
+                {situation.boursier && <Badge variant="info">Boursier</Badge>}
             </div>
 
-            <Groupe titre="Admission">
-                <Ligne terme="Niveau">{valeur('niveau')}</Ligne>
-                <Ligne terme="Campagne">{valeur('campagne', 'Non renseignée')}</Ligne>
-                <Ligne terme="Boursier">{profil.boursier ? 'Oui' : 'Non'}</Ligne>
-                <Ligne terme="Groupe sanguin">{valeur('groupe_sanguin')}</Ligne>
+            <Groupe etape={1} titre="Identité">
+                <Ligne terme="Civilité">{valeur(identite.civilite, 'Non renseignée')}</Ligne>
+                <Ligne terme="Date de naissance">{identite.date_naissance ? dateFr(identite.date_naissance) : valeur(null, 'Non renseignée')}</Ligne>
+                <Ligne terme="Lieu de naissance">{valeur(identite.lieu_naissance)}</Ligne>
+                <Ligne terme="Nationalité">{valeur(identite.nationalite, 'Non renseignée')}</Ligne>
+                <Ligne terme="Téléphone">{valeur(identite.telephone1)}</Ligne>
+                {identite.telephone2 && <Ligne terme="Téléphone 2">{identite.telephone2}</Ligne>}
+                <Ligne terme="E-mail">{valeur(identite.email1)}</Ligne>
+                {identite.email2 && <Ligne terme="E-mail 2">{identite.email2}</Ligne>}
+                <Ligne terme="Type de pièce">{valeur(identite.type_piece)}</Ligne>
+                <Ligne terme="Numéro de la pièce">{valeur(identite.numero_piece)}</Ligne>
+                <Ligne terme="Expiration de la pièce">{identite.date_expiration ? dateFr(identite.date_expiration) : valeur(null, 'Non renseignée')}</Ligne>
+                <Ligne terme="Groupe sanguin">{valeur(identite.groupe_sanguin)}</Ligne>
             </Groupe>
-            <Groupe titre="Contact">
-                <Ligne terme="Téléphone 1">{valeur('telephone1')}</Ligne>
-                <Ligne terme="Téléphone 2">{valeur('telephone2')}</Ligne>
-                <Ligne terme="E-mail 1">{valeur('email1')}</Ligne>
-                <Ligne terme="E-mail 2">{valeur('email2')}</Ligne>
+
+            <Groupe etape={2} titre="Études">
+                <Ligne terme="Campagne">{valeur(etudes.campagne, 'Non renseignée')}</Ligne>
+                <Ligne terme="Niveau précédent">{valeur(etudes.niveau_precedent)}</Ligne>
+                <Ligne terme="Niveau actuel">{valeur(etudes.niveau)}</Ligne>
+                <Ligne terme="Redoublant">{ouiNon(etudes.redoublant)}</Ligne>
+                {!etudes.bachelier && <Ligne terme="Matricule">{valeur(etudes.matricule)}</Ligne>}
+                <Ligne terme="Filière">{valeur(etudes.filiere, 'Non renseignée')}</Ligne>
+                {etudes.bachelier ? (
+                    <>
+                        <Ligne terme="Note au bac">
+                            {etudes.note_bac !== null ? (
+                                <>
+                                    {scoreFr(etudes.note_bac)}/400 <span className="text-muted">({scoreFr(etudes.moyenne ?? 0)}/20)</span>
+                                </>
+                            ) : (
+                                valeur(null, 'Non renseignée')
+                            )}
+                        </Ligne>
+                        <Ligne terme="Ville du bac">{valeur(etudes.ville_bac, 'Non renseignée')}</Ligne>
+                    </>
+                ) : (
+                    <>
+                        <Ligne terme="Moyenne générale">{etudes.moyenne !== null ? `${scoreFr(etudes.moyenne)}/20` : valeur(null, 'Non renseignée')}</Ligne>
+                        <Ligne terme="Crédits validés">
+                            {etudes.credits !== null ? (
+                                <>
+                                    {etudes.credits}/{etudes.credits_max} <span className="text-muted">({scoreFr((etudes.credits / etudes.credits_max) * 100)} %)</span>
+                                </>
+                            ) : (
+                                valeur(null)
+                            )}
+                        </Ligne>
+                    </>
+                )}
             </Groupe>
-            <Groupe titre="Adresse">
-                <Ligne terme="Région">{valeur('region', 'Non renseignée')}</Ligne>
-                <Ligne terme="Ville">{valeur('ville', 'Non renseignée')}</Ligne>
-                <Ligne terme="Adresse">{valeur('adresse', 'Non renseignée')}</Ligne>
-                <Ligne terme="Nationalité">{valeur('nationalite', 'Non renseignée')}</Ligne>
+
+            <Groupe etape={3} titre="Situation">
+                <Ligne terme="Boursier">{situation.boursier ? 'Oui' : 'Non'}</Ligne>
+                {situation.observations && (
+                    <div className="py-1.5">
+                        <dt className="text-muted">Situation sociale ou observations</dt>
+                        <dd className="mt-0.5 break-words whitespace-pre-line">{situation.observations}</dd>
+                    </div>
+                )}
             </Groupe>
-            <Groupe titre="Pièce d’identité">
-                <Ligne terme="Date de naissance">{profil.date_naissance ? dateFr(profil.date_naissance as string) : valeur('date_naissance')}</Ligne>
-                <Ligne terme="Lieu de naissance">{valeur('lieu_naissance')}</Ligne>
-                <Ligne terme="Type">{valeur('type_piece')}</Ligne>
-                <Ligne terme="Numéro">{valeur('numero_piece')}</Ligne>
-                <Ligne terme="Expiration">{profil.date_expiration ? dateFr(profil.date_expiration as string) : valeur('date_expiration', 'Non renseignée')}</Ligne>
+
+            <Groupe etape={4} titre="Adresse">
+                <Ligne terme="Région">{valeur(adresse.region, 'Non renseignée')}</Ligne>
+                <Ligne terme="Ville">{valeur(adresse.ville, 'Non renseignée')}</Ligne>
+                <Ligne terme="Adresse complète">{valeur(adresse.adresse, 'Non renseignée')}</Ligne>
+                <Ligne terme="Distance domicile – campus">{adresse.distance !== null ? `${scoreFr(adresse.distance)} km` : valeur(null, 'Non renseignée')}</Ligne>
             </Groupe>
+
+            {documents && (
+                <Groupe etape={5} titre="Documents">
+                    <Ligne terme="Pièces fournies">
+                        {documents.length > 0 ? (
+                            <a href="#documents-fournis" className="font-medium text-primary hover:underline">
+                                {documents.length} · {valides} validée{valides > 1 ? 's' : ''}
+                            </a>
+                        ) : (
+                            valeur(null, 'Aucune')
+                        )}
+                    </Ligne>
+                </Groupe>
+            )}
         </section>
     );
 }
 
-function Groupe({ titre, children }: { titre: string; children: ReactNode }) {
+function Groupe({ etape, titre, children }: { etape: number; titre: string; children: ReactNode }) {
     return (
         <>
-            <h3 className="mt-4 mb-1 text-xs font-medium tracking-wide text-muted uppercase">{titre}</h3>
+            <h3 className="mt-4 mb-1 flex items-center gap-2 text-xs font-medium tracking-wide text-muted uppercase">
+                <span className="flex size-5 items-center justify-center rounded-full bg-soft text-[11px] text-primary" aria-hidden>
+                    {etape}
+                </span>
+                {titre}
+            </h3>
             <dl className="divide-y text-sm">{children}</dl>
         </>
     );

@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Http\Services\EtudiantService;
 use App\Models\Document;
 use App\Http\Requests\CampagneRequest;
+use App\Http\Requests\DemandeHebergementRequest;
 use App\Http\Services\CampagneService;
 use Illuminate\Http\RedirectResponse;
 use \App\Models\Cite;
@@ -180,8 +181,9 @@ class CampagnesAdmissionController extends Controller
                 'label' => app(\App\Http\Services\CatalogueSanctions::class)->libelle($statutDisciplinaire),
                 'bloquant' => app(\App\Http\Services\CatalogueSanctions::class)->estBloquant($statutDisciplinaire),
             ] : null,
-            'eligibilite' => $vues->allows($admin, 'admissions.eligibility')
-                ? $this->criteresEligibilite($etudiant, $this->campagneActive())
+            // Critères de rejet du volet de la demande (admission ou réadmission) comparés aux valeurs saisies.
+            'eligibilite' => $derniere && $vues->allows($admin, 'admissions.eligibility')
+                ? $this->conformite($etudiant, $derniere, $admin, $vues->allows($admin, 'housing.discipline'))
                 : null,
             'bareme' => $vues->allows($admin, 'admissions.eligibility') ? $this->scoreBareme($derniere, $etudiant) : null,
             'documents' => $documents ? collect($etudiant->documents)->map(fn ($document) => [
@@ -217,25 +219,7 @@ class CampagnesAdmissionController extends Controller
                     ? $url('admin.hebergement.campagnes_admission.derogations.store', ['student' => $etudiant->getKey()]) : null,
             ] : null,
             'suivi' => $voirAdmissions && $derniere ? $this->suiviDossier($derniere, $admin) : null,
-            'profil' => $personnel ? [
-                'boursier' => (bool) $etudiant->boursier,
-                'niveau' => $derniere?->niveauEtudiantActuel?->name,
-                'campagne' => $derniere?->campagne?->annee_campagne,
-                'groupe_sanguin' => $etudiant->groupeSanguin?->name,
-                'telephone1' => $etudiant->telephone1,
-                'telephone2' => $etudiant->telephone2,
-                'email1' => $etudiant->email1,
-                'email2' => $etudiant->email2,
-                'region' => $etudiant->region?->name,
-                'ville' => $etudiant->ville?->name,
-                'adresse' => $etudiant->adresse,
-                'nationalite' => $etudiant->nationalite,
-                'date_naissance' => $etudiant->date_naissance?->toDateString(),
-                'lieu_naissance' => $etudiant->lieu_naissance,
-                'type_piece' => $etudiant->typePiece?->name,
-                'numero_piece' => $etudiant->numero_piece,
-                'date_expiration' => $etudiant->date_expiration ? Carbon::parse($etudiant->date_expiration)->toDateString() : null,
-            ] : null,
+            'profil' => $personnel ? $this->profilDemande($etudiant, $derniere) : null,
             // Toutes les demandes de l'étudiant, toutes campagnes confondues.
             'historique' => $historique ? $etudiant->demandes->sortByDesc('created_at')->values()->map(fn ($item) => [
                 'id' => (string) $item->getKey(),
@@ -256,96 +240,75 @@ class CampagnesAdmissionController extends Controller
     }
 
     /**
-     * Critères d'éligibilité affichés à l'agent (mêmes règles que l'ancienne vue) : état ok, nok ou nd (non renseigné).
-     * La décision reste prise par le workflow ; ce tableau sert d'aide à l'étude du dossier.
+     * Informations saisies par l'étudiant, regroupées comme les étapes du formulaire de demande
+     * (Identité, Études, Situation, Adresse). Les informations académiques viennent de la dernière demande.
+     * Après la Terminale, la moyenne enregistrée (sur 20) est la note au bac saisie sur 400 : elle est restituée sur 400.
      */
-    private function criteresEligibilite(Etudiant $demande, ?Campagne $campagne): array
+    private function profilDemande(Etudiant $etudiant, ?DemandeEtudiant $demande): array
     {
-        $derniere = $demande->derniereDemande;
-        $niveauActuel = $derniere?->niveauEtudiantActuel;
-        $regles = [];
-        $regle = fn (string $label, string $regleCampagne, string $valeur, string $etat) => ['label' => $label, 'campagne' => $regleCampagne, 'etudiant' => $valeur, 'etat' => $etat];
-
-        // 1. Âge maximum selon le niveau
-        $age = $demande->date_naissance?->age;
-        $ageMax = $campagne?->{'age_'.strtoupper($niveauActuel->abreviation ?? '').'_max'} ?? null;
-        if ($ageMax !== null) {
-            $regles[] = $age === null
-                ? $regle('Âge maximum', '≤ '.$ageMax.' ans', 'Date de naissance non renseignée', 'nd')
-                : $regle('Âge maximum (niveau '.strtoupper($niveauActuel->name ?? '?').')', '≤ '.$ageMax.' ans', $age.' ans', $age <= $ageMax ? 'ok' : 'nok');
-        }
-        // 2. Moyenne minimale
-        if ($campagne?->moyenne_min !== null) {
-            $moyenne = $derniere?->moyenne;
-            $regles[] = $moyenne === null
-                ? $regle('Moyenne', '≥ '.$campagne->moyenne_min.'/20', 'Non renseignée', 'nd')
-                : $regle('Moyenne', '≥ '.$campagne->moyenne_min.'/20', $moyenne.'/20', $moyenne >= $campagne->moyenne_min ? 'ok' : 'nok');
-        }
-        // 3. Crédits validés (hors L1) : nombre de crédits sur 60, comparé au seuil en % de la campagne
-        if ($campagne?->pourcentage_validate !== null && ($niveauActuel->abreviation ?? null) != 'L1') {
-            $credits = $derniere?->credit_valider;
-            $pourcentage = $credits === null ? null : DemandeEtudiant::pourcentageCredits($credits);
-            $regles[] = $credits === null
-                ? $regle('Crédits validés', '≥ '.$campagne->pourcentage_validate.' %', 'Non renseigné', 'nd')
-                : $regle('Crédits validés', '≥ '.$campagne->pourcentage_validate.' %', $credits.'/'.DemandeEtudiant::CREDITS_PAR_AN.' crédits ('.round($pourcentage).' %)', $pourcentage >= $campagne->pourcentage_validate ? 'ok' : 'nok');
-        }
-        // 4. Distance domicile ↔ campus
-        if ($campagne?->distance_min !== null) {
-            $distance = $demande->distance;
-            $regles[] = $distance === null
-                ? $regle('Distance domicile – campus', '≥ '.$campagne->distance_min.' km', 'Non renseignée', 'nd')
-                : $regle('Distance domicile – campus', '≥ '.$campagne->distance_min.' km', $distance.' km', $distance >= $campagne->distance_min ? 'ok' : 'nok');
-        }
-        if ($campagne !== null) {
-            // 5. Boursier (toujours accepté)
-            $regles[] = $regle('Boursier', 'Acceptés', $demande->boursier ? 'Oui' : 'Non', 'ok');
-        }
-        // 6. Redoublement
-        if ($campagne?->redoublement !== null) {
-            $autorise = (bool) $campagne->redoublement;
-            $redoublant = (bool) ($demande->redoublant ?? false);
-            $regles[] = $regle('Redoublement', $autorise ? 'Autorisé' : 'Non autorisé', $redoublant ? 'Redoublant' : 'Non redoublant', $autorise || !$redoublant ? 'ok' : 'nok');
-        }
-        // 7. PMR
-        if ($campagne?->pmr !== null) {
-            $autorise = (bool) $campagne->pmr;
-            $pmr = (bool) ($demande->pmr ?? false);
-            $regles[] = $regle('PMR (mobilité réduite)', $autorise ? 'Accepté' : 'Non accepté', $pmr ? 'Oui' : 'Non', !$pmr || $autorise ? 'ok' : 'nok');
-        }
-        // 8. Étudiants internationaux
-        if ($campagne?->internationnaux !== null) {
-            $autorise = (bool) $campagne->internationnaux;
-            $nationalite = strtolower(trim((string) $demande->nationalite));
-            $international = $demande->nationalite !== null && !in_array($nationalite, ['ivoirienne', 'ivoirien'], true);
-            $regles[] = $regle('Étudiant international', $autorise ? 'Accepté' : 'Non accepté', $international ? 'Oui ('.$demande->nationalite.')' : 'Non', !$international || $autorise ? 'ok' : 'nok');
-        }
-        // 9. Nouveau bachelier
-        if ($campagne?->new_bachelier !== null) {
-            $autorise = (bool) $campagne->new_bachelier;
-            $nouveau = (bool) ($demande->nouveau_bachelier ?? false);
-            $regles[] = $regle('Nouveau bachelier', $autorise ? 'Accepté' : 'Non accepté', $nouveau ? 'Oui' : 'Non', !$nouveau || $autorise ? 'ok' : 'nok');
-        }
-        // 10. Réadmission
-        if ($campagne?->readmission !== null) {
-            $autorise = (bool) $campagne->readmission;
-            $nombre = $demande->demandes->count();
-            $regles[] = $regle('Réadmission', $autorise ? 'Autorisée' : 'Non autorisée', $nombre > 1 ? 'Oui ('.$nombre.' demande(s))' : 'Non', $nombre <= 1 || $autorise ? 'ok' : 'nok');
-        }
-        // 11. Documents validés (indicatif, non bloquant) : « rejeté » si une pièce est rejetée, sinon « non vérifié » tant que le seuil n'est pas atteint.
-        $total = count($demande->documents);
-        $valides = collect($demande->documents)->where('statut', 'valide')->count();
-        $pourcentage = $total > 0 ? round($valides / $total * 100) : 0;
-        $requis = $campagne?->pourcentage_validate ?? 100;
-        $etatDocuments = $pourcentage >= $requis ? 'ok' : (collect($demande->documents)->contains('statut', 'rejete') ? 'rejete' : 'nv');
-        $regles[] = $regle('Documents validés', '≥ '.$requis.' %', $valides.'/'.$total.' ('.$pourcentage.' %)', $etatDocuments);
-
-        $conformes = collect($regles)->where('etat', 'ok')->count();
+        $precedent = $demande?->niveauEtudiantPrecedent;
+        $actuel = $demande?->niveauEtudiantActuel;
+        $bachelier = $precedent !== null && \App\Http\Services\Eligibilite\CriteresCampagne::niveauSansAgeMax($precedent->name, $precedent->abreviation ?? null);
+        $moyenne = $demande !== null && $demande->moyenne !== null && $demande->moyenne !== '' ? (float) $demande->moyenne : null;
+        $credits = $demande !== null && $demande->credit_valider !== null && $demande->credit_valider !== '' ? (int) $demande->credit_valider : null;
+        $filiere = filled($demande?->filiere_code) ? \App\Models\Filiere::query()->whereKey($demande->filiere_code)->value('name') : null;
 
         return [
-            'campagne' => $campagne?->annee_campagne,
-            'regles' => $regles,
-            'conformes' => $conformes,
-            'score' => $regles ? (int) round($conformes / count($regles) * 100) : 0,
+            'identite' => [
+                'civilite' => $etudiant->civilite?->name,
+                'date_naissance' => $etudiant->date_naissance?->toDateString(),
+                'lieu_naissance' => $etudiant->lieu_naissance,
+                'nationalite' => $etudiant->nationalite,
+                'telephone1' => $etudiant->telephone1,
+                'telephone2' => $etudiant->telephone2,
+                'email1' => $etudiant->email1,
+                'email2' => $etudiant->email2,
+                'type_piece' => $etudiant->typePiece?->name,
+                'numero_piece' => $etudiant->numero_piece,
+                'date_expiration' => $etudiant->date_expiration ? Carbon::parse($etudiant->date_expiration)->toDateString() : null,
+                'groupe_sanguin' => $etudiant->groupeSanguin?->name,
+            ],
+            'etudes' => [
+                'campagne' => $demande?->campagne?->annee_campagne ?? $demande?->annee_academique_actuel,
+                'niveau_precedent' => $precedent?->name,
+                'niveau' => $actuel?->name,
+                // Redoublant : niveau précédent identique au niveau actuel (règle du formulaire).
+                'redoublant' => $precedent !== null && $actuel !== null ? (string) $precedent->getKey() === (string) $actuel->getKey() : null,
+                'bachelier' => $bachelier,
+                'matricule' => $etudiant->matricule,
+                'filiere' => $filiere,
+                'moyenne' => $moyenne,
+                'note_bac' => $bachelier && $moyenne !== null ? round($moyenne * DemandeHebergementRequest::NOTE_BAC_MAX / 20, 2) : null,
+                'credits' => $credits,
+                'credits_max' => DemandeEtudiant::CREDITS_PAR_AN,
+                'ville_bac' => $demande?->ville_bac,
+            ],
+            'situation' => [
+                'boursier' => (bool) ($demande?->boursier ?? $etudiant->boursier),
+                'observations' => $demande?->commentaires,
+            ],
+            'adresse' => [
+                'region' => $etudiant->region?->name,
+                'ville' => $etudiant->ville?->name,
+                'adresse' => $etudiant->adresse,
+                'distance' => $etudiant->distance !== null && $etudiant->distance !== '' ? (float) $etudiant->distance : null,
+            ],
+        ];
+    }
+
+    /**
+     * Critères de rejet du volet de la demande (admission ou réadmission) comparés aux valeurs saisies par l'étudiant,
+     * avec le lien vers les critères de la campagne (si l'agent peut les consulter). Aide à l'étude : la décision
+     * reste prise par le workflow.
+     */
+    private function conformite(Etudiant $etudiant, DemandeEtudiant $demande, $admin, bool $discipline): array
+    {
+        $conformite = app(\App\Http\Services\Eligibilite\ConformiteDemande::class)->evaluer($etudiant, $demande, $discipline);
+        $vue = app(\App\Http\Services\Eligibilite\CriteresCampagneVue::class);
+        $campagne = $demande->campagne;
+
+        return $conformite + [
+            'lien' => $campagne && $vue->visible($admin) ? $vue->lienPage($admin, $campagne, $conformite['volet']) : null,
         ];
     }
 

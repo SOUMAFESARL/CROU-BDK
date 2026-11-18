@@ -8,8 +8,8 @@ use App\Http\Controllers\etudiant\DisciplinaryIncidentController;
 //Route::middleware(['auth:etudiant'])->group(function () {
 Route::middleware(['etudiants'])->group(function () {
     Route::get('/entree-logement', [\App\Http\Controllers\HousingEntryController::class,'student'])->name('housing-entry');
-    Route::get('/readmission', [\App\Http\Controllers\etudiant\ReadmissionController::class,'show'])->name('readmission');
-    Route::post('/readmission', [\App\Http\Controllers\etudiant\ReadmissionController::class,'store'])
+    Route::get('/readmission', [\App\Http\Controllers\etudiant\ReadmissionPageController::class,'show'])->name('readmission');
+    Route::post('/readmission', [\App\Http\Controllers\etudiant\ReadmissionPageController::class,'store'])
         ->middleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class)->name('readmission.store');
 
     Route::post('/dossiers/{demande}/transition', [\App\Http\Controllers\DossierWorkflowController::class,'student'])

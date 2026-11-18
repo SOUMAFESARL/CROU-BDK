@@ -1,9 +1,11 @@
 import { z } from "zod";
 import {
+    CODES_MERITE,
     DEPARTAGE_VOLET,
     MERITE_ADMISSION,
     placesCasSociaux,
     type CritereDepartage,
+    type MeriteRegle,
     type PlacesCite,
     type Regles,
     type ReglesGenerales,
@@ -70,16 +72,6 @@ const nombre = (valeur: string) =>
 /* ------------------------------------------------------------------ */
 
 export const generalSchema = z.object({
-    credits: z.object({
-        seuil_defaut: entier("le pourcentage de crédits exigé", 0, 100),
-        filieres: z.array(
-            z.object({
-                filiere_id: z.string().min(1, "Choisissez la filière."),
-                seuil: entier("le pourcentage de la filière", 0, 100),
-                concours: z.boolean(),
-            }),
-        ),
-    }),
     rang_filiere: z.object({
         actif: z.boolean(),
         n: entier("le nombre de premiers par filière", 1, 100),
@@ -126,14 +118,6 @@ export function valeursGenerales(
     ];
 
     return {
-        credits: {
-            seuil_defaut: texte(regles.credits.seuil_defaut),
-            filieres: regles.credits.filieres.map((ligne) => ({
-                filiere_id: ligne.filiere_id,
-                seuil: texte(ligne.seuil),
-                concours: ligne.concours,
-            })),
-        },
         rang_filiere: {
             actif: regles.rang_filiere.actif,
             n: texte(regles.rang_filiere.n),
@@ -158,14 +142,6 @@ export function valeursGenerales(
 export function generalAEnvoyer(v: GeneralFormOutput) {
     const n = (valeur: string) => Number(valeur);
     return {
-        credits: {
-            seuil_defaut: n(v.credits.seuil_defaut),
-            filieres: v.credits.filieres.map((ligne) => ({
-                filiere_id: ligne.filiere_id,
-                seuil: n(ligne.seuil),
-                concours: ligne.concours,
-            })),
-        },
         rang_filiere: {
             actif: v.rang_filiere.actif,
             n: n(v.rang_filiere.n),
@@ -184,21 +160,6 @@ export function generalAEnvoyer(v: GeneralFormOutput) {
     };
 }
 
-/** Une filière ne peut avoir qu'un seuil propre. */
-export function reglesCroiseesGenerales(
-    v: GeneralFormInput,
-): Record<string, string> {
-    const erreurs: Record<string, string> = {};
-    const vues = new Set<string>();
-    v.credits.filieres.forEach((ligne, index) => {
-        if (ligne.filiere_id && vues.has(ligne.filiere_id))
-            erreurs[`credits.filieres.${index}.filiere_id`] =
-                "Cette filière a déjà son propre seuil.";
-        vues.add(ligne.filiere_id);
-    });
-    return erreurs;
-}
-
 /* ------------------------------------------------------------------ */
 /* Critères d'un volet                                                 */
 /* ------------------------------------------------------------------ */
@@ -213,7 +174,18 @@ const blocReadmission = z.object({
         actif: z.boolean(),
         mois_exiges: entier("le nombre de mois exigés", 1, 12),
     }),
-    credits_actif: z.boolean(),
+    // Crédits exigés : pourcentage pour toutes les filières, seuil propre à une filière (école sur concours : C1).
+    credits: z.object({
+        actif: z.boolean(),
+        seuil_defaut: entier("le pourcentage de crédits exigé", 0, 100),
+        filieres: z.array(
+            z.object({
+                filiere_id: z.string().min(1, "Choisissez la filière."),
+                seuil: entier("le pourcentage de la filière", 0, 100),
+                concours: z.boolean(),
+            }),
+        ),
+    }),
     conduite_actif: z.boolean(),
     /** Bornée par la note initiale du paramétrage des sanctions : contrôlée dans `reglesCroisees`. */
     conduite_note_min: z.string(),
@@ -221,11 +193,22 @@ const blocReadmission = z.object({
     report_places: z.enum(["C6_puis_admission", "C6", "admission", "vacant"]),
 });
 
-const blocAdmission = z.object({
-    merite: z.enum(["moyenne_bac_desc", "credits_desc"]),
-    seuil_actif: z.boolean(),
+/** Un mérite d'admission ; le seuil est borné selon le mérite dans `superRefine`. */
+const meriteAdmission = z.object({
+    actif: z.boolean(),
     seuil: z.string(),
-    age_actif: z.boolean(),
+});
+
+const blocAdmission = z.object({
+    merite: z
+        .object({
+            moyenne_bac_desc: meriteAdmission,
+            credits_desc: meriteAdmission,
+        })
+        .refine(
+            (merite) => CODES_MERITE.some((code) => merite[code].actif),
+            "Retenez au moins un critère de mérite.",
+        ),
     ville_bac: z
         .string()
         .trim()
@@ -274,23 +257,33 @@ export const criteresSchema = z
         appliquer: z.boolean(),
     })
     .superRefine((v, ctx) => {
-        // Seuil de rejet en admission : borné selon le mérite (note sur 20 ou crédits), exigé s'il est actif.
+        // Seuils de rejet en admission : bornés selon le mérite (note du bac sur 400, crédits sur 60), exigés quand le mérite est retenu.
         const a = v.admission;
-        if (!a?.seuil_actif) return;
-        const info = MERITE_ADMISSION[a.merite];
-        const resultat = nombreBorne(info.seuil.toLowerCase(), 0, info.max, {
-            decimal: true,
-        }).safeParse(a.seuil);
-        if (!resultat.success)
-            ctx.addIssue({
-                code: "custom",
-                path: ["admission", "seuil"],
-                message: resultat.error.issues[0]?.message ?? "Seuil invalide.",
-            });
+        if (!a) return;
+        CODES_MERITE.forEach((code) => {
+            const m = a.merite[code];
+            if (!m.actif) return;
+            const info = MERITE_ADMISSION[code];
+            const resultat = nombreBorne(info.seuil.toLowerCase(), 0, info.max, {
+                decimal: true,
+            }).safeParse(m.seuil);
+            if (!resultat.success)
+                ctx.addIssue({
+                    code: "custom",
+                    path: ["admission", "merite", code, "seuil"],
+                    message:
+                        resultat.error.issues[0]?.message ?? "Seuil invalide.",
+                });
+        });
     });
 
 export type CriteresFormInput = z.input<typeof criteresSchema>;
 export type CriteresFormOutput = z.output<typeof criteresSchema>;
+
+const meriteSaisi = (m: MeriteRegle) => ({
+    actif: m.actif,
+    seuil: texte(m.seuil),
+});
 
 /** Valeurs initiales de l'assistant à partir des critères et des places enregistrés du volet. */
 export function valeursInitiales(
@@ -322,7 +315,15 @@ export function valeursInitiales(
                           actif: r.loyers.actif,
                           mois_exiges: texte(r.loyers.mois_exiges),
                       },
-                      credits_actif: r.credits_actif,
+                      credits: {
+                          actif: r.credits.actif,
+                          seuil_defaut: texte(r.credits.seuil_defaut),
+                          filieres: r.credits.filieres.map((ligne) => ({
+                              filiere_id: ligne.filiere_id,
+                              seuil: texte(ligne.seuil),
+                              concours: ligne.concours,
+                          })),
+                      },
                       conduite_actif: r.conduite.actif,
                       conduite_note_min: texte(r.conduite.note_min),
                       age_actif: r.age_actif,
@@ -332,10 +333,10 @@ export function valeursInitiales(
         admission:
             volet === "admission" && a
                 ? {
-                      merite: a.merite,
-                      seuil_actif: a.seuil_actif,
-                      seuil: texte(a.seuil),
-                      age_actif: a.age_actif,
+                      merite: {
+                          moyenne_bac_desc: meriteSaisi(a.merite.moyenne_bac_desc),
+                          credits_desc: meriteSaisi(a.merite.credits_desc),
+                      },
                       ville_bac: a.ville_bac,
                   }
                 : undefined,
@@ -392,10 +393,15 @@ export function reglesAEnvoyer(volet: Volet, v: CriteresFormOutput) {
                 delai_completude_jours: n(v.calendrier.delai_completude_jours),
             },
             admission: {
-                merite: a.merite,
-                seuil_actif: a.seuil_actif,
-                seuil: nombre(a.seuil),
-                age_actif: a.age_actif,
+                merite: Object.fromEntries(
+                    CODES_MERITE.map((code) => [
+                        code,
+                        {
+                            actif: a.merite[code].actif,
+                            seuil: nombre(a.merite[code].seuil),
+                        },
+                    ]),
+                ),
                 ville_bac: a.ville_bac,
             },
             classement,
@@ -414,7 +420,15 @@ export function reglesAEnvoyer(volet: Volet, v: CriteresFormOutput) {
                 actif: r.loyers.actif,
                 mois_exiges: n(r.loyers.mois_exiges),
             },
-            credits_actif: r.credits_actif,
+            credits: {
+                actif: r.credits.actif,
+                seuil_defaut: n(r.credits.seuil_defaut),
+                filieres: r.credits.filieres.map((ligne) => ({
+                    filiere_id: ligne.filiere_id,
+                    seuil: n(ligne.seuil),
+                    concours: ligne.concours,
+                })),
+            },
             conduite: {
                 actif: r.conduite_actif,
                 note_min: nombre(r.conduite_note_min),
@@ -476,8 +490,9 @@ type Contexte = {
 };
 
 /**
- * Règles entre champs (mêmes contrôles que le service) : dates après la clôture, places du volet + places de l'autre
- * volet ≤ capacité, places réservées en réadmission (cas sociaux + comité) ≤ places de réadmission. Clé = chemin du champ.
+ * Règles entre champs (mêmes contrôles que le service) : dates après la clôture, une filière au plus une fois dans les
+ * crédits de réadmission, places du volet + places de l'autre volet ≤ capacité, places réservées en réadmission
+ * (cas sociaux + comité) ≤ places de réadmission. Clé = chemin du champ.
  */
 export function reglesCroisees(
     v: CriteresFormInput,
@@ -493,6 +508,15 @@ export function reglesCroisees(
                 `La liste provisoire ne peut pas précéder la clôture des dépôts (${jjmmaaaa(ctx.cloture)}).`;
         }
         const r = v.readmission;
+        if (ctx.volet === "readmission" && r) {
+            const vues = new Set<string>();
+            r.credits.filieres.forEach((ligne, index) => {
+                if (ligne.filiere_id && vues.has(ligne.filiere_id))
+                    erreurs[`readmission.credits.filieres.${index}.filiere_id`] =
+                        "Cette filière a déjà son propre seuil.";
+                vues.add(ligne.filiere_id);
+            });
+        }
         if (ctx.volet === "readmission" && r?.conduite_actif) {
             const resultat = nombreBorne(
                 "la note de conduite minimale",

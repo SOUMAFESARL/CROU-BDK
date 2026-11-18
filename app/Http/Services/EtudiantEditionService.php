@@ -17,8 +17,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
- * Modification par l'administration de toutes les informations d'un étudiant (fiche + informations académiques de sa dernière demande),
+ * Modification par l'administration des informations d'un étudiant (fiche + informations académiques de sa dernière demande),
  * utilisée par la page des résidents et par la page de traitement d'une demande.
+ * Seules les informations saisies dans le formulaire de demande initiale sont modifiables ici (pas de téléphone/e-mail
+ * secondaire, numéro étudiant, années académiques, type de bourse, santé ni tuteur) : les autres champs envoyés sont ignorés.
  * Le statut, l'état du dossier, l'affectation et la confirmation PMR ne sont pas modifiables ici (cycle géré par `DossierWorkflow`).
  */
 class EtudiantEditionService
@@ -26,16 +28,13 @@ class EtudiantEditionService
     /** Champs de la fiche étudiant (table `etudiants`). */
     private const CHAMPS_ETUDIANT = ['name', 'genre_id', 'date_naissance', 'lieu_naissance', 'nationalite', 'groupe_sanguin_id',
         'type_piece_id', 'numero_piece', 'date_expiration',
-        'telephone1', 'telephone2', 'email1', 'email2', 'regions_id', 'ville_id', 'adresse', 'distance',
-        'matricule', 'numero_etudiant', 'annee_academique_actuel',
-        'boursier', 'type_bourse', 'allergies', 'maladies_chroniques', 'autiste',
-        'name_tuteur', 'telephone_tuteur', 'adresse_tuteur'];
+        'telephone1', 'email1', 'regions_id', 'ville_id', 'adresse', 'distance',
+        'matricule', 'boursier'];
 
     /** Informations académiques portées par la dernière demande (table `demande`). */
-    private const CHAMPS_DEMANDE = ['annee_academique_precedent', 'niveau_etude_precedent_code', 'niveau_etude_actuel_code',
-        'filiere_code', 'moyenne', 'credit_valider'];
+    private const CHAMPS_DEMANDE = ['niveau_etude_precedent_code', 'niveau_etude_actuel_code', 'filiere_code', 'moyenne', 'credit_valider'];
 
-    private const BOOLEENS = ['boursier', 'allergies', 'maladies_chroniques', 'autiste'];
+    private const BOOLEENS = ['boursier'];
 
     private const DATES = ['date_naissance', 'date_expiration'];
 
@@ -86,7 +85,7 @@ class EtudiantEditionService
         $unique = fn (string $colonne) => Rule::unique('etudiants', $colonne)->ignore($etudiant->getKey(), 'id_etudiant');
         $demande = $etudiant->derniereDemande;
 
-        Telephone::normaliserRequete($request, ['telephone1', 'telephone2', 'telephone_tuteur']);
+        Telephone::normaliserRequete($request, ['telephone1']);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'genre_id' => ['required', 'integer', Rule::exists('genre', 'id')],
@@ -98,26 +97,14 @@ class EtudiantEditionService
             'numero_piece' => ['nullable', 'string', 'max:50', $unique('numero_piece')],
             'date_expiration' => ['nullable', 'date'],
             'telephone1' => ['required', Telephone::regle(), $unique('telephone1')],
-            'telephone2' => ['nullable', Telephone::regle()],
             'email1' => ['nullable', 'email', 'max:255', $unique('email1')],
-            'email2' => ['nullable', 'email', 'max:255'],
             'regions_id' => ['nullable', 'integer', Rule::exists('regions', 'id')],
             'ville_id' => ['nullable', 'integer', Rule::exists('villes', 'id')->where(fn ($q) => $request->filled('regions_id') ? $q->where('region_id', $request->input('regions_id')) : $q)],
             'adresse' => ['nullable', 'string', 'max:255'],
             'distance' => ['nullable', 'integer', 'min:0'],
             'matricule' => ['required', 'string', 'max:100', $unique('matricule')],
-            'numero_etudiant' => ['nullable', 'string', 'max:100', $unique('numero_etudiant')],
-            'annee_academique_actuel' => ['nullable', 'string', 'regex:/^\d{4}-\d{4}$/'],
             'boursier' => ['nullable', 'boolean'],
-            'type_bourse' => ['nullable', 'string', 'max:100'],
-            'allergies' => ['nullable', 'boolean'],
-            'maladies_chroniques' => ['nullable', 'boolean'],
-            'autiste' => ['nullable', 'boolean'],
-            'name_tuteur' => ['nullable', 'string', 'max:255'],
-            'telephone_tuteur' => ['nullable', Telephone::regle()],
-            'adresse_tuteur' => ['nullable', 'string', 'max:255'],
             // Informations académiques : seulement si l'étudiant a une demande.
-            'annee_academique_precedent' => ['nullable', 'string', 'regex:/^\d{4}-\d{4}$/'],
             'niveau_etude_precedent_code' => ['nullable', 'string', Rule::exists('niveau_etude', 'id_niveau_etude')],
             'niveau_etude_actuel_code' => ['nullable', 'string', Rule::exists('niveau_etude', 'id_niveau_etude')],
             'filiere_code' => ['nullable', Rule::exists('filiere', 'id_filiere')],
@@ -125,14 +112,11 @@ class EtudiantEditionService
             'credit_valider' => ['nullable', 'integer', 'min:0', 'max:'.DemandeEtudiant::CREDITS_PAR_AN],
         ], [
             'matricule.unique' => 'Un autre étudiant possède déjà ce matricule.',
-            'numero_etudiant.unique' => 'Un autre étudiant possède déjà ce numéro étudiant.',
             'numero_piece.unique' => 'Un autre étudiant possède déjà ce numéro de pièce.',
             'telephone1.unique' => 'Un autre étudiant possède déjà ce numéro de téléphone.',
             'email1.unique' => 'Un autre étudiant possède déjà cette adresse e-mail.',
             'date_naissance.before' => 'La date de naissance doit être antérieure à aujourd’hui.',
             'ville_id.exists' => 'La ville choisie n’appartient pas à la région sélectionnée.',
-            'annee_academique_actuel.regex' => 'Format attendu : 2025-2026.',
-            'annee_academique_precedent.regex' => 'Format attendu : 2025-2026.',
             'moyenne.max' => 'La moyenne doit être comprise entre 0 et 20.',
             'credit_valider.max' => 'Le nombre de crédits validés doit être compris entre 0 et '.DemandeEtudiant::CREDITS_PAR_AN.'.',
         ]);
@@ -144,6 +128,7 @@ class EtudiantEditionService
                 $fiche[$champ] = (bool) $fiche[$champ];
             }
         }
+        // Plus boursier : le type de bourse éventuellement connu n'a plus lieu d'être.
         if (array_key_exists('boursier', $fiche) && ! $fiche['boursier']) {
             $fiche['type_bourse'] = null;
         }

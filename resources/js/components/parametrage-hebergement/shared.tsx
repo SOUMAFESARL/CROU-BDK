@@ -21,6 +21,7 @@ import {
 /** Campagne proposée dans la liste de choix des pages de campagne (`ParametrageHebergement::options()`). */
 export type CampagneOption = {
     id: string;
+    libelle: string | null;
     annee: string | null;
     description: string | null;
     statut: string | null;
@@ -266,9 +267,11 @@ export function ErreurGenerale({ message }: { message: string | null }) {
     );
 }
 
+/** « Libellé — année » ; la description remplace le libellé quand celui-ci n’est pas renseigné. */
 export const libelleCampagne = (c: CampagneOption) =>
-    [c.annee, c.description].filter(Boolean).join(" — ") ||
-    "Campagne sans titre";
+    [c.libelle?.trim() || c.description?.trim(), c.annee]
+        .filter(Boolean)
+        .join(" — ") || "Campagne sans titre";
 
 /** Choix de la campagne affichée (`?campagne_id=`), commun aux pages de campagne du paramétrage. */
 export function ChoixCampagne({

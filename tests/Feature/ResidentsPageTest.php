@@ -116,14 +116,14 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNotNull($props['urls']['admissionDirecte']);
 
         $donnees = ['name' => 'Konan Awa Marie', 'genre_id' => 2, 'matricule' => 'M-001', 'telephone1' => '0700000001',
-            'email1' => 'awa@example.com', 'date_naissance' => '2003-05-12', 'name_tuteur' => 'Konan Yao'];
+            'email1' => 'awa@example.com', 'date_naissance' => '2003-05-12', 'lieu_naissance' => 'Bondoukou'];
         $this->put(route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => 'student']), $donnees)
             ->assertSessionHasNoErrors()->assertSessionHas('success');
 
         $etudiant = DB::table('etudiants')->where('id_etudiant', 'student')->first();
         $this->assertSame('Konan Awa Marie', $etudiant->name);
         $this->assertSame('awa@example.com', $etudiant->email1);
-        $this->assertSame('Konan Yao', $etudiant->name_tuteur);
+        $this->assertSame('Bondoukou', $etudiant->lieu_naissance);
         $this->assertSame('residents', $etudiant->statut_inscription);
 
         // Matricule et téléphone déjà utilisés par un autre étudiant : refusés.
@@ -139,9 +139,8 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
 
         $donnees = ['name' => 'Konan Awa', 'genre_id' => 2, 'matricule' => 'M-001', 'telephone1' => '0700000001',
             'groupe_sanguin_id' => 1, 'type_piece_id' => 1, 'numero_piece' => 'CI0001', 'date_expiration' => '2034-01-10',
-            'regions_id' => 1, 'ville_id' => 10, 'distance' => 120, 'annee_academique_actuel' => '2025-2026',
-            'boursier' => true, 'type_bourse' => 'Nationale', 'allergies' => true, 'maladies_chroniques' => false, 'autiste' => false,
-            'annee_academique_precedent' => '2024-2025', 'niveau_etude_precedent_code' => 'L1', 'niveau_etude_actuel_code' => 'L2',
+            'regions_id' => 1, 'ville_id' => 10, 'distance' => 120, 'boursier' => true,
+            'niveau_etude_precedent_code' => 'L1', 'niveau_etude_actuel_code' => 'L2',
             'filiere_code' => '1', 'moyenne' => '13.5', 'credit_valider' => 45];
         $this->put(route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => 'student']), $donnees)
             ->assertSessionHasNoErrors();
@@ -150,8 +149,6 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('CI0001', $etudiant->numero_piece);
         $this->assertSame(10, (int) $etudiant->ville_id);
         $this->assertSame(1, (int) $etudiant->boursier);
-        $this->assertSame('Nationale', $etudiant->type_bourse);
-        $this->assertSame(1, (int) $etudiant->allergies);
         $demande = DB::table('demande')->where('etudiant_id', 'student')->first();
         $this->assertSame('L2', $demande->niveau_etude_actuel_code);
         $this->assertSame('1', (string) $demande->filiere_code);
@@ -166,7 +163,17 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
             ['ville_id' => 20, 'date_expiration' => 'pas-une-date', 'niveau_etude_actuel_code' => 'X'] + $donnees)
             ->assertSessionHasErrors(['ville_id', 'date_expiration', 'niveau_etude_actuel_code']);
 
+        // Informations absentes du formulaire de demande initiale : ignorées.
+        $this->put(route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => 'student']),
+            ['allergies' => true, 'name_tuteur' => 'Konan Yao', 'telephone2' => '0700000009'] + $donnees)
+            ->assertSessionHasNoErrors();
+        $etudiant = DB::table('etudiants')->where('id_etudiant', 'student')->first();
+        $this->assertSame(0, (int) $etudiant->allergies);
+        $this->assertNull($etudiant->name_tuteur);
+        $this->assertNull($etudiant->telephone2);
+
         // Plus boursier : le type de bourse est effacé.
+        DB::table('etudiants')->where('id_etudiant', 'student')->update(['type_bourse' => 'Nationale']);
         $this->put(route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => 'student']), ['boursier' => false] + $donnees)
             ->assertSessionHasNoErrors();
         $this->assertNull(DB::table('etudiants')->where('id_etudiant', 'student')->value('type_bourse'));
