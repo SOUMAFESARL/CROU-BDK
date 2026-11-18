@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowLeft, ArrowRight, Loader2, Save } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Controller, useForm, useWatch, type FieldPath } from 'react-hook-form';
 import { z } from 'zod';
 import { ICON } from '@/components/layout/app-sidebar';
@@ -30,39 +30,58 @@ const nombre = (min: number, max: number | null, message: string, entier = false
             return Number.isFinite(n) && n >= min && (max === null || n <= max) && (!entier || Number.isInteger(n));
         }, message);
 
-/** Uniquement les informations saisies dans le formulaire de demande initiale (`EtudiantEditionService`). */
-const schema = z
-    .object({
-        // Identité
-        name: requis('Le nom et les prénoms sont obligatoires.').max(255, '255 caractères au maximum.'),
-        genre_id: requis('Choisissez la civilité.'),
-        date_naissance: z.string(),
-        lieu_naissance: optionnel(255),
-        nationalite: optionnel(100),
-        groupe_sanguin_id: z.string(),
-        // Pièce d'identité
-        type_piece_id: z.string(),
-        numero_piece: optionnel(50),
-        date_expiration: z.string(),
-        // Coordonnées
-        telephone1: telephoneObligatoire('Le téléphone est obligatoire.'),
-        email1: email,
-        regions_id: z.string(),
-        ville_id: z.string(),
-        adresse: optionnel(255),
-        distance: nombre(0, null, 'La distance doit être un nombre entier positif.', true),
-        // Études
-        matricule: requis('Le matricule est obligatoire.').max(100, '100 caractères au maximum.'),
-        niveau_etude_precedent_code: z.string(),
-        niveau_etude_actuel_code: z.string(),
-        filiere_code: z.string(),
-        moyenne: nombre(0, 20, 'La moyenne doit être comprise entre 0 et 20.'),
-        credit_valider: nombre(0, 60, 'Le nombre de crédits doit être un entier entre 0 et 60.', true),
-        // Situation
-        boursier: z.boolean(),
-    });
+/** Note au bac saisie sur 400 par un nouveau bachelier (`DemandeHebergementRequest::NOTE_BAC_MAX`). */
+const NOTE_BAC_MAX = 400;
 
-export type ValeursEtudiant = z.infer<typeof schema> & {
+/**
+ * Uniquement les informations saisies dans le formulaire de demande initiale (`EtudiantEditionService`), avec les mêmes
+ * critères : matricule facultatif ; après la Terminale (`terminales` : niveaux précédents d'un nouveau bachelier), note au
+ * bac sur 400, ni matricule ni crédits ; sinon moyenne sur 20. Le serveur revérifie.
+ */
+const creerSchema = (terminales: string[]) =>
+    z
+        .object({
+            // Identité
+            name: requis('Le nom et les prénoms sont obligatoires.').max(255, '255 caractères au maximum.'),
+            genre_id: requis('Choisissez la civilité.'),
+            date_naissance: z.string(),
+            lieu_naissance: optionnel(255),
+            nationalite: optionnel(100),
+            groupe_sanguin_id: z.string(),
+            // Pièce d'identité
+            type_piece_id: z.string(),
+            numero_piece: optionnel(50),
+            date_expiration: z.string(),
+            // Coordonnées
+            telephone1: telephoneObligatoire('Le téléphone est obligatoire.'),
+            email1: email,
+            regions_id: z.string(),
+            ville_id: z.string(),
+            adresse: optionnel(255),
+            distance: nombre(0, null, 'La distance doit être un nombre entier positif.', true),
+            // Études
+            matricule: optionnel(50),
+            niveau_etude_precedent_code: z.string(),
+            niveau_etude_actuel_code: z.string(),
+            filiere_code: z.string(),
+            moyenne: z.string().trim(),
+            credit_valider: nombre(0, 60, 'Le nombre de crédits doit être un entier entre 0 et 60.', true),
+            // Situation
+            boursier: z.boolean(),
+        })
+        .superRefine((valeurs, ctx) => {
+            const bachelier = terminales.includes(valeurs.niveau_etude_precedent_code);
+            const max = bachelier ? NOTE_BAC_MAX : 20;
+            const message = bachelier ? `La note au bac doit être comprise entre 1 et ${NOTE_BAC_MAX}.` : 'La moyenne doit être comprise entre 1 et 20.';
+            if (!nombre(1, max, message).safeParse(valeurs.moyenne).success) ctx.addIssue({ code: 'custom', path: ['moyenne'], message });
+            if (terminales.includes(valeurs.niveau_etude_actuel_code)) {
+                ctx.addIssue({ code: 'custom', path: ['niveau_etude_actuel_code'], message: 'La Terminale ne peut pas être le niveau d’étude actuel.' });
+            }
+        });
+
+type Schema = z.infer<ReturnType<typeof creerSchema>>;
+
+export type ValeursEtudiant = Schema & {
     /** Faux si l'étudiant n'a aucune demande : les informations académiques de la demande ne sont alors pas modifiables. */
     avec_demande: boolean;
 };
@@ -74,11 +93,12 @@ export type OptionsEtudiant = {
     groupesSanguins: Option[];
     regions: Option[];
     villes: (Option & { region_id: string })[];
-    niveaux: Option[];
+    /** `terminale` : niveau précédent d'un nouveau bachelier, jamais un niveau actuel. */
+    niveaux: (Option & { terminale?: boolean })[];
     filieres: Option[];
 };
 
-type Champ = FieldPath<z.infer<typeof schema>>;
+type Champ = FieldPath<Schema>;
 
 const CHAMPS_ETAPES: Champ[][] = [
     ['name', 'genre_id', 'date_naissance', 'lieu_naissance', 'nationalite', 'groupe_sanguin_id'],
@@ -102,6 +122,8 @@ type Props = {
 export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
     const [etape, setEtape] = useState(0);
     const [erreurServeur, setErreurServeur] = useState<string | null>(null);
+    const terminales = useMemo(() => options.niveaux.filter((niveau) => niveau.terminale).map((niveau) => niveau.id), [options.niveaux]);
+    const schema = useMemo(() => creerSchema(terminales), [terminales]);
     const {
         control,
         register,
@@ -111,9 +133,12 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
         setError,
         setValue,
         formState: { errors, isSubmitting },
-    } = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema), mode: 'onTouched' });
+    } = useForm<Schema>({ resolver: zodResolver(schema), mode: 'onTouched' });
     const region = useWatch({ control, name: 'regions_id' });
+    const precedent = useWatch({ control, name: 'niveau_etude_precedent_code' });
     const avecDemande = etudiant?.valeurs.avec_demande ?? false;
+    // Nouveau bachelier (niveau précédent : Terminale) : note au bac sur 400, ni matricule ni crédits, comme le formulaire de demande.
+    const bachelier = avecDemande && terminales.includes(precedent ?? '');
 
     useEffect(() => {
         if (etudiant) {
@@ -139,7 +164,7 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
         setEtape(cible);
     };
 
-    const onSubmit = (valeurs: z.infer<typeof schema>) => {
+    const onSubmit = (valeurs: Schema) => {
         if (!etudiant) return;
         setErreurServeur(null);
         return envoyer(etudiant.url, valeurs, {
@@ -267,15 +292,21 @@ export function EtudiantEditDialog({ etudiant, options, onClose }: Props) {
                         {etape === 3 && (
                             <>
                                 <Grille>
-                                    <div className="sm:col-span-2">{champ('matricule', 'Matricule', { required: true })}</div>
+                                    {!bachelier && <div className="sm:col-span-2">{champ('matricule', 'Matricule')}</div>}
                                     {avecDemande && liste('niveau_etude_precedent_code', 'Niveau précédent', options.niveaux)}
-                                    {avecDemande && liste('niveau_etude_actuel_code', 'Niveau actuel', options.niveaux)}
+                                    {avecDemande &&
+                                        liste(
+                                            'niveau_etude_actuel_code',
+                                            'Niveau actuel',
+                                            options.niveaux.filter((niveau) => !niveau.terminale),
+                                        )}
                                     {avecDemande && <div className="sm:col-span-2">{liste('filiere_code', 'Filière', options.filieres)}</div>}
-                                    {avecDemande && champ('moyenne', 'Moyenne (sur 20)', { inputMode: 'decimal' })}
-                                    {avecDemande && champ('credit_valider', 'Crédits validés (sur 60)', { inputMode: 'numeric' })}
+                                    {avecDemande && champ('moyenne', bachelier ? `Note au bac (sur ${NOTE_BAC_MAX})` : 'Moyenne (sur 20)', { inputMode: 'decimal' })}
+                                    {avecDemande && !bachelier && champ('credit_valider', 'Crédits validés (sur 60)', { inputMode: 'numeric' })}
                                     {caseACocher('boursier', 'Boursier')}
                                 </Grille>
                                 {!avecDemande && <Encadre ton="info">Aucune demande : niveau, filière, moyenne et crédits ne sont pas modifiables.</Encadre>}
+                                {bachelier && <Encadre ton="info">Nouveau bachelier : ni matricule ni crédits validés, la note au bac est saisie sur {NOTE_BAC_MAX}.</Encadre>}
                             </>
                         )}
 

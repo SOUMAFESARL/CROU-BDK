@@ -13,6 +13,9 @@ use Tests\TestCase;
 class AdmissionDerogationTest extends TestCase
 {
     private AdmissionDerogationService $service;
+    /** Constat de recevabilité (`ConformiteDemande`) : demande irrecevable. */
+    private array $conformite = ['volet' => 'admission', 'regles' => [['label' => 'Distance', 'campagne' => '≤ 50 km', 'etudiant' => '80 km', 'etat' => 'nok']]];
+    /** Éligibilité contrôlée par `DossierWorkflow` au passage en « Recevable » (sanction bloquante uniquement). */
     private array $evaluation = ['eligible' => false, 'regles' => [['label' => 'Distance', 'ok' => false]]];
 
     protected function setUp(): void
@@ -49,6 +52,7 @@ class AdmissionDerogationTest extends TestCase
         $repo = $this->mock(EtudiantRepositoryInterface::class);
         $repo->shouldReceive('findWithRelations')->andReturnUsing(fn () => Etudiant::findOrFail('student'));
         $repo->shouldReceive('verifierEligibilite')->andReturnUsing(fn () => $this->evaluation);
+        $this->mock(\App\Http\Services\Eligibilite\ConformiteDemande::class)->shouldReceive('evaluer')->andReturnUsing(fn () => $this->conformite);
         $this->service = app(AdmissionDerogationService::class);
     }
 
@@ -64,7 +68,7 @@ class AdmissionDerogationTest extends TestCase
         $exception = $this->service->request($this->actor('requester', 1), 'student', 'request', 'Situation exceptionnelle');
         $this->assertSame('demande', Etudiant::findOrFail('student')->statut_inscription);
         Model::withoutEvents(fn () => $this->service->decide($this->actor('approver', 3), $exception->id, true, 'Décision motivée'));
-        // Éligible : en attente de la confirmation de l'étudiant.
+        // Recevable : en attente de la confirmation de l'étudiant.
         $this->assertSame('en_attente', Etudiant::findOrFail('student')->statut_inscription);
         $this->assertSame('approved', $exception->fresh()->status);
         $this->assertSame('approver', $exception->fresh()->decided_by);
@@ -105,7 +109,7 @@ class AdmissionDerogationTest extends TestCase
     public function test_changed_criteria_require_a_new_request(): void
     {
         $exception = $this->service->request($this->actor('requester'), 'student', 'request', 'Motif');
-        $this->evaluation['regles'][] = ['label' => 'Documents', 'ok' => false];
+        $this->conformite['regles'][] = ['label' => 'Âge', 'campagne' => '≤ 25 ans', 'etudiant' => '27 ans', 'etat' => 'nok'];
         $this->expectException(ValidationException::class);
         $this->service->decide($this->actor('approver'), $exception->id, true, 'Motif');
     }
@@ -118,6 +122,21 @@ class AdmissionDerogationTest extends TestCase
         $this->assertSame('demande', Etudiant::findOrFail('student')->statut_inscription);
         $this->expectException(ValidationException::class);
         $this->service->decide($this->actor('approver'), $exception->id, true, 'Autre motif');
+    }
+
+    public function test_recevable_request_cannot_receive_a_derogation(): void
+    {
+        $this->conformite['regles'] = [['label' => 'Distance', 'campagne' => '≤ 50 km', 'etudiant' => '20 km', 'etat' => 'ok']];
+        $this->expectException(ValidationException::class);
+        $this->service->request($this->actor('requester'), 'student', 'request', 'Motif');
+    }
+
+    public function test_approved_derogation_makes_the_request_recevable(): void
+    {
+        $exception = $this->service->request($this->actor('requester'), 'student', 'request', 'Situation sociale');
+        Model::withoutEvents(fn () => $this->service->decide($this->actor('approver', 3), $exception->id, true, 'Accord motivé'));
+        $this->assertSame('eligible', DB::table('demande')->where('id_demande', 'request')->value('etat_dossier'));
+        $this->assertSame('Recevabilité par dérogation validée.', DB::table('dossier_transitions')->where('demande_id', 'request')->value('motif'));
     }
 
     public function test_empty_reason_is_rejected(): void

@@ -80,7 +80,7 @@ class StudentRequestsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame(route('etudiants.validation-demande', ['idDemande' => $dossier->getKey()]), $props['decision']['url']);
         $this->assertNull($props['proposition']);
         $this->assertSame(['fait', 'fait', 'en_cours', 'a_venir', 'a_venir'], array_column($props['etapes'], 'statut'));
-        $this->assertSame('Critères vérifiés.', collect($props['historique'])->firstWhere('etat', 'Éligible')['motif']);
+        $this->assertSame('Critères vérifiés.', collect($props['historique'])->firstWhere('etat', 'Recevable')['motif']);
     }
 
     public function test_pre_allocated_dossier_of_the_former_journey_exposes_proposal_answer(): void

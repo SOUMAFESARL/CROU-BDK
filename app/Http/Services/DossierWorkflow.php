@@ -11,7 +11,7 @@ class DossierWorkflow
 {
     public const LABELS = [
         'brouillon'=>'Brouillon','soumis'=>'Soumis','incomplet'=>'Incomplet','en_etude'=>'En étude',
-        'eligible'=>'Éligible','confirme'=>'Confirmé par l’étudiant','pre_attribue'=>'Pré-attribué','accepte'=>'Accepté par l’étudiant',
+        'eligible'=>'Recevable','confirme'=>'Confirmé par l’étudiant','pre_attribue'=>'Pré-attribué','accepte'=>'Accepté par l’étudiant',
         'attribue_definitif'=>'Attribué définitif','refuse'=>'Refusé','annule'=>'Annulé',
         'expire'=>'Expiré','cloture'=>'Clôturé',
     ];
@@ -51,7 +51,9 @@ class DossierWorkflow
             && ($regle['ok'] ?? false) !== true);
         if ($regles->isEmpty() || $sanctionBloquante) {
             $exception = AdmissionDerogation::where('demande_id',$request->getKey())->where('status','approved')->latest('decided_at')->first();
-            if (!$exception || $exception->eligibility != $evaluation) {
+            // Une dérogation approuvée (constat de recevabilité vérifié à la décision, `AdmissionDerogationService`)
+            // couvre une éligibilité non évaluable, jamais une sanction bloquante.
+            if (!$exception || $sanctionBloquante) {
                 throw ValidationException::withMessages(['etat_dossier'=>$sanctionBloquante
                     ? 'Le dossier n’est pas éligible : l’étudiant fait l’objet d’une sanction disciplinaire bloquante.'
                     : 'Le dossier n’est pas éligible : l’éligibilité de l’étudiant n’a pas pu être évaluée.']);

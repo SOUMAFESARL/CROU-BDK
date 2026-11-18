@@ -57,29 +57,30 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
     {
         $this->agentLimite();
 
-        $page = $this->page('liste', ['etat' => 'nouvelles_demandes']);
+        $page = $this->page('liste', ['etat' => 'toutes']);
 
         $this->assertSame('Admin/Hebergement/Admissions/Index', $page['component']);
         $props = $page['props'];
-        $this->assertSame('nouvelles_demandes', $props['etat']);
+        $this->assertSame('toutes', $props['etat']);
         $this->assertSame(['personnel' => false, 'historique' => false], $props['colonnes']);
-        $this->assertSame(2, $props['dossiers']['total']);
+        // « other » n'a déposé aucune demande : il ne figure pas dans la liste.
+        $this->assertSame(1, $props['dossiers']['total']);
         $this->assertSame(10, $props['dossiers']['per_page']);
         $this->assertNull($props['dossiers']['data'][0]['personnel']);
         $this->assertNull($props['dossiers']['data'][0]['demandes']);
-        $this->assertSame(2, $props['stats']['nouvelles_demandes']);
+        $this->assertSame(1, $props['stats']['toutes']);
         $this->assertSame('active', DB::table('campagne')->value('statut'));
         $this->assertArrayNotHasKey('admissionDirecte', $props['urls']);
     }
 
-    public function test_filtre_inconnu_ou_residents_ramene_aux_nouvelles_demandes(): void
+    public function test_filtre_inconnu_ou_residents_ramene_a_toutes_les_demandes(): void
     {
         $this->agentLimite();
         DB::table('etudiants')->where('id_etudiant', 'other')->update(['statut_inscription' => 'residents']);
 
         foreach (['nimporte', 'residents', null] as $etat) {
             $props = $this->page('liste', ['etat' => $etat])['props'];
-            $this->assertSame('nouvelles_demandes', $props['etat']);
+            $this->assertSame('toutes', $props['etat']);
             // Les étudiants logés ne figurent pas dans la liste des demandes.
             $this->assertSame(['student'], collect($props['dossiers']['data'])->pluck('id')->all());
         }
@@ -89,20 +90,108 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
     {
         $this->agentLimite();
 
-        $parNom = $this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['q' => 'konan'])['props'];
+        $parNom = $this->page('liste', ['etat' => 'toutes'], query: ['q' => 'konan'])['props'];
         $this->assertSame(['q' => 'konan', 'etat_dossier' => ''], $parNom['filters']);
         $this->assertSame(['student'], collect($parNom['dossiers']['data'])->pluck('id')->all());
-        $this->assertSame(['student'], collect($this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['q' => 'M-001'])['props']['dossiers']['data'])->pluck('id')->all());
+        $this->assertSame(['student'], collect($this->page('liste', ['etat' => 'toutes'], query: ['q' => 'M-001'])['props']['dossiers']['data'])->pluck('id')->all());
 
-        $soumis = $this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['etat_dossier' => 'soumis'])['props'];
+        $soumis = $this->page('liste', ['etat' => 'toutes'], query: ['etat_dossier' => 'soumis'])['props'];
         $this->assertSame(['student'], collect($soumis['dossiers']['data'])->pluck('id')->all());
         $this->assertContains('soumis', array_column($soumis['etatsDossier'], 'value'));
-        $this->assertSame(0, $this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['etat_dossier' => 'refuse'])['props']['dossiers']['total']);
+        $this->assertSame(0, $this->page('liste', ['etat' => 'toutes'], query: ['etat_dossier' => 'refuse'])['props']['dossiers']['total']);
 
         // Valeur inconnue : filtre ignoré.
-        $inconnu = $this->page('liste', ['etat' => 'nouvelles_demandes'], query: ['etat_dossier' => 'pirate'])['props'];
+        $inconnu = $this->page('liste', ['etat' => 'toutes'], query: ['etat_dossier' => 'pirate'])['props'];
         $this->assertSame('', $inconnu['filters']['etat_dossier']);
-        $this->assertSame(2, $inconnu['dossiers']['total']);
+        $this->assertSame(1, $inconnu['dossiers']['total']);
+    }
+
+    public function test_demandes_recevables_et_rejetees_selon_les_criteres_de_la_campagne(): void
+    {
+        $this->agentEligibilite();
+        $demande = DB::table('demande')->where('etudiant_id', 'student');
+        $ids = fn (string $etat) => collect($this->page('liste', ['etat' => $etat])['props']['dossiers']['data'])->pluck('id')->all();
+
+        // Nouveau bachelier : 9/20 = 180/400 sous le seuil du modèle CROU (200/400) → rejetée.
+        $demande->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 9]);
+        $props = $this->page('liste', ['etat' => 'rejetees'])['props'];
+        $this->assertSame('rejetees', $props['etat']);
+        $this->assertSame(['student'], collect($props['dossiers']['data'])->pluck('id')->all());
+        $this->assertSame(['toutes' => 1, 'recevables' => 0, 'rejetees' => 1, 'refusees' => 0], $props['stats']);
+        $this->assertSame([], $ids('recevables'));
+
+        // 12/20 = 240/400 : tous les critères conformes → recevable.
+        $demande->update(['moyenne' => 12]);
+        $this->assertSame(['student'], $ids('recevables'));
+        $this->assertSame([], $ids('rejetees'));
+        $this->assertSame(['student'], $ids('toutes'));
+
+        // Information manquante (nationalité non renseignée) sans critère non conforme : ni recevable ni rejetée.
+        DB::table('etudiants')->where('id_etudiant', 'student')->update(['nationalite' => '']);
+        $this->assertSame([], $ids('recevables'));
+        $this->assertSame([], $ids('rejetees'));
+        $this->assertSame(['student'], $ids('toutes'));
+
+        // Refusée par un agent pendant la validation : sort des listes recevables / irrecevables, reste dans « Toutes ».
+        DB::table('etudiants')->where('id_etudiant', 'student')->update(['nationalite' => 'IVOIRIENNE']);
+        $id = (string) $demande->value('id_demande');
+        $refus = fn (string $etat, string $acteur) => [
+            $demande->update(['etat_dossier' => $etat]),
+            DB::table('dossier_transitions')->insert(['demande_id' => $id, 'ancien_etat' => 'soumis', 'nouvel_etat' => $etat, 'acteur_type' => $acteur, 'created_at' => now()]),
+        ];
+        $refus('refuse', 'admin');
+        $props = $this->page('liste', ['etat' => 'refusees'])['props'];
+        $this->assertSame('refusees', $props['etat']);
+        $this->assertSame(['student'], collect($props['dossiers']['data'])->pluck('id')->all());
+        $this->assertSame(['toutes' => 1, 'recevables' => 0, 'rejetees' => 0, 'refusees' => 1], $props['stats']);
+        $this->assertSame([], $ids('recevables'));
+
+        // Refus automatique (barème) ou annulation par l'étudiant : pas une décision de l'administration.
+        $refus('refuse', 'systeme');
+        $this->assertSame([], $ids('refusees'));
+        $this->assertSame(['student'], $ids('recevables'));
+        $refus('annule', 'etudiant');
+        $this->assertSame([], $ids('refusees'));
+        $refus('annule', 'admin');
+        $this->assertSame(['student'], $ids('refusees'));
+
+        // Anciens liens : « en_attente » → recevables, « annuler » → rejetées, « nouvelles_demandes » → toutes.
+        $this->assertSame('recevables', $this->page('liste', ['etat' => 'en_attente'])['props']['etat']);
+        $this->assertSame('rejetees', $this->page('liste', ['etat' => 'annuler'])['props']['etat']);
+        $this->assertSame('toutes', $this->page('liste', ['etat' => 'nouvelles_demandes'])['props']['etat']);
+    }
+
+    public function test_demande_irrecevable_rendue_recevable_par_derogation(): void
+    {
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.create']);
+        $ids = fn (string $etat) => collect($this->page('liste', ['etat' => $etat])['props']['dossiers']['data'])->pluck('id')->all();
+        // Nouveau bachelier : 9/20 = 180/400 sous le seuil du modèle CROU (200/400) → irrecevable.
+        DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 9]);
+        $id = (string) DB::table('demande')->where('etudiant_id', 'student')->value('id_demande');
+
+        $props = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props'];
+        $this->assertNotNull($props['derogations']['demander']);
+        $this->assertNull($props['eligibilite']['derogation']);
+
+        // Dérogation en attente : la demande reste irrecevable ; approuvée : elle devient recevable.
+        DB::table('admission_derogations')->insert(['id' => 'derog', 'demande_id' => $id, 'etudiant_id' => 'student', 'status' => 'pending']);
+        $this->assertSame(['student'], $ids('rejetees'));
+        DB::table('admission_derogations')->update(['status' => 'approved', 'decided_at' => '2026-11-18 10:00:00']);
+        $this->assertSame(['student'], $ids('recevables'));
+        $this->assertSame([], $ids('rejetees'));
+
+        $props = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props'];
+        $this->assertSame(1, $props['eligibilite']['non_conformes']);
+        $this->assertSame('2026-11-18 10:00', $props['eligibilite']['derogation']['date']);
+        $this->assertNull($props['derogations']['demander']);
+    }
+
+    public function test_pas_de_derogation_pour_une_demande_recevable(): void
+    {
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.create']);
+        DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12]);
+
+        $this->assertNull($this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['derogations']['demander']);
     }
 
     public function test_traitement_d_une_demande_avec_droits_limites(): void
@@ -151,6 +240,45 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('L1', $demande->niveau_etude_actuel_code);
         $this->assertEquals(12, (float) $demande->moyenne);
         $this->assertSame('soumis', $demande->etat_dossier);
+    }
+
+    /** Mêmes critères que le formulaire de demande : matricule facultatif ; nouveau bachelier : note au bac /400, ni matricule ni crédits. */
+    public function test_modification_avec_les_criteres_du_formulaire_de_demande(): void
+    {
+        $this->agentLimite(['hebergement.admissions.update']);
+        // Ordre des niveaux : Terminale, puis Licence 1, Licence 2.
+        DB::table('niveau_etude')->insert(['id_niveau_etude' => 'TLE', 'name' => 'Terminale', 'ordre' => 1]);
+        DB::table('niveau_etude')->where('id_niveau_etude', 'L1')->update(['ordre' => 2]);
+        DB::table('niveau_etude')->where('id_niveau_etude', 'L2')->update(['ordre' => 3]);
+        DB::table('etudiants')->where('id_etudiant', 'student')->update(['matricule' => null]);
+        $url = route('admin.hebergement.campagnes_admission.update_etudiant', ['etudiant' => 'student']);
+        $base = ['name' => 'Konan Awa', 'genre_id' => 2, 'telephone1' => '0700000001', 'matricule' => ''];
+        $demande = fn () => DB::table('demande')->where('etudiant_id', 'student')->first();
+
+        // Matricule non renseigné au départ : la modification passe sans matricule.
+        $this->put($url, $base + ['niveau_etude_precedent_code' => 'L1', 'niveau_etude_actuel_code' => 'L2', 'moyenne' => '12', 'credit_valider' => '48'])
+            ->assertSessionHasNoErrors()->assertSessionHas('success');
+        $this->assertNull(DB::table('etudiants')->where('id_etudiant', 'student')->value('matricule'));
+        $this->assertSame(48, (int) $demande()->credit_valider);
+
+        // Moyenne sur 20 (entre 1 et 20) ; niveau actuel inférieur au précédent refusé.
+        $this->put($url, $base + ['niveau_etude_precedent_code' => 'L2', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => '25'])
+            ->assertSessionHasErrors(['moyenne', 'niveau_etude_actuel_code']);
+
+        // Nouveau bachelier : note au bac sur 400 enregistrée sur 20, crédits effacés, matricule ignoré.
+        $this->put($url, $base + ['matricule' => 'IGNORE', 'niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => '245', 'credit_valider' => '30'])
+            ->assertSessionHasNoErrors();
+        $this->assertEquals(12.25, (float) $demande()->moyenne);
+        $this->assertNull($demande()->credit_valider);
+        $this->assertNull(DB::table('etudiants')->where('id_etudiant', 'student')->value('matricule'));
+        // La note est restituée sur 400 dans le formulaire ; la Terminale est signalée comme niveau d'un nouveau bachelier.
+        $props = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props'];
+        $this->assertSame('245', $props['edition']['moyenne']);
+        $this->assertTrue(collect($props['options']['niveaux'])->firstWhere('id', 'TLE')['terminale']);
+
+        // La Terminale n'est pas un niveau actuel possible.
+        $this->put($url, $base + ['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'TLE', 'moyenne' => '245'])
+            ->assertSessionHasErrors(['niveau_etude_actuel_code']);
     }
 
     public function test_informations_saisies_regroupees_par_etape_du_formulaire(): void

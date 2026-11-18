@@ -189,19 +189,42 @@ class EtudiantRepository implements EtudiantRepositoryInterface
     }
 
     /**
+     * Statuts d'inscription des étudiants suivis sur la page « Admissions » (`etat = 'demandes'`) : demandes en cours,
+     * en attente de confirmation et rejetées ; les dossiers en vérification et les résidents ont leur propre page.
+     */
+    public const STATUTS_DEMANDES = ['demande', 'en_attente', 'annuler'];
+
+    /**
+     * Étudiants de la page « Admissions » ayant une demande, avec ce qu'il faut pour évaluer la conformité
+     * de leur dernière demande aux critères de sa campagne (`RecevabiliteDemandes`).
+     */
+    public function getPopulationDemandes(): \Illuminate\Database\Eloquent\Collection
+    {
+        return Etudiant::with(['derniereDemande.campagne', 'derniereDemande.niveauEtudiantPrecedent', 'derniereDemande.niveauEtudiantActuel'])
+            ->whereIn(DB::raw('LOWER(statut_inscription)'), self::STATUTS_DEMANDES)
+            ->whereHas('derniereDemande')
+            ->get();
+    }
+
+    /**
      * `$recherche` : nom, matricule, téléphone, numéro de demande ou numéro de chambre (affectation confirmée).
      * `$etatDossier` : état (`Demande.etat_dossier`) de la dernière demande de l'étudiant.
+     * `$etudiants` : limite la liste à ces étudiants (identifiants), par exemple les demandes recevables.
      */
-    public function getAdmissionsPage(?string $etat = null, int $parPage = 25, ?string $recherche = null, ?string $etatDossier = null): \Illuminate\Pagination\LengthAwarePaginator
+    public function getAdmissionsPage(?string $etat = null, int $parPage = 25, ?string $recherche = null, ?string $etatDossier = null, ?array $etudiants = null): \Illuminate\Pagination\LengthAwarePaginator
     {
         $recherche = trim((string) $recherche);
         $etatDossier = trim((string) $etatDossier);
-        $status = match($etat) {
-            'nouvelles_demandes'=>'demande', 'en_attente'=>'en_attente',
-            'en_verification'=>'en_verification', 'annuler'=>'annuler', default=>'residents',
+        $statuts = match($etat) {
+            'demandes' => self::STATUTS_DEMANDES,
+            'nouvelles_demandes'=>['demande'], 'en_attente'=>['en_attente'],
+            'en_verification'=>['en_verification'], 'annuler'=>['annuler'], default=>['residents'],
         };
         return Etudiant::with(['region','ville','derniereDemande'])->withCount('demandes')
-            ->whereRaw('LOWER(statut_inscription) = ?',[$status])
+            ->whereIn(DB::raw('LOWER(statut_inscription)'), $statuts)
+            // Page « Admissions » : uniquement les étudiants ayant déposé une demande (comme `getPopulationDemandes`).
+            ->when($etat === 'demandes', fn ($query) => $query->whereHas('derniereDemande'))
+            ->when($etudiants !== null, fn ($query) => $query->whereIn('id_etudiant', $etudiants))
             ->when($recherche !== '', function ($query) use ($recherche) {
                 $motif = '%'.addcslashes($recherche, '%_\\').'%';
                 $query->where(fn ($q) => $q->where('name', 'like', $motif)

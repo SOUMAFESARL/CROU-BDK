@@ -2,7 +2,7 @@
 namespace App\Http\Services;
 
 use App\Models\{AdmissionDerogation, Campagne, DemandeEtudiant, Etudiant, User};
-use App\Repositories\Interfaces\EtudiantRepositoryInterface;
+use App\Http\Services\Eligibilite\ConformiteDemande;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -42,12 +42,18 @@ class AdmissionDerogationService
         return [$student, $request, $campaign];
     }
 
-    private function evaluate(Etudiant $student, Campagne $campaign): array
+    /**
+     * Constat de recevabilité de la demande : critères de la campagne comparés aux valeurs saisies (`ConformiteDemande`,
+     * même calcul que la liste des admissions et le bloc « Critères d’éligibilité » de la fiche, situation disciplinaire
+     * comprise). Seules les règles sont conservées avec la dérogation, pour vérifier qu'elles n'ont pas changé à la décision.
+     */
+    private function evaluate(Etudiant $student, DemandeEtudiant $request, Campagne $campaign): array
     {
-        $repository = app(EtudiantRepositoryInterface::class);
-        return $repository->verifierEligibilite($repository->findWithRelations($student->getKey()), [
-            'success' => true, 'data' => ['campagnes' => collect([$campaign])],
-        ]);
+        $request->setRelation('campagne', $campaign);
+        $student->setRelation('derniereDemande', $request);
+        $evaluation = app(ConformiteDemande::class)->evaluer($student, $request, true);
+
+        return ['volet' => $evaluation['volet'] ?? null, 'regles' => array_values($evaluation['regles'] ?? [])];
     }
 
     public function request(User $actor, string $studentId, string $requestId, string $reason): AdmissionDerogation
@@ -58,9 +64,10 @@ class AdmissionDerogationService
             if (AdmissionDerogation::where('demande_id', $requestId)->where('status', 'pending')->exists()) {
                 throw ValidationException::withMessages(['reason' => 'Une dérogation attend déjà une décision.']);
             }
-            $eligibility = $this->evaluate($student, $campaign);
-            if (($eligibility['eligible'] ?? null) !== false || !collect($eligibility['regles'] ?? [])->contains(fn ($rule) => ($rule['ok'] ?? null) === false)) {
-                throw ValidationException::withMessages(['reason' => 'La dérogation nécessite un constat de critères non respectés.']);
+            // Seule une demande irrecevable (au moins un critère non conforme) peut être rendue recevable par dérogation.
+            $eligibility = $this->evaluate($student, $request, $campaign);
+            if (!collect($eligibility['regles'])->contains('etat', 'nok')) {
+                throw ValidationException::withMessages(['reason' => 'La dérogation ne concerne qu’une demande irrecevable (au moins un critère non conforme).']);
             }
             return AdmissionDerogation::create([
                 'id' => (string) Str::uuid(), 'etudiant_id' => $studentId, 'demande_id' => $requestId,
@@ -84,13 +91,13 @@ class AdmissionDerogationService
             }
             if ($approve) {
                 [$student, $request, $campaign] = $this->dossier($exception->etudiant_id, $exception->demande_id);
-                if ($this->evaluate($student, $campaign) != $exception->eligibility) {
+                if ($this->evaluate($student, $request, $campaign)['regles'] != ($exception->eligibility['regles'] ?? null)) {
                     throw ValidationException::withMessages(['reason' => 'Les critères ont changé : refusez cette demande puis faites établir une nouvelle dérogation.']);
                 }
                 $student->update(['statut_inscription' => 'en_attente', 'is_rejet' => 0]);
                 // L'approbation autorise la transition, mais ne simule ni proposition ni acceptation.
                 $exception->update(['status'=>'approved','decided_at'=>now(),'decided_by'=>$actor->getKey()]);
-                app(DossierWorkflow::class)->admin($request->getKey(),'eligible','Éligibilité par dérogation validée.');
+                app(DossierWorkflow::class)->admin($request->getKey(),'eligible','Recevabilité par dérogation validée.');
             }
             $exception->update(['status' => $approve ? 'approved' : 'rejected', 'decided_by' => $actor->getKey(),
                 'decider_name' => $actor->name ?? $actor->getKey(), 'decision_reason' => $reason, 'decided_at' => now()]);

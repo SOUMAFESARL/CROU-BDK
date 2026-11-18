@@ -20,7 +20,11 @@ import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
 
-type Filtre = 'nouvelles_demandes' | 'en_attente' | 'annuler';
+/**
+ * Toutes les demandes, demandes recevables (tous les critères conformes), demandes irrecevables (au moins un critère
+ * non conforme), demandes refusées (refusées ou annulées par l'administration pendant la validation).
+ */
+type Filtre = 'toutes' | 'recevables' | 'rejetees' | 'refusees';
 
 type Dossier = {
     id: string;
@@ -29,7 +33,7 @@ type Dossier = {
     demande_id: string | null;
     etat_dossier: string | null;
     date: string | null;
-    personnel: { telephone: string | null; adresse: string | null; region: string | null; ville: string | null; date_naissance: string | null } | null;
+    personnel: { region: string | null; ville: string | null } | null;
     demandes: number | null;
     url: string | null;
     /** Refusé par le barème de scoring : peut être rendu éligible en un clic. */
@@ -38,7 +42,7 @@ type Dossier = {
 
 type Props = {
     dossiers: Paginated<Dossier>;
-    stats: { nouvelles_demandes: number; en_attente: number; annulees: number; residents: number; en_verification: number; total: number };
+    stats: Record<Filtre, number>;
     etat: Filtre;
     filters: { q: string; etat_dossier: string };
     /** États possibles de `Demande.etat_dossier` (`DossierWorkflow::LABELS`). */
@@ -49,9 +53,10 @@ type Props = {
 };
 
 const TITRES: Record<Filtre, string> = {
-    nouvelles_demandes: 'Nouvelles demandes',
-    en_attente: 'Demandes en attente',
-    annuler: 'Demandes rejetées',
+    toutes: 'Toutes les demandes',
+    recevables: 'Demandes recevables',
+    rejetees: 'Demandes irrecevables',
+    refusees: 'Demandes refusées',
 };
 
 /**
@@ -172,8 +177,6 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
         },
         ...(colonnes.personnel
             ? ([
-                  { key: 'telephone', header: 'Téléphone', className: 'whitespace-nowrap', cell: (d) => vide(d.personnel?.telephone) },
-                  { key: 'adresse', header: 'Adresse', cell: (d) => vide(d.personnel?.adresse) },
                   {
                       key: 'region',
                       header: 'Région / Ville',
@@ -184,7 +187,6 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
                           </>
                       ),
                   },
-                  { key: 'naissance', header: 'Date de naissance', className: 'whitespace-nowrap', cell: (d) => dateFr(d.personnel?.date_naissance) },
               ] satisfies DataTableColumn<Dossier>[])
             : []),
         ...(colonnes.historique
@@ -216,40 +218,36 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
         <AdminLayout title="Admissions">
             <PageHeader title="Admissions" description="Suivez les demandes de logement et traitez chaque dossier de candidature." />
 
-            <OngletsCampagnesAdmissions actif="admissions" urls={{ campagnes: urls.campagnes, admissions: urls.filtres?.nouvelles_demandes ?? null }} />
-
-            {/* Bandeau de la campagne active */}
-            <div className={cn('mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-brand border px-4 py-3 text-sm', campagneActive ? 'border-[#C6E3A6] bg-soft text-[#004D00]' : 'bg-white text-muted')}>
-                {campagneActive ? (
-                    <>
-                        <Element icone={<CirclePlay className="size-4" aria-hidden />}>
-                            <strong className="font-medium">Campagne active {campagneActive.annee}</strong>
-                        </Element>
-                        {campagneActive.echeance && <Element icone={<CalendarClock className="size-4" aria-hidden />}>Échéance des demandes : {dateFr(campagneActive.echeance)}</Element>}
-                        {campagneActive.moyenne_min && <Element icone={<GraduationCap className="size-4" aria-hidden />}>Moyenne min. {campagneActive.moyenne_min}/20</Element>}
-                        {campagneActive.distance_min && <Element icone={<MapPin className="size-4" aria-hidden />}>Distance min. {campagneActive.distance_min} km</Element>}
-                    </>
-                ) : (
-                    <Element icone={<Info className="size-4" aria-hidden />}>Aucune campagne active pour le moment.</Element>
-                )}
-            </div>
+            {/* Campagne active : à droite, sur la ligne des onglets Campagnes / Admissions. */}
+            <OngletsCampagnesAdmissions
+                actif="admissions"
+                urls={{ campagnes: urls.campagnes, admissions: urls.filtres?.toutes ?? null }}
+                aside={
+                    campagneActive ? (
+                        <>
+                            <span className="inline-flex items-center gap-1.5 rounded-brand border border-[#C6E3A6] bg-soft px-3 py-1 text-[#004D00]">
+                                <CirclePlay className="size-4" aria-hidden />
+                                <strong className="font-medium">Campagne active {campagneActive.annee}</strong>
+                            </span>
+                            {campagneActive.echeance && <Element icone={<CalendarClock className="size-4" aria-hidden />}>Échéance : {dateFr(campagneActive.echeance)}</Element>}
+                            {campagneActive.moyenne_min && <Element icone={<GraduationCap className="size-4" aria-hidden />}>Moyenne min. {campagneActive.moyenne_min}/20</Element>}
+                            {campagneActive.distance_min && <Element icone={<MapPin className="size-4" aria-hidden />}>Distance min. {campagneActive.distance_min} km</Element>}
+                        </>
+                    ) : (
+                        <Element icone={<Info className="size-4" aria-hidden />}>Aucune campagne active pour le moment.</Element>
+                    )
+                }
+            />
 
             {urls.filtres && (
                 <KpiFilters
                     label="Filtrer les dossiers"
                     active={etat}
-                    className="xl:grid-cols-3"
                     items={[
-                        {
-                            key: 'nouvelles_demandes',
-                            label: 'Nouvelles demandes',
-                            value: nombre(stats.nouvelles_demandes),
-                            tone: 'blue',
-                            href: urls.filtres.nouvelles_demandes,
-                            extra: campagneActive ? `Campagne ${campagneActive.annee}` : 'Demandes reçues',
-                        },
-                        { key: 'en_attente', label: 'En attente', value: nombre(stats.en_attente), tone: 'amber', href: urls.filtres.en_attente, extra: 'Confirmation de l’étudiant' },
-                        { key: 'annuler', label: 'Demandes rejetées', value: nombre(stats.annulees), tone: 'plum', href: urls.filtres.annuler, extra: 'Refusées' },
+                        { key: 'toutes', label: 'Toutes les demandes', value: nombre(stats.toutes), tone: 'blue', href: urls.filtres.toutes, extra: 'Demandes reçues' },
+                        { key: 'recevables', label: 'Demandes recevables', value: nombre(stats.recevables), tone: 'green', href: urls.filtres.recevables, extra: 'Tous les critères conformes' },
+                        { key: 'rejetees', label: 'Demandes irrecevables', value: nombre(stats.rejetees), tone: 'plum', href: urls.filtres.rejetees, extra: 'Au moins un critère non conforme' },
+                        { key: 'refusees', label: 'Demandes refusées', value: nombre(stats.refusees), tone: 'red', href: urls.filtres.refusees, extra: 'Par l’administration' },
                     ]}
                 />
             )}
@@ -334,8 +332,8 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
                 title={aLever === 'selection' ? 'Rendre éligibles les dossiers sélectionnés ?' : 'Rendre ce dossier éligible ?'}
                 description={
                     aLever === 'selection'
-                        ? `${nombre(selection.length)} dossier(s) refusé(s) automatiquement (score insuffisant) passeront en « Éligible » ; chaque étudiant devra confirmer son intérêt.`
-                        : `Le refus automatique de ${aLever?.name ?? ''} sera levé : le dossier passe en « Éligible » et l’étudiant devra confirmer son intérêt.`
+                        ? `${nombre(selection.length)} dossier(s) refusé(s) automatiquement (score insuffisant) passeront en « Recevable » ; chaque étudiant devra confirmer son intérêt.`
+                        : `Le refus automatique de ${aLever?.name ?? ''} sera levé : le dossier passe en « Recevable » et l’étudiant devra confirmer son intérêt.`
                 }
                 confirmLabel="Rendre éligible"
                 confirmIcon={<CircleCheck className="size-4" aria-hidden />}
@@ -362,7 +360,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
 
 function Element({ icone, children }: { icone: ReactNode; children: ReactNode }) {
     return (
-        <span className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-1.5 text-muted">
             {icone}
             {children}
         </span>

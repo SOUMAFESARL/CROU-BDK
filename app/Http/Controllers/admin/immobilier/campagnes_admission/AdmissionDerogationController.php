@@ -19,7 +19,7 @@ class AdmissionDerogationController extends Controller
         $data = $request->validate(['decision' => 'required|in:approve,reject', 'reason' => 'required|string|max:2000']);
         $service->decide(auth('admin')->user(), $derogation, $data['decision'] === 'approve', $data['reason']);
         return back()->with('success', $data['decision'] === 'approve'
-            ? 'Dérogation approuvée. Le candidat peut poursuivre son admission ; les règles de disponibilité et de capacité restent applicables.'
+            ? 'Dérogation approuvée : la demande devient recevable. Les règles de disponibilité et de capacité restent applicables.'
             : 'Dérogation refusée.');
     }
 }

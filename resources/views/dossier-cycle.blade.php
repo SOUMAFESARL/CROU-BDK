@@ -18,7 +18,7 @@
     <div class="card-body">
         <h3>Suivi du dossier</h3>
         <p>État actuel : <strong>{{ $labels[$dossier->etat_dossier] ?? $dossier->etat_dossier }}</strong></p>
-        <p class="text-muted">Brouillon → Soumis → Éligible → Confirmé par l’étudiant → Attribué définitif.</p>
+        <p class="text-muted">Soumis → Recevable → Confirmé par l’étudiant → Attribué définitif.</p>
         @if($proposal && in_array($dossier->etat_dossier,['pre_attribue','accepte','attribue_definitif'],true))
             <p>Proposition : chambre <strong>{{ $proposal->chambre?->numero_chambre ?? $proposal->chambre_id }}</strong>
                 @if($proposal->date_fin) — valable jusqu’au {{ $proposal->date_fin->format('d/m/Y H:i') }} @endif

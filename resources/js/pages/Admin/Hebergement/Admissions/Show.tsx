@@ -106,6 +106,8 @@ type Props = {
         non_conformes: number;
         score: number;
         lien: string | null;
+        /** Dérogation approuvée sur la demande : irrecevable, elle est rendue recevable. */
+        derogation: { auteur: string | null; date: string | null } | null;
     } | null;
     /** Score du barème de scoring actif (seul score comparé au minimum de la décision automatique). */
     bareme: Bareme | null;
@@ -131,7 +133,7 @@ type Props = {
     urls: { admissions: string | null; contrat: string | null; modifier: string | null };
 };
 
-const PARCOURS = ['brouillon', 'soumis', 'eligible', 'confirme', 'attribue_definitif'];
+const PARCOURS = ['soumis', 'eligible', 'confirme', 'attribue_definitif'];
 
 const ETATS_REGLE = {
     ok: { label: 'Conforme', variant: 'success', icone: CircleCheck },
@@ -325,7 +327,7 @@ function ScoreBareme({ score, minimum, volets, erreur, score_decision }: Bareme)
     );
 }
 
-function Eligibilite({ volet_libelle, campagne, origine, regles, conformes, non_conformes, score, lien }: NonNullable<Props['eligibilite']>) {
+function Eligibilite({ volet_libelle, campagne, origine, regles, conformes, non_conformes, score, lien, derogation }: NonNullable<Props['eligibilite']>) {
     const couleur = non_conformes > 0 ? '#B42318' : score === 100 ? '#067647' : '#B54708';
     const circonference = 2 * Math.PI * 26;
     const aVerifier = regles.length - conformes - non_conformes;
@@ -372,13 +374,17 @@ function Eligibilite({ volet_libelle, campagne, origine, regles, conformes, non_
                 <div>
                     <p className="font-medium text-gray-900">
                         {non_conformes > 0
-                            ? `${non_conformes} critère${non_conformes > 1 ? 's' : ''} non conforme${non_conformes > 1 ? 's' : ''} : la demande serait rejetée de la liste provisoire.`
+                            ? `${non_conformes} critère${non_conformes > 1 ? 's' : ''} non conforme${non_conformes > 1 ? 's' : ''} : ${derogation ? 'la demande est rendue recevable par dérogation.' : 'la demande est irrecevable.'}`
                             : aVerifier > 0
                               ? 'Aucun critère non conforme, mais des informations sont manquantes ou à vérifier.'
                               : 'Tous les critères de recevabilité sont conformes : la demande est recevable.'}
                     </p>
                     <p className="text-sm text-muted">
                         {conformes} critère(s) conforme(s) sur {regles.length}.
+                        {non_conformes > 0 &&
+                            (derogation
+                                ? ` Dérogation approuvée${derogation.auteur ? ` par ${derogation.auteur}` : ''}${derogation.date ? ` le ${dateFr(derogation.date)}` : ''}.`
+                                : ' Corrigez les informations de la demande ou demandez une dérogation pour la rendre recevable.')}
                     </p>
                 </div>
             </div>
@@ -515,10 +521,10 @@ function Derogations({ liste, demander, demandeId }: NonNullable<Props['derogati
     };
 
     return (
-        <Carte icone={<Scale size={18} strokeWidth={1.25} />} teinte="bg-[#FEEBC0] text-[#6B3F00]" titre="Dérogation à l’éligibilité" meta={`${liste.length} enregistrée(s)`}>
+        <Carte icone={<Scale size={18} strokeWidth={1.25} />} teinte="bg-[#FEEBC0] text-[#6B3F00]" titre="Dérogation à la recevabilité" meta={`${liste.length} enregistrée(s)`}>
             <p className="mb-4 text-sm text-muted">
-                Une dérogation permet de poursuivre l’admission malgré des critères non respectés. Elle doit être motivée et validée par un autre Sous-DAL ou Chef du service logement habilité. Elle ne
-                réserve aucune chambre et ne supprime aucun contrôle de disponibilité.
+                Une demande irrecevable (au moins un critère non conforme) peut être rendue recevable par dérogation. La dérogation doit être motivée et validée par un autre Sous-DAL ou Chef du service
+                logement habilité. Elle ne réserve aucune chambre et ne supprime aucun contrôle de disponibilité.
             </p>
 
             {demander && (
@@ -745,7 +751,7 @@ function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: stri
                     if (!ouvert) setErreurLevee(null);
                 }}
                 title="Rendre ce dossier éligible ?"
-                description="Le refus automatique sera levé : le dossier passe en « Éligible » et l’étudiant devra confirmer son intérêt."
+                description="Le refus automatique sera levé : le dossier passe en « Recevable » et l’étudiant devra confirmer son intérêt."
                 confirmLabel="Rendre éligible"
                 confirmIcon={<CircleCheck className="size-4" aria-hidden />}
                 processing={enCours}

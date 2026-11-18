@@ -31,6 +31,9 @@ class ConformiteDemande
 {
     public const VOLETS = ['admission' => 'Admission', 'readmission' => 'Réadmission'];
 
+    /** Règles lues par campagne et par volet : une seule lecture quand une liste de demandes est évaluée. */
+    private array $reglesLues = [];
+
     public function __construct(
         private CriteresCampagne $criteres,
         private CatalogueSanctions $sanctions,
@@ -44,10 +47,7 @@ class ConformiteDemande
     {
         $campagne = $demande->campagne;
         $volet = $this->criteres->voletEtudiant($campagne, (string) $etudiant->getKey());
-        $vigueur = $campagne && Schema::hasTable('campagne_regles') ? $this->criteres->enVigueur($campagne, $volet) : null;
-        $generalVigueur = $campagne && Schema::hasTable('campagne_regles') ? $this->criteres->enVigueur($campagne, 'general') : null;
-        $regles = $this->criteres->completer($volet, $vigueur?->parametres ?? [], $campagne);
-        $general = $this->criteres->completer('general', $generalVigueur?->parametres ?? [], $campagne);
+        [$vigueur, $regles, $general] = $this->reglesLues[($campagne?->getKey() ?? '').'|'.$volet] ??= $this->lireRegles($campagne, $volet);
 
         $liste = $volet === 'admission'
             ? $this->admission($regles, $general, $etudiant, $demande)
@@ -65,6 +65,19 @@ class ConformiteDemande
             'conformes' => $conformes,
             'non_conformes' => collect($liste)->where('etat', 'nok')->count(),
             'score' => $liste ? (int) round($conformes / count($liste) * 100) : 100,
+        ];
+    }
+
+    /** @return array{0: ?\App\Models\CampagneRegles, 1: array, 2: array} version en vigueur du volet, règles du volet, paramétrage général */
+    private function lireRegles(?Campagne $campagne, string $volet): array
+    {
+        $vigueur = $campagne && Schema::hasTable('campagne_regles') ? $this->criteres->enVigueur($campagne, $volet) : null;
+        $generalVigueur = $campagne && Schema::hasTable('campagne_regles') ? $this->criteres->enVigueur($campagne, 'general') : null;
+
+        return [
+            $vigueur,
+            $this->criteres->completer($volet, $vigueur?->parametres ?? [], $campagne),
+            $this->criteres->completer('general', $generalVigueur?->parametres ?? [], $campagne),
         ];
     }
 

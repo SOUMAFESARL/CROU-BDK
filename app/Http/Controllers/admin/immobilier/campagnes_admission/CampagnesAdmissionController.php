@@ -47,10 +47,15 @@ class CampagnesAdmissionController extends Controller
 
 
     /**
-     * Filtres de la liste des admissions (statut d'inscription de l'étudiant) : demandes uniquement,
-     * les étudiants logés et les dossiers en vérification sont suivis sur la page « Résidents & contrats ».
+     * Filtres de la liste des admissions : toutes les demandes, demandes recevables (tous les critères de la campagne
+     * conformes), demandes irrecevables (au moins un critère non conforme) et demandes refusées (refusées ou annulées
+     * par l'administration pendant la validation), selon `RecevabiliteDemandes`.
+     * Les étudiants logés et les dossiers en vérification sont suivis sur la page « Résidents & contrats ».
      */
-    private const FILTRES_ADMISSION = ['nouvelles_demandes', 'en_attente', 'annuler'];
+    private const FILTRES_ADMISSION = ['toutes', 'recevables', 'rejetees', 'refusees'];
+
+    /** Anciens filtres (liens enregistrés) : nouvelles demandes, en attente, rejetées. */
+    private const FILTRES_ADMISSION_ANCIENS = ['nouvelles_demandes' => 'toutes', 'en_attente' => 'recevables', 'annuler' => 'rejetees'];
 
     public function liste(Request $request, ?string $etat = null)
     {
@@ -85,7 +90,8 @@ class CampagnesAdmissionController extends Controller
         $vues = app(AdminViewAccess::class);
         $personnel = $vues->allows($admin, 'admissions.personal');
         $historique = $vues->allows($admin, 'admissions.history');
-        $etat = in_array($filtre, self::FILTRES_ADMISSION, true) ? $filtre : 'nouvelles_demandes';
+        $filtre = self::FILTRES_ADMISSION_ANCIENS[(string) $filtre] ?? $filtre;
+        $etat = in_array($filtre, self::FILTRES_ADMISSION, true) ? $filtre : 'toutes';
         $recherche = trim((string) $request->query('q', ''));
         $etatDossier = (string) $request->query('etat_dossier', '');
         $etatDossier = array_key_exists($etatDossier, DossierWorkflow::LABELS) ? $etatDossier : '';
@@ -93,7 +99,15 @@ class CampagnesAdmissionController extends Controller
         $repository = app(\App\Repositories\EtudiantRepository::class);
         // Bandeau : campagne au statut « active » (comme la page Campagnes), pas celle de l'année universitaire.
         $campagne = $this->campagneActive();
-        $dossiers = $repository->getAdmissionsPage($etat, 10, $recherche, $etatDossier);
+        // Conformité de la dernière demande de chaque étudiant aux critères de sa campagne : compteurs et listes filtrées.
+        $population = $repository->getPopulationDemandes();
+        $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
+        $dossiers = $repository->getAdmissionsPage('demandes', 10, $recherche, $etatDossier, match ($etat) {
+            'recevables' => $classement['recevables'],
+            'rejetees' => $classement['rejetees'],
+            'refusees' => $classement['refusees'],
+            default => null,
+        });
         // Levée des refus automatiques (barème) : par dossier, ou pour les dossiers cochés dans la liste.
         $decision = app(DecisionAutomatiqueDossier::class);
         $peutLever = $access->allows($admin, 'admin.hebergement.campagnes_admission.lever_refus_automatiques');
@@ -109,18 +123,21 @@ class CampagnesAdmissionController extends Controller
                 'demande_id' => $etudiant->derniereDemande ? (string) $etudiant->derniereDemande->getKey() : null,
                 'etat_dossier' => $etudiant->derniereDemande?->etat_dossier,
                 'date' => $etudiant->created_at?->format('Y-m-d H:i'),
+                // Téléphone, adresse et date de naissance : consultables sur la fiche du dossier (liste sans défilement horizontal).
                 'personnel' => $personnel ? [
-                    'telephone' => $etudiant->telephone1,
-                    'adresse' => $etudiant->adresse,
                     'region' => $etudiant->region?->name,
                     'ville' => $etudiant->ville?->name,
-                    'date_naissance' => $etudiant->date_naissance?->toDateString(),
                 ] : null,
                 'demandes' => $historique ? (int) $etudiant->demandes_count : null,
                 'url' => $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant]),
                 'refus_automatique' => in_array((string) $etudiant->derniereDemande?->getKey(), $refusAutomatiques, true),
             ]),
-            'stats' => $repository->getStats(),
+            'stats' => [
+                'toutes' => $population->count(),
+                'recevables' => count($classement['recevables']),
+                'rejetees' => count($classement['rejetees']),
+                'refusees' => count($classement['refusees']),
+            ],
             'etat' => $etat,
             'filters' => ['q' => $recherche, 'etat_dossier' => $etatDossier],
             'etatsDossier' => collect(DossierWorkflow::LABELS)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values(),
@@ -153,6 +170,9 @@ class CampagnesAdmissionController extends Controller
         $voirAdmissions = $admin->hasPermission('hebergement.admissions.view');
         $derogations = $voirAdmissions ? \App\Models\AdmissionDerogation::where('etudiant_id', $id)->latest()->get() : collect();
         $peutApprouver = app(\App\Http\Services\AdmissionDerogationService::class)->canApprove($admin);
+        // Dérogation approuvée sur la demande courante : la demande irrecevable est rendue recevable.
+        $derogationApprouvee = $derniere ? \App\Models\AdmissionDerogation::where('demande_id', $derniere->getKey())
+            ->where('status', 'approved')->latest('decided_at')->first() : null;
         $personnel = $vues->allows($admin, 'admissions.personal');
         $documents = $vues->allows($admin, 'admissions.documents');
         $historique = $vues->allows($admin, 'admissions.history');
@@ -183,7 +203,12 @@ class CampagnesAdmissionController extends Controller
             ] : null,
             // Critères de rejet du volet de la demande (admission ou réadmission) comparés aux valeurs saisies.
             'eligibilite' => $derniere && $vues->allows($admin, 'admissions.eligibility')
-                ? $this->conformite($etudiant, $derniere, $admin, $vues->allows($admin, 'housing.discipline'))
+                ? $this->conformite($etudiant, $derniere, $admin, $vues->allows($admin, 'housing.discipline')) + [
+                    'derogation' => $derogationApprouvee ? [
+                        'auteur' => $derogationApprouvee->decider_name,
+                        'date' => $derogationApprouvee->decided_at?->format('Y-m-d H:i'),
+                    ] : null,
+                ]
                 : null,
             'bareme' => $vues->allows($admin, 'admissions.eligibility') ? $this->scoreBareme($derniere, $etudiant) : null,
             'documents' => $documents ? collect($etudiant->documents)->map(fn ($document) => [
@@ -203,7 +228,9 @@ class CampagnesAdmissionController extends Controller
                     'demandeur' => $derogation->requester_name,
                     'date' => $derogation->created_at?->format('Y-m-d H:i'),
                     'motif' => $derogation->reason,
-                    'non_respectes' => collect($derogation->eligibility['regles'] ?? [])->reject(fn ($regle) => $regle['ok'] ?? false)
+                    // Critères non conformes au moment de la demande (`etat` : constat de recevabilité ; `ok` : anciennes dérogations).
+                    'non_respectes' => collect($derogation->eligibility['regles'] ?? [])
+                        ->filter(fn ($regle) => array_key_exists('etat', $regle) ? $regle['etat'] === 'nok' : !($regle['ok'] ?? false))
                         ->map(fn ($regle) => $regle['label'] ?? 'Critère non respecté')->values(),
                     'decision' => $derogation->decided_at ? [
                         'auteur' => $derogation->decider_name,
@@ -214,8 +241,10 @@ class CampagnesAdmissionController extends Controller
                     'decider' => !$derogation->decided_at && $peutApprouver && (string) $derogation->requested_by !== (string) $admin->getKey()
                         ? $url('admin.hebergement.campagnes_admission.derogations.decide', ['derogation' => $derogation->id]) : null,
                 ])->values(),
+                // Seule une demande irrecevable (au moins un critère non conforme, sans dérogation approuvée) peut être rendue recevable.
                 'demander' => in_array($derniere?->etat_dossier, ['soumis', 'en_etude'], true)
                     && !$derogations->where('demande_id', $derniere->getKey())->contains('status', 'pending')
+                    && app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classe($etudiant) === \App\Http\Services\Eligibilite\RecevabiliteDemandes::REJETEE
                     ? $url('admin.hebergement.campagnes_admission.derogations.store', ['student' => $etudiant->getKey()]) : null,
             ] : null,
             'suivi' => $voirAdmissions && $derniere ? $this->suiviDossier($derniere, $admin) : null,
