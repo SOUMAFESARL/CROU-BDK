@@ -24,6 +24,7 @@ use App\Http\Services\CampaignScoringService;
 use App\Models\CampaignScoring;
 use App\Models\DemandeEtudiant;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use RuntimeException;
 use App\Models\Etudiant;
 use Carbon\Carbon;
@@ -114,6 +115,13 @@ class CampagnesAdmissionController extends Controller
         $refusAutomatiques = $peutLever
             ? $decision->refusAutomatiques(collect($dossiers->items())->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande?->getKey())->all())
             : [];
+        // Type de demande (admission / réadmission) : volet de l'étudiant dans la campagne de sa demande.
+        $criteres = app(\App\Http\Services\Eligibilite\CriteresCampagne::class);
+        $dossiers->getCollection()->load('derniereDemande.campagne');
+        $types = $criteres->voletsDemandes(collect($dossiers->items())->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande));
+        $listesProvisoires = $etat === 'recevables'
+            ? $this->classementProvisoire($request, $population->whereIn('id_etudiant', $classement['recevables']), $campagne, $recherche, $personnel, $url, $access, $admin)
+            : null;
 
         return Inertia::render('Admin/Hebergement/Admissions/Index', [
             'dossiers' => $dossiers->through(fn (Etudiant $etudiant) => [
@@ -121,6 +129,7 @@ class CampagnesAdmissionController extends Controller
                 'name' => $etudiant->name,
                 'numero_demande' => $etudiant->derniereDemande?->numero_demande,
                 'demande_id' => $etudiant->derniereDemande ? (string) $etudiant->derniereDemande->getKey() : null,
+                'type_demande' => $types[(string) $etudiant->id_etudiant] ?? null,
                 'etat_dossier' => $etudiant->derniereDemande?->etat_dossier,
                 'date' => $etudiant->created_at?->format('Y-m-d H:i'),
                 // Téléphone, adresse et date de naissance : consultables sur la fiche du dossier (liste sans défilement horizontal).
@@ -139,6 +148,7 @@ class CampagnesAdmissionController extends Controller
                 'refusees' => count($classement['refusees']),
             ],
             'etat' => $etat,
+            'classement' => $listesProvisoires,
             'filters' => ['q' => $recherche, 'etat_dossier' => $etatDossier],
             'etatsDossier' => collect(DossierWorkflow::LABELS)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values(),
             'colonnes' => ['personnel' => $personnel, 'historique' => $historique],
@@ -373,6 +383,81 @@ class CampagnesAdmissionController extends Controller
         if ($transition?->acteur_type !== 'systeme' || ($details[DecisionAutomatiqueDossier::MARQUEUR] ?? false) !== true) return null;
 
         return ['etat' => $transition->nouvel_etat, 'score' => (float) ($details['score'] ?? 0), 'minimum' => (float) ($details['minimum_score'] ?? 0)];
+    }
+
+    /**
+     * Listes provisoires d'admission et de réadmission des demandes recevables (`ClassementProvisoire`), pour la
+     * campagne active (sinon celle de la demande recevable la plus récente), une par volet ouvert par la campagne
+     * (une campagne d'admission seule n'a pas de liste de réadmission). Onglet ouvert : `?liste=` (un volet fermé ramène à la liste des demandes) ; la
+     * recherche (`q`) filtre la liste ouverte sans changer les rangs. L'âge n'est envoyé qu'avec les données personnelles.
+     */
+    private function classementProvisoire(Request $request, EloquentCollection $recevables, ?Campagne $campagne, string $recherche, bool $personnel, \Closure $url, AdminAccess $access, $admin): array
+    {
+        $campagne ??= $recevables->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)->filter()
+            ->sortByDesc('created_at')->first()?->campagne;
+        $criteres = app(\App\Http\Services\Eligibilite\CriteresCampagne::class);
+        // Onglets selon le type de campagne : une liste provisoire par volet ouvert (admission seule → pas de réadmission).
+        $onglets = ['demandes', ...($campagne ? array_keys(array_filter($criteres->volets($campagne))) : [])];
+        $liste = in_array($request->query('liste'), $onglets, true) ? $request->query('liste') : 'demandes';
+        $listes = $campagne
+            ? app(\App\Http\Services\Eligibilite\ClassementProvisoire::class)->classer(
+                $recevables,
+                $campagne,
+                $criteres->voletsDemandes($recevables->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)),
+            )
+            : ['admission' => [], 'readmission' => []];
+        $lien = fn (string $onglet) => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
+            ? route('admin.hebergement.campagnes_admission.admission', ['etat' => 'recevables'] + ($onglet === 'demandes' ? [] : ['liste' => $onglet]))
+            : null;
+
+        $lignes = null;
+        if ($liste !== 'demandes') {
+            $motif = Str::lower(Str::ascii($recherche));
+            $filtrees = collect($listes[$liste])->filter(fn (array $ligne) => $motif === '' || Str::contains(
+                Str::lower(Str::ascii(implode(' ', [$ligne['etudiant']->name, $ligne['etudiant']->matricule, $ligne['etudiant']->derniereDemande?->numero_demande]))),
+                $motif,
+            ))->values();
+            $page = max(1, (int) $request->query('page', 1));
+            $lignes = (new LengthAwarePaginator($filtrees->forPage($page, 10)->values(), $filtrees->count(), 10, $page, [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ]))->through(function (array $ligne) use ($personnel, $url) {
+                $etudiant = $ligne['etudiant'];
+                $demande = $etudiant->derniereDemande;
+
+                return [
+                    'id' => (string) $etudiant->id_etudiant,
+                    'rang' => $ligne['rang'],
+                    'name' => $etudiant->name,
+                    'numero_demande' => $demande?->numero_demande,
+                    'niveau' => $demande?->niveauEtudiantActuel?->name,
+                    'etat_dossier' => $demande?->etat_dossier,
+                    'age' => $personnel && $etudiant->date_naissance ? Carbon::parse($etudiant->date_naissance)->age : null,
+                    'merite' => $ligne['merite'] ?? null,
+                    'ville_bac' => $ligne['ville_bac'] ?? null,
+                    'hors_ville' => $ligne['hors_ville'] ?? null,
+                    'categorie' => $ligne['categorie'] ?? null,
+                    'boursier' => $ligne['boursier'] ?? null,
+                    'moyenne' => $ligne['moyenne'] ?? null,
+                    'credits' => $ligne['credits'] ?? null,
+                    'url' => $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant]),
+                ];
+            });
+        }
+
+        return [
+            'liste' => $liste,
+            'onglets' => $onglets,
+            'campagne' => $campagne?->annee_campagne,
+            'compteurs' => [
+                'demandes' => $recevables->count(),
+                'admission' => count($listes['admission']),
+                'readmission' => count($listes['readmission']),
+            ],
+            'lignes' => $lignes,
+            'colonnes' => ['age' => $personnel],
+            'urls' => collect($onglets)->mapWithKeys(fn ($onglet) => [$onglet => $lien($onglet)]),
+        ];
     }
 
     /** Campagne au statut « active » la plus récente : référence du bandeau et des critères d'éligibilité. */

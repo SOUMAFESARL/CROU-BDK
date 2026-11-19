@@ -2,6 +2,8 @@ import { Link, router } from '@inertiajs/react';
 import { CalendarClock, CircleCheck, CirclePlay, Eye, FolderOpen, GraduationCap, Info, MapPin, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { OngletsCampagnesAdmissions } from '@/components/campagnes/onglets-campagnes-admissions';
+import { OngletsRecevables, TableauClassement, type Classement } from '@/components/campagnes/liste-provisoire';
+import { Badge } from '@/components/ui/badge';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
@@ -31,6 +33,8 @@ type Dossier = {
     name: string;
     numero_demande: string | null;
     demande_id: string | null;
+    /** Volet de la demande dans sa campagne : admission (nouvel étudiant) ou réadmission (ancien résident). */
+    type_demande: 'admission' | 'readmission' | null;
     etat_dossier: string | null;
     date: string | null;
     personnel: { region: string | null; ville: string | null } | null;
@@ -44,6 +48,8 @@ type Props = {
     dossiers: Paginated<Dossier>;
     stats: Record<Filtre, number>;
     etat: Filtre;
+    /** Demandes recevables seulement : onglets liste des demandes / listes provisoires d'admission et de réadmission. */
+    classement: Classement | null;
     filters: { q: string; etat_dossier: string };
     /** États possibles de `Demande.etat_dossier` (`DossierWorkflow::LABELS`). */
     etatsDossier: { value: string; label: string }[];
@@ -63,8 +69,13 @@ const TITRES: Record<Filtre, string> = {
  * Liste des demandes de logement (remplace `admission/admission.blade.php`).
  * Les étudiants déjà logés sont suivis sur la page « Résidents & contrats ».
  */
-export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsDossier, colonnes, campagneActive, urls }: Props) {
+export default function AdmissionsIndex({ dossiers, stats, etat, classement, filters, etatsDossier, colonnes, campagneActive, urls }: Props) {
+    /** Onglet « Liste provisoire » ouvert (admission ou réadmission) : le classement remplace la liste des demandes. */
+    const listeProvisoire = classement !== null && classement.liste !== 'demandes';
     const [recherche, setRecherche] = useState(filters.q);
+    /** Onglet choisi (mis à jour dès le clic) ; il diffère de `classement.liste` le temps du chargement. */
+    const [ongletVise, setOngletVise] = useState(classement?.liste ?? 'demandes');
+    const changement = classement !== null && ongletVise !== classement.liste;
     /** Refus automatiques cochés (identifiants de demande), à rendre éligibles ensemble. */
     const [selection, setSelection] = useState<string[]>([]);
     /** Levée de refus automatiques à confirmer : un dossier, ou la `selection`. */
@@ -80,6 +91,12 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
 
     // La sélection ne vaut que pour la page affichée (changement de page, de filtre ou levée effectuée).
     useEffect(() => setSelection([]), [dossiers]);
+
+    // Nouvel onglet affiché : l'onglet choisi et la recherche suivent la réponse du serveur (la page est conservée).
+    useEffect(() => {
+        setOngletVise(classement?.liste ?? 'demandes');
+        setRecherche(filters.q);
+    }, [classement?.liste]);
 
     const leverRefus = async () => {
         if (!urls.leverRefus || !aLever) return;
@@ -107,6 +124,8 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
     // Recherche et filtre côté serveur (retour en page 1, onglet KPI conservé par l'URL).
     const appliquer = (valeurs: { q: string; etat_dossier: string }) => {
         const parametres = Object.fromEntries(Object.entries(valeurs).filter(([, valeur]) => valeur.trim() !== '').map(([cle, valeur]) => [cle, valeur.trim()]));
+        // L'onglet de liste provisoire ouvert est conservé.
+        if (classement && classement.liste !== 'demandes') parametres.liste = classement.liste;
         router.get(window.location.pathname, parametres, { preserveState: true, preserveScroll: true, replace: true });
     };
 
@@ -192,6 +211,16 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
         ...(colonnes.historique
             ? ([{ key: 'demandes', header: 'Demandes (toutes campagnes)', className: 'text-center tabular-nums', headClassName: 'text-center', cell: (d) => nombre(d.demandes) }] satisfies DataTableColumn<Dossier>[])
             : []),
+        {
+            key: 'type',
+            header: 'Type de demande',
+            cell: (d) =>
+                d.type_demande ? (
+                    <Badge variant={d.type_demande === 'readmission' ? 'info' : 'success'}>{d.type_demande === 'readmission' ? 'Réadmission' : 'Admission'}</Badge>
+                ) : (
+                    vide(null)
+                ),
+        },
         { key: 'etat', header: 'État du dossier', cell: (d) => <EtatDossierBadge etat={d.etat_dossier} /> },
         {
             key: 'actions',
@@ -253,10 +282,62 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
             )}
 
             <section className="mt-6">
-                <div className="mb-3 flex items-baseline justify-between gap-3">
-                    <h2 className="text-base font-medium text-gray-900">{TITRES[etat] ?? 'Dossiers'}</h2>
-                    <span className="text-sm text-muted">{dossiers.total} dossier(s)</span>
-                </div>
+                {classement ? (
+                    // Demandes recevables : onglets à droite du titre, sur la même ligne.
+                    <div className="mb-4 flex flex-wrap items-end gap-x-4 gap-y-1 border-b">
+                        <h2 className="py-2.5 text-base font-medium text-gray-900">{TITRES[etat]}</h2>
+                        <OngletsRecevables classement={classement} actif={ongletVise} onSelect={setOngletVise} />
+                    </div>
+                ) : (
+                    <div className="mb-3 flex items-baseline justify-between gap-3">
+                        <h2 className="text-base font-medium text-gray-900">{TITRES[etat] ?? 'Dossiers'}</h2>
+                        <span className="text-sm text-muted">{dossiers.total} dossier(s)</span>
+                    </div>
+                )}
+                {/* Changement d'onglet : contenu atténué pendant le chargement, puis fondu à l'arrivée du nouvel onglet. */}
+                <div
+                    key={classement?.liste ?? etat}
+                    aria-busy={changement}
+                    className={cn(
+                        'transition-opacity duration-300 animate-in fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none motion-reduce:transition-none',
+                        changement && 'pointer-events-none opacity-50',
+                    )}
+                >
+                {classement && listeProvisoire ? (
+                    <TableauClassement
+                        classement={classement}
+                        filtre={filters.q !== ''}
+                        toolbar={
+                            <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                                <div className="w-full sm:max-w-sm">
+                                    <Input
+                                        type="search"
+                                        value={recherche}
+                                        onChange={(event) => setRecherche(event.target.value)}
+                                        placeholder="Rechercher par nom, matricule ou n° de demande…"
+                                        aria-label="Rechercher dans la liste provisoire"
+                                        icon={<Search />}
+                                        className="h-10"
+                                    />
+                                </div>
+                                {filters.q !== '' && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-10"
+                                        onClick={() => {
+                                            setRecherche('');
+                                            appliquer({ q: '', etat_dossier: '' });
+                                        }}
+                                    >
+                                        <X className="size-4" aria-hidden />
+                                        Réinitialiser
+                                    </Button>
+                                )}
+                            </div>
+                        }
+                    />
+                ) : (
                 <DataTable
                     columns={colonnesTableau}
                     data={dossiers}
@@ -320,6 +401,8 @@ export default function AdmissionsIndex({ dossiers, stats, etat, filters, etatsD
                         </span>
                     }
                 />
+                )}
+                </div>
             </section>
 
             <ConfirmDialog

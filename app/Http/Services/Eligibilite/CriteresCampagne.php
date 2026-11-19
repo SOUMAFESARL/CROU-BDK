@@ -301,6 +301,34 @@ class CriteresCampagne
         return $ancien ? 'readmission' : 'admission';
     }
 
+    /**
+     * Volet de chaque demande (même règle que `voletEtudiant()`, sur la campagne de la demande), en une seule requête :
+     * utilisé pour les listes de demandes.
+     *
+     * @param  iterable<\App\Models\DemandeEtudiant>  $demandes  avec leur campagne chargée
+     * @return array<string, string> volet par identifiant d'étudiant
+     */
+    public function voletsDemandes(iterable $demandes): array
+    {
+        $demandes = collect($demandes)->filter();
+        $etudiants = $demandes->map(fn ($demande) => (string) $demande->etudiant_id)->unique()->values();
+        $assignations = $etudiants->isEmpty() ? collect() : $etudiants->chunk(500)
+            ->flatMap(fn ($lot) => AssignationChambre::query()->whereIn('etudiant_id', $lot->all())->get(['etudiant_id', 'campagne_id']))
+            ->groupBy(fn ($assignation) => (string) $assignation->etudiant_id);
+
+        return $demandes->mapWithKeys(function ($demande) use ($assignations) {
+            $campagne = $demande->campagne;
+            $volets = $campagne ? array_keys(array_filter($this->volets($campagne))) : ['admission', 'readmission'];
+            if (count($volets) === 1) {
+                return [(string) $demande->etudiant_id => $volets[0]];
+            }
+            $ancien = collect($assignations[(string) $demande->etudiant_id] ?? [])
+                ->contains(fn ($assignation) => ! $campagne || $assignation->campagne_id === null || (string) $assignation->campagne_id !== (string) $campagne->getKey());
+
+            return [(string) $demande->etudiant_id => $ancien ? 'readmission' : 'admission'];
+        })->all();
+    }
+
     /** Le paramétrage général s'applique à toute campagne ; un volet, s'il est ouvert par la campagne. */
     public function voletOuvert(Campagne $campagne, string $jeu): bool
     {

@@ -397,6 +397,75 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame(0, $eligibilite['non_conformes']);
     }
 
+    public function test_listes_provisoires_d_admission_et_de_readmission(): void
+    {
+        $this->agentEligibilite();
+        (require database_path('migrations/2026_11_17_000001_add_ville_bac_to_demande.php'))->up();
+        foreach (['ancien' => 'Bamba Ali', 'ancien2' => 'Coulibaly Ines'] as $id => $nom) {
+            DB::table('etudiants')->insert(['id_etudiant' => $id, 'genre_id' => 1, 'statut_inscription' => 'demande', 'name' => $nom]);
+            $this->dossier($id);
+            // Anciens résidents : logés lors d'une autre campagne.
+            DB::table('assignation_chambres')->insert(['id_assignation' => 'a-'.$id, 'etudiant_id' => $id, 'chambre_id' => 'room', 'campagne_id' => 'autre', 'statut' => 'terminee']);
+        }
+        $this->dossier('other');
+        DB::table('etudiants')->where('id_etudiant', 'other')->update(['name' => 'Yao Marc']);
+        DB::table('etudiants')->whereIn('id_etudiant', ['other', 'ancien', 'ancien2'])->update(['nationalite' => 'IVOIRIENNE', 'date_naissance' => now()->subYears(20)->toDateString()]);
+        $demande = fn (string $id) => DB::table('demande')->where('etudiant_id', $id);
+        // Admission : même note du bac (240/400) ; le bac obtenu hors de la ville de référence (Bondoukou) passe devant.
+        $demande('student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12, 'ville_bac' => 'Bondoukou']);
+        $demande('other')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12, 'ville_bac' => 'Abidjan']);
+        // Réadmission : l'école sur concours au-delà de son seuil (C1) passe devant une meilleure moyenne (C6).
+        $demande('ancien')->update(['niveau_etude_precedent_code' => 'L1', 'niveau_etude_actuel_code' => 'L2', 'filiere_code' => '1', 'credit_valider' => 48, 'moyenne' => 11]);
+        $demande('ancien2')->update(['niveau_etude_precedent_code' => 'L1', 'niveau_etude_actuel_code' => 'L2', 'credit_valider' => 60, 'moyenne' => 15, 'boursier' => true]);
+        $this->enVigueur('readmission', ['readmission' => [
+            'loyers' => ['actif' => false, 'mois_exiges' => 10],
+            'credits' => ['actif' => true, 'seuil_defaut' => 100, 'filieres' => [['filiere_id' => '1', 'seuil' => 80, 'concours' => true]]],
+            'conduite' => ['actif' => false, 'note_min' => 10, 'sanctions' => ['suspension', 'expulsion']],
+        ]]);
+        $recevables = fn (array $query = []) => $this->page('liste', ['etat' => 'recevables'], '/admin/gestion-hebergement/campagnes_admissions/liste/recevables', $query)['props'];
+
+        // Liste des demandes : type de demande de chaque dossier, compteurs des onglets.
+        $props = $recevables();
+        $this->assertSame('demandes', $props['classement']['liste']);
+        $this->assertNull($props['classement']['lignes']);
+        $this->assertSame(['demandes' => 4, 'admission' => 2, 'readmission' => 2], $props['classement']['compteurs']);
+        $this->assertSame(['ancien' => 'readmission', 'ancien2' => 'readmission', 'other' => 'admission', 'student' => 'admission'],
+            collect($props['dossiers']['data'])->pluck('type_demande', 'id')->sortKeys()->all());
+        $this->assertStringContainsString('liste=admission', $props['classement']['urls']['admission']);
+
+        $admission = $recevables(['liste' => 'admission'])['classement'];
+        $this->assertSame('admission', $admission['liste']);
+        $this->assertSame([['other', 1], ['student', 2]], collect($admission['lignes']['data'])->map(fn ($l) => [$l['id'], $l['rang']])->all());
+        $this->assertSame([240, 400], [(int) $admission['lignes']['data'][0]['merite']['valeur'], $admission['lignes']['data'][0]['merite']['max']]);
+        $this->assertTrue($admission['lignes']['data'][0]['hors_ville']);
+        $this->assertSame(20, $admission['lignes']['data'][0]['age']);
+
+        $readmission = $recevables(['liste' => 'readmission'])['classement'];
+        $this->assertSame([['ancien', 'C1'], ['ancien2', 'C6']], collect($readmission['lignes']['data'])->map(fn ($l) => [$l['id'], $l['categorie']['code']])->all());
+
+        // La recherche filtre la liste ouverte sans changer les rangs.
+        $recherche = $recevables(['liste' => 'admission', 'q' => 'konan'])['classement']['lignes']['data'];
+        $this->assertSame([['student', 2]], collect($recherche)->map(fn ($l) => [$l['id'], $l['rang']])->all());
+
+        // Campagne d'admission et de réadmission : les deux listes provisoires.
+        $this->assertSame(['demandes', 'admission', 'readmission'], $props['classement']['onglets']);
+        // Campagne d'admission seule : pas d'onglet de réadmission (un lien vers cet onglet ramène à la liste des demandes).
+        if (! Schema::hasColumn('campagne', 'admission')) {
+            Schema::table('campagne', function (Blueprint $t) {
+                $t->boolean('admission')->default(false);
+                $t->boolean('readmission')->default(false);
+            });
+        }
+        DB::table('campagne')->update(['admission' => true, 'readmission' => false]);
+        $admissionSeule = $recevables(['liste' => 'readmission'])['classement'];
+        $this->assertSame(['demandes', 'admission'], $admissionSeule['onglets']);
+        $this->assertSame(['demandes', 'admission'], array_keys($admissionSeule['urls']));
+        $this->assertSame('demandes', $admissionSeule['liste']);
+
+        // Pas d'onglets de classement hors des demandes recevables.
+        $this->assertNull($this->page('liste', ['etat' => 'toutes'])['props']['classement']);
+    }
+
     public function test_modification_refusee_sans_le_droit_de_modifier_les_admissions(): void
     {
         $this->agentLimite();
