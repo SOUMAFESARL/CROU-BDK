@@ -21,7 +21,8 @@ use Illuminate\Validation\ValidationException;
  * Critères d'une campagne, en trois jeux versionnés séparément (docs/notes/eligibilite-criteres-campagne.md) :
  *
  * 1. le **paramétrage général** (`general`), commun aux deux volets et préalable à leur application : rang par
- *    filière, rang des clubs et associations, cas sociaux, comité des résidents, âge maximum par niveau d'études ;
+ *    filière, rang des clubs et associations, cas sociaux, comité des résidents, âge maximum par niveau d'études,
+ *    priorité aux boursiers dans le classement des demandes recevables ;
  * 2. les critères d'**admission** (nouveaux étudiants) ;
  * 3. les critères de **réadmission** (anciens résidents), dont les crédits exigés par filière (et écoles sur concours).
  *
@@ -50,6 +51,9 @@ class CriteresCampagne
 
     /** Crédits enregistrés dans le paramétrage général par les anciennes versions, par campagne (lus une fois par requête). */
     private array $creditsGenerauxAnciens = [];
+
+    /** Priorité aux boursiers enregistrée dans la réadmission par les anciennes versions, par campagne (lue une fois par requête). */
+    private array $boursiersReadmissionAnciens = [];
 
     /** Catégories de réadmission, dans l'ordre de la cascade (un candidat est retenu dans la première qui le retient). */
     public const CATEGORIES = [
@@ -86,9 +90,6 @@ class CriteresCampagne
         'readmission' => ['age_plus_jeune'],
         'admission' => ['hors_ville_bac', 'age_plus_jeune'],
     ];
-
-    /** Priorité aux boursiers : `categorie` (oui, devant les non-boursiers) ou `aucune` (non). */
-    public const PRIORITE_BOURSIERS = ['categorie', 'aucune'];
 
     /** Statut de boursier retenu : celui déclaré par l'étudiant suffit. */
     public const SOURCE_BOURSIER = 'declare';
@@ -138,6 +139,8 @@ class CriteresCampagne
                 'comite' => ['actif' => true, 'places' => 10],
                 // Âge maximum par niveau d'études : [['niveau' => id_niveau_etude, 'age' => 25], …] ; un niveau absent n'a pas de limite.
                 'age_max' => [],
+                // Classement des demandes recevables (admission et réadmission) : boursiers devant les non-boursiers.
+                'priorite_boursiers' => true,
             ];
         }
 
@@ -191,8 +194,8 @@ class CriteresCampagne
                 'report_places' => 'C6_puis_admission',
             ],
             'classement' => [
-                'priorite_boursiers' => 'categorie',
-                // Le statut de boursier déclaré par l'étudiant suffit (règle fixe, non paramétrable).
+                // La priorité aux boursiers relève du paramétrage général. Le statut de boursier déclaré par l'étudiant
+                // suffit (règle fixe, non paramétrable).
                 'source_boursier' => self::SOURCE_BOURSIER,
                 'departage' => self::DEPARTAGE_DEFAUT['readmission'],
                 'k_liste_elargie' => 2,
@@ -500,10 +503,14 @@ class CriteresCampagne
         if ($jeu === 'readmission') {
             $parametres = $this->creditsAnciens($parametres, $campagne);
         }
+        if ($jeu === 'general' && ! array_key_exists('priorite_boursiers', $parametres) && ($ancienne = $this->boursiersReadmissionAnciens($campagne)) !== null) {
+            $parametres['priorite_boursiers'] = $ancienne;
+        }
         $resultat = $this->fusionner($this->modeleParDefaut($jeu, $campagne), $parametres);
 
         if ($jeu === 'general') {
             $resultat['age_max'] = $this->sansNiveauxExclus($resultat['age_max'] ?? []);
+            $resultat['priorite_boursiers'] = (bool) $resultat['priorite_boursiers'];
 
             return $resultat;
         }
@@ -515,8 +522,6 @@ class CriteresCampagne
             }
         }
         if ($jeu === 'readmission') {
-            // Priorité aux boursiers : oui (toujours devant les non-boursiers) ou non ; l'ancien « à mérite égal » vaut oui.
-            $resultat['classement']['priorite_boursiers'] = $resultat['classement']['priorite_boursiers'] === 'aucune' ? 'aucune' : 'categorie';
             $resultat['classement']['source_boursier'] = self::SOURCE_BOURSIER;
         }
         // Départage : seuls les critères propres au volet ; au moins un reste actif.
@@ -603,6 +608,26 @@ class CriteresCampagne
         }
 
         return $this->creditsGenerauxAnciens[$cle];
+    }
+
+    /**
+     * Anciennes versions : la priorité aux boursiers était un critère de classement de la réadmission (`categorie` ou
+     * `aucune`). Un paramétrage général qui ne la porte pas encore reprend ce choix (version de réadmission en vigueur,
+     * sinon brouillon) ; null s'il n'y en a pas.
+     */
+    private function boursiersReadmissionAnciens(?Campagne $campagne): ?bool
+    {
+        if (! $campagne || ! Schema::hasTable('campagne_regles')) {
+            return null;
+        }
+        $cle = (string) $campagne->getKey();
+        if (! array_key_exists($cle, $this->boursiersReadmissionAnciens)) {
+            $readmission = $this->enVigueur($campagne, 'readmission') ?? $this->brouillon($campagne, 'readmission');
+            $priorite = $readmission?->parametres['classement']['priorite_boursiers'] ?? null;
+            $this->boursiersReadmissionAnciens[$cle] = is_string($priorite) ? $priorite !== 'aucune' : null;
+        }
+
+        return $this->boursiersReadmissionAnciens[$cle];
     }
 
     /** Seuil d'une ancienne version : la note du bac passe de 20 à 400. */
@@ -748,6 +773,7 @@ class CriteresCampagne
                     ->filter(fn ($ligne) => ($ligne['age'] ?? null) !== null && $ligne['age'] !== '')
                     ->map(fn ($ligne) => ['niveau' => (string) $ligne['niveau'], 'age' => (int) $ligne['age']])
                     ->unique('niveau')->values()->all()),
+                'priorite_boursiers' => (bool) $saisie['priorite_boursiers'],
             ], $campagne);
         }
 
@@ -814,9 +840,7 @@ class CriteresCampagne
                 'age_actif' => (bool) $saisie['readmission']['age_actif'],
                 'report_places' => $saisie['readmission']['report_places'],
             ],
-            'classement' => $classement + [
-                'priorite_boursiers' => $saisie['classement']['priorite_boursiers'],
-            ],
+            'classement' => $classement,
         ], $campagne);
     }
 

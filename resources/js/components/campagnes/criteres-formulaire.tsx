@@ -694,10 +694,7 @@ function Assistant({
                                     readmission.credits.filieres,
                                 )}
                             />
-                            {interrupteur(
-                                "classement.priorite_boursiers",
-                                "Priorité aux boursiers",
-                            )}
+                            <PrioriteBoursiers general={general} />
                             <OrdreDepartage
                                 volet={volet}
                                 control={control}
@@ -708,9 +705,10 @@ function Assistant({
 
                     {courante.cle === "classement" && admission && (
                         <>
-                            <Titre aide="Clé de classement des recevables : mérite, puis départage dans l’ordre ci-dessous.">
+                            <Titre aide="Clé de classement des recevables : boursiers (s’ils sont prioritaires), mérite, puis départage dans l’ordre ci-dessous.">
                                 Critères de classement de l’admission
                             </Titre>
+                            <PrioriteBoursiers general={general} />
                             <div className="md:max-w-xs">
                                 <Field
                                     id={`cr-${volet}-ville_bac`}
@@ -874,13 +872,6 @@ function Assistant({
                                                             }),
                                                         )
                                                       : []),
-                                                  {
-                                                      label: "Priorité boursiers",
-                                                      valeur: valeurs.classement
-                                                          .priorite_boursiers
-                                                          ? "Oui"
-                                                          : "Non",
-                                                  },
                                               ]
                                             : []),
                                         ...(admission
@@ -1047,6 +1038,19 @@ function CategoriesAppliquees({
                 );
             })}
         </ol>
+    );
+}
+
+/** Priorité aux boursiers (lecture seule) : se règle dans le paramétrage général, commun aux deux volets. */
+function PrioriteBoursiers({ general }: { general: GeneralApplique | null }) {
+    if (!general) return null;
+    return (
+        <Note icone={<ShieldCheck />}>
+            {general.regles.priorite_boursiers
+                ? "Boursiers prioritaires : ils sont classés devant les non-boursiers"
+                : "Pas de priorité aux boursiers"}{" "}
+            (paramétrage général).
+        </Note>
     );
 }
 

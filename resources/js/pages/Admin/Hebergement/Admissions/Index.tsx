@@ -1,5 +1,5 @@
 import { Link, router } from '@inertiajs/react';
-import { CalendarClock, CircleCheck, CirclePlay, Eye, FolderOpen, GraduationCap, Info, MapPin, Search, X } from 'lucide-react';
+import { CalendarClock, CircleCheck, CirclePlay, Download, Eye, FileSpreadsheet, FolderOpen, GraduationCap, Info, MapPin, Printer, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { OngletsCampagnesAdmissions } from '@/components/campagnes/onglets-campagnes-admissions';
 import { OngletsRecevables, TableauClassement, type Classement } from '@/components/campagnes/liste-provisoire';
@@ -11,6 +11,7 @@ import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { KpiFilters } from '@/components/ui/kpi-filters';
@@ -50,13 +51,20 @@ type Props = {
     etat: Filtre;
     /** Demandes recevables seulement : onglets liste des demandes / listes provisoires d'admission et de réadmission. */
     classement: Classement | null;
-    filters: { q: string; etat_dossier: string };
+    /** `type` : type de demande (admission ou réadmission), vide pour tous. */
+    filters: { q: string; etat_dossier: string; type: string };
     /** États possibles de `Demande.etat_dossier` (`DossierWorkflow::LABELS`). */
     etatsDossier: { value: string; label: string }[];
     colonnes: { personnel: boolean; historique: boolean };
     campagneActive: { annee: string; echeance: string | null; moyenne_min: number | string | null; distance_min: number | string | null } | null;
     urls: { campagnes: string | null; leverRefus: string | null; filtres: Record<Filtre, string> | null };
 };
+
+/** Filtre « Type de demande » de la liste des demandes. */
+const TYPES_DEMANDE = [
+    { value: 'admission', label: 'Admission' },
+    { value: 'readmission', label: 'Réadmission' },
+];
 
 const TITRES: Record<Filtre, string> = {
     toutes: 'Toutes les demandes',
@@ -122,7 +130,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
     const premierRendu = useRef(true);
 
     // Recherche et filtre côté serveur (retour en page 1, onglet KPI conservé par l'URL).
-    const appliquer = (valeurs: { q: string; etat_dossier: string }) => {
+    const appliquer = (valeurs: { q: string; etat_dossier: string; type?: string }) => {
         const parametres = Object.fromEntries(Object.entries(valeurs).filter(([, valeur]) => valeur.trim() !== '').map(([cle, valeur]) => [cle, valeur.trim()]));
         // L'onglet de liste provisoire ouvert est conservé.
         if (classement && classement.liste !== 'demandes') parametres.liste = classement.liste;
@@ -136,11 +144,11 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
             return;
         }
         if (recherche.trim() === filters.q) return;
-        const minuteur = window.setTimeout(() => appliquer({ q: recherche, etat_dossier: filters.etat_dossier }), 350);
+        const minuteur = window.setTimeout(() => appliquer({ q: recherche, etat_dossier: filters.etat_dossier, type: filters.type }), 350);
         return () => window.clearTimeout(minuteur);
     }, [recherche]);
 
-    const filtre = filters.q !== '' || filters.etat_dossier !== '';
+    const filtre = filters.q !== '' || filters.etat_dossier !== '' || filters.type !== '';
     const vide = (valeur: string | null | undefined) => valeur || <span className="text-muted">—</span>;
 
     const colonnesTableau: DataTableColumn<Dossier>[] = [
@@ -233,7 +241,8 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                             <CircleCheck className="size-4" aria-hidden /> Rendre éligible
                         </Button>
                     )}
-                    {d.url && (
+                    {/* « Toutes les demandes » : pas de bouton « Suivre le dossier » (le clic sur la ligne ouvre le dossier). */}
+                    {d.url && etat !== 'toutes' && (
                         <Link href={d.url} className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'whitespace-nowrap')}>
                             <Eye className="size-4" aria-hidden /> Suivre le dossier
                         </Link>
@@ -334,6 +343,30 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                                         Réinitialiser
                                     </Button>
                                 )}
+                                {classement.exports && (
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button variant="secondary" className="h-10 sm:ml-auto" disabled={classement.compteurs[classement.liste] === 0}>
+                                                <Download className="size-4" aria-hidden />
+                                                Télécharger
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-52">
+                                            <DropdownMenuItem asChild className="cursor-pointer">
+                                                <a href={classement.exports.excel} download>
+                                                    <FileSpreadsheet aria-hidden />
+                                                    Excel (.xlsx)
+                                                </a>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem asChild className="cursor-pointer">
+                                                <a href={classement.exports.pdf} target="_blank" rel="noopener">
+                                                    <Printer aria-hidden />
+                                                    Imprimer (PDF)
+                                                </a>
+                                            </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                )}
                             </div>
                         }
                     />
@@ -359,7 +392,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                             </div>
                             <Select
                                 value={filters.etat_dossier || 'tous'}
-                                onValueChange={(valeur) => appliquer({ q: recherche, etat_dossier: valeur === 'tous' ? '' : valeur })}
+                                onValueChange={(valeur) => appliquer({ q: recherche, etat_dossier: valeur === 'tous' ? '' : valeur, type: filters.type })}
                             >
                                 <SelectTrigger aria-label="Filtrer par statut de la demande" className="h-10 w-full sm:w-56">
                                     <SelectValue />
@@ -367,6 +400,22 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                                 <SelectContent>
                                     <SelectItem value="tous">Tous les statuts</SelectItem>
                                     {etatsDossier.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                            {option.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Select
+                                value={filters.type || 'tous'}
+                                onValueChange={(valeur) => appliquer({ q: recherche, etat_dossier: filters.etat_dossier, type: valeur === 'tous' ? '' : valeur })}
+                            >
+                                <SelectTrigger aria-label="Filtrer par type de demande" className="h-10 w-full sm:w-48">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="tous">Tous les types</SelectItem>
+                                    {TYPES_DEMANDE.map((option) => (
                                         <SelectItem key={option.value} value={option.value}>
                                             {option.label}
                                         </SelectItem>

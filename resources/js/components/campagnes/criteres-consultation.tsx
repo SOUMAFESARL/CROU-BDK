@@ -131,6 +131,20 @@ function Detail({ page, regles, places }: DetailProps) {
                         className="p-4"
                     />
                 </Section>
+                <Section
+                    valeur="boursiers"
+                    titre="Priorité de classement"
+                    icone={<ListOrdered {...ICON} />}
+                >
+                    <Lignes
+                        lignes={[
+                            [
+                                "Priorité aux boursiers",
+                                (g.priorite_boursiers ?? true) ? "Oui" : "Non",
+                            ],
+                        ]}
+                    />
+                </Section>
                 {/* Rangs et quotas (C2 à C5) : réadmission seulement, sans objet pour une campagne d'admission seule. */}
                 {page.campagne.volets.readmission && (
                 <Section
@@ -278,14 +292,6 @@ function Detail({ page, regles, places }: DetailProps) {
                                                   : "—",
                                           ],
                                           [
-                                              "Priorité aux boursiers",
-                                              v.classement
-                                                  .priorite_boursiers ===
-                                              "aucune"
-                                                  ? "Non"
-                                                  : "Oui",
-                                          ],
-                                          [
                                               "Places non pourvues",
                                               REPORT_PLACES[r.report_places],
                                           ],
@@ -300,6 +306,14 @@ function Detail({ page, regles, places }: DetailProps) {
                                           [
                                               "Ville du bac",
                                               `Hors ${a.ville_bac} prioritaire`,
+                                          ],
+                                      ] as [string, ReactNode][])
+                                    : []),
+                                ...(page.general
+                                    ? ([
+                                          [
+                                              "Priorité aux boursiers",
+                                              `${(page.general.regles.priorite_boursiers ?? true) ? "Oui" : "Non"} (paramétrage général)`,
                                           ],
                                       ] as [string, ReactNode][])
                                     : []),

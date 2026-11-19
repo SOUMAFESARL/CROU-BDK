@@ -238,6 +238,9 @@ Route::middleware(['admin'])->group(function () {
         ->group(function () {
 
             Route::get('/liste/{etat?}', 'liste')->name('admission');
+            Route::get('/liste-provisoire/{volet}/{format}', 'exportListeProvisoire')
+                ->whereIn('volet', ['admission', 'readmission'])->whereIn('format', ['excel', 'pdf'])
+                ->name('liste_provisoire_export');
             Route::get('/campagnes/nouvelle', 'createCampagne')->name('create_campagne');
             Route::get('/campagnes/{etat?}', 'campagnes')->name('campagnes');
             Route::post('/campagnes', 'storeCampagne')->name('post_campagnes');

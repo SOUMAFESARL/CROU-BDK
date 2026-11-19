@@ -175,7 +175,8 @@ class CriteresCampagneTest extends TestCase
 
         $general = $page['props']['niveaux']['general'];
         // Les crédits par filière, propres à la réadmission, ne font pas partie du paramétrage général.
-        $this->assertSame(['rang_filiere', 'clubs', 'cas_sociaux', 'comite', 'age_max'], array_keys($general['regles']));
+        $this->assertSame(['rang_filiere', 'clubs', 'cas_sociaux', 'comite', 'age_max', 'priorite_boursiers'], array_keys($general['regles']));
+        $this->assertTrue($general['regles']['priorite_boursiers']);
         $this->assertSame(5, $general['regles']['rang_filiere']['n']);
         $this->assertSame(3, $general['regles']['clubs']['n']);
         $this->assertSame(10, $general['regles']['cas_sociaux']['taux']);
@@ -199,7 +200,9 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame(10, $criteres['regles']['readmission']['loyers']['mois_exiges']);
         // Étudiants internationaux non acceptés par défaut, comme en admission.
         $this->assertFalse($criteres['regles']['recevabilite']['internationaux']);
-        $this->assertSame('categorie', $criteres['regles']['classement']['priorite_boursiers']);
+        // La priorité aux boursiers relève du paramétrage général (cochée par défaut).
+        $this->assertArrayNotHasKey('priorite_boursiers', $criteres['regles']['classement']);
+        $this->assertTrue($criteres['general']['regles']['priorite_boursiers']);
         // Le statut de boursier déclaré suffit ; les préalables sont contrôlés à la clôture des dépôts.
         $this->assertSame('declare', $criteres['regles']['classement']['source_boursier']);
         $this->assertArrayNotHasKey('date_controle_prealables', $criteres['regles']['calendrier']);
@@ -331,20 +334,50 @@ class CriteresCampagneTest extends TestCase
         $this->assertSame(['general', 'readmission'], DB::table('campagne_regles')->where('statut', 'en_vigueur')->orderBy('volet')->pluck('volet')->all());
     }
 
-    public function test_priorite_aux_boursiers_oui_ou_non(): void
+    public function test_priorite_aux_boursiers_dans_le_parametrage_general(): void
     {
-        $this->appliquerGeneral();
-        $route = route(self::BASE.'update', ['k1', 'readmission']);
-        $classement = fn () => json_decode(DB::table('campagne_regles')->where('volet', 'readmission')->value('parametres'), true)['classement'];
+        $this->admin();
+        // Cochée par défaut (modèle CROU).
+        $this->assertTrue($this->niveau('general')['regles']['priorite_boursiers']);
 
-        $payload = $this->readmission(['appliquer' => false]);
-        $payload['regles']['classement']['priorite_boursiers'] = 'aucune';
+        $route = route(self::BASE.'update', ['k1', 'general']);
+        $general = fn () => json_decode(DB::table('campagne_regles')->where('volet', 'general')->value('parametres'), true);
+        $payload = $this->general();
+        $payload['regles']['priorite_boursiers'] = false;
         $this->put($route, $payload)->assertSessionHasNoErrors();
-        $this->assertSame(['aucune', 'declare'], [$classement()['priorite_boursiers'], $classement()['source_boursier']]);
+        $this->assertFalse($general()['priorite_boursiers']);
+        $this->assertFalse($this->niveau('admission')['general']['regles']['priorite_boursiers']);
 
-        // L'ancienne option « à mérite égal » n'est plus proposée.
-        $payload['regles']['classement']['priorite_boursiers'] = 'departage';
-        $this->put($route, $payload)->assertSessionHasErrors('regles.classement.priorite_boursiers');
+        $payload['regles']['priorite_boursiers'] = 'aucune';
+        $this->put($route, $payload)->assertSessionHasErrors('regles.priorite_boursiers');
+        unset($payload['regles']['priorite_boursiers']);
+        $this->put($route, $payload)->assertSessionHasErrors('regles.priorite_boursiers');
+
+        // Elle n'est plus un critère de la réadmission : une valeur envoyée est ignorée, le statut déclaré reste la source.
+        $this->put($route, $this->general(['appliquer' => true]))->assertSessionHasNoErrors();
+        $readmission = $this->readmission();
+        $readmission['regles']['classement']['priorite_boursiers'] = 'aucune';
+        $this->put(route(self::BASE.'update', ['k1', 'readmission']), $readmission)->assertSessionHasNoErrors();
+        $classement = json_decode(DB::table('campagne_regles')->where('volet', 'readmission')->value('parametres'), true)['classement'];
+        $this->assertArrayNotHasKey('priorite_boursiers', $classement);
+        $this->assertSame('declare', $classement['source_boursier']);
+    }
+
+    public function test_anciennes_versions_reprennent_la_priorite_boursiers_de_la_readmission(): void
+    {
+        $this->admin();
+        DB::table('campagne_regles')->insert([
+            [
+                'id' => 'g-ancien', 'campagne_id' => 'k1', 'volet' => 'general', 'version' => 1, 'statut' => 'en_vigueur',
+                'parametres' => json_encode(['comite' => ['actif' => true, 'places' => 10]]), 'places' => null,
+            ],
+            [
+                'id' => 'r-ancien', 'campagne_id' => 'k1', 'volet' => 'readmission', 'version' => 1, 'statut' => 'en_vigueur',
+                'parametres' => json_encode(['classement' => ['priorite_boursiers' => 'aucune']]), 'places' => null,
+            ],
+        ]);
+
+        $this->assertFalse($this->niveau('general')['regles']['priorite_boursiers']);
     }
 
     public function test_desactivation_de_criteres(): void
@@ -745,6 +778,7 @@ class CriteresCampagneTest extends TestCase
                 'cas_sociaux' => ['actif' => true, 'taux' => 10, 'base' => 'places_readmission_cite'],
                 'comite' => ['actif' => true, 'places' => 10],
                 'age_max' => [['niveau' => 'n1', 'age' => 25], ['niveau' => 'n2', 'age' => null]],
+                'priorite_boursiers' => true,
             ],
             'appliquer' => false,
         ], $surcharge);
@@ -771,10 +805,7 @@ class CriteresCampagneTest extends TestCase
                     'age_actif' => true,
                     'report_places' => 'C6_puis_admission',
                 ],
-                'classement' => [
-                    'priorite_boursiers' => 'categorie',
-                    'departage' => ['age_plus_jeune'], 'k_liste_elargie' => 2,
-                ],
+                'classement' => ['departage' => ['age_plus_jeune'], 'k_liste_elargie' => 2],
             ],
             'places' => $places ?? [
                 ['cite_id' => 'filles', 'places' => 60],

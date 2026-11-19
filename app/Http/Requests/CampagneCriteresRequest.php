@@ -53,6 +53,7 @@ class CampagneCriteresRequest extends FormRequest
                 $r.'age_max' => 'sometimes|array',
                 $r.'age_max.*.niveau' => 'required|string|distinct|exists:niveau_etude,id_niveau_etude',
                 $r.'age_max.*.age' => 'nullable|integer|min:15|max:60',
+                $r.'priorite_boursiers' => 'required_with:regles|boolean',
             ];
         }
 
@@ -104,7 +105,6 @@ class CampagneCriteresRequest extends FormRequest
             $r.'conduite.note_min' => 'nullable|required_if_accepted:'.$r.'conduite.actif|numeric|decimal:0,2|min:0|max:'.app(\App\Http\Services\CatalogueSanctions::class)->noteInitiale(),
             $r.'age_actif' => 'required_with:regles|boolean',
             $r.'report_places' => ['required_with:regles', Rule::in(C::REPORT_PLACES)],
-            'regles.classement.priorite_boursiers' => ['required_with:regles', Rule::in(C::PRIORITE_BOURSIERS)],
         ];
     }
 
@@ -137,6 +137,7 @@ class CampagneCriteresRequest extends FormRequest
             'regles.comite.places' => 'places du comité des résidents',
             'regles.age_max.*.niveau' => 'niveau d’études',
             'regles.age_max.*.age' => 'âge maximum',
+            'regles.priorite_boursiers' => 'priorité aux boursiers',
             'regles.admission.merite.moyenne_bac_desc.seuil' => 'note minimale au baccalauréat',
             'regles.admission.merite.credits_desc.seuil' => 'nombre minimum de crédits',
             'regles.conditions.caution_mois' => 'nombre de mois de caution',

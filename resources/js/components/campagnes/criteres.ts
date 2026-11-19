@@ -45,6 +45,8 @@ export type ReglesGenerales = {
     };
     comite: { actif: boolean; places: number };
     age_max: AgeNiveau[];
+    /** Classement des demandes recevables (admission et réadmission) : boursiers devant les non-boursiers. */
+    priorite_boursiers: boolean;
 };
 
 export type ReglesReadmission = {
@@ -83,9 +85,6 @@ export type Regles = {
     readmission?: ReglesReadmission;
     admission?: ReglesAdmission;
     classement: {
-        /** Réadmission seulement. */
-        /** `categorie` : boursiers prioritaires ; `aucune` : pas de priorité. */
-        priorite_boursiers?: "categorie" | "aucune";
         departage: CritereDepartage[];
         k_liste_elargie: number;
     };

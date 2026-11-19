@@ -31,7 +31,7 @@ import {
 } from "@/schemas/criteres-campagne";
 
 type Etape = {
-    cle: "rangs" | "ages" | "verification";
+    cle: "rangs" | "ages" | "boursiers" | "verification";
     label: string;
     champs: Path<GeneralFormInput>[];
 };
@@ -43,6 +43,7 @@ const ETAPES: Etape[] = [
         champs: ["rang_filiere", "clubs", "cas_sociaux", "comite"],
     },
     { cle: "ages", label: "Âge maximum", champs: ["age_max"] },
+    { cle: "boursiers", label: "Boursiers", champs: ["priorite_boursiers"] },
     { cle: "verification", label: "Vérification", champs: [] },
 ];
 
@@ -55,8 +56,9 @@ const etapesDe = (readmission: boolean) =>
 
 /**
  * Paramétrage général de la campagne, préalable aux critères d'admission et de réadmission : rang par filière, rang
- * des clubs et associations, cas sociaux, comité des résidents et âge maximum par niveau d'études. Les crédits par
- * filière, propres à la réadmission, se règlent dans ses critères de rejet.
+ * des clubs et associations, cas sociaux, comité des résidents, âge maximum par niveau d'études et priorité aux
+ * boursiers dans le classement des demandes recevables (cochée par défaut). Les crédits par filière, propres à la
+ * réadmission, se règlent dans ses critères de rejet.
  */
 export function CriteresGenerauxFormulaire(props: PageGeneral) {
     const { campagne, etat, source } = props;
@@ -347,6 +349,45 @@ function Assistant({
                         </>
                     )}
 
+                    {courante.cle === "boursiers" && (
+                        <>
+                            <Controller
+                                control={control}
+                                name="priorite_boursiers"
+                                render={({ field }) => (
+                                    <label
+                                        htmlFor="cr-general-priorite_boursiers"
+                                        className={cn(
+                                            "flex cursor-pointer items-start gap-3 rounded-brand border px-4 py-3 transition-colors md:max-w-xl",
+                                            field.value
+                                                ? "border-primary/40 bg-white"
+                                                : "border-gray-200 bg-surface/60",
+                                        )}
+                                    >
+                                        <Checkbox
+                                            id="cr-general-priorite_boursiers"
+                                            checked={field.value}
+                                            onCheckedChange={(valeur) =>
+                                                field.onChange(valeur === true)
+                                            }
+                                            className="mt-0.5"
+                                        />
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block text-sm font-medium text-gray-900">
+                                                Priorité aux boursiers
+                                            </span>
+                                            <span className="block text-xs text-muted">
+                                                Cochée : les boursiers sont
+                                                classés devant les
+                                                non-boursiers, avant le mérite.
+                                            </span>
+                                        </span>
+                                    </label>
+                                )}
+                            />
+                        </>
+                    )}
+
                     {derniere && (
                         <div className="space-y-4">
                             {readmission && (
@@ -379,6 +420,16 @@ function Assistant({
                                 ]}
                             />
                             )}
+                            <Recap
+                                lignes={[
+                                    {
+                                        label: "Priorité aux boursiers",
+                                        valeur: valeurs.priorite_boursiers
+                                            ? "Oui"
+                                            : "Non",
+                                    },
+                                ]}
+                            />
                             <div className="space-y-2">
                                 <p className="text-sm text-muted">
                                     Âge maximum par niveau

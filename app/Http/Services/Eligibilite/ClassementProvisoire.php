@@ -16,12 +16,13 @@ use Illuminate\Support\Str;
  * Classement provisoire des demandes recevables d'une campagne, par volet, selon les critères de classement de la
  * campagne (version en vigueur, sinon modèle CROU ; docs/notes/eligibilite-criteres-campagne.md) :
  *
- * - **admission** : mérite du public de l'étudiant, en % du maximum (note du bac sur 400 pour un nouveau bachelier,
+ * - **admission** : boursiers devant les non-boursiers si la priorité est retenue (paramétrage général, cochée par
+ *   défaut) ; mérite du public de l'étudiant, en % du maximum (note du bac sur 400 pour un nouveau bachelier,
  *   crédits validés sur 60 de la Licence 2 au doctorat), décroissant ; puis le départage dans l'ordre paramétré
  *   (bac obtenu hors de la ville de référence, puis le plus jeune) ;
  * - **réadmission** : catégorie (C1 écoles sur concours au-delà du seuil de la filière, puis C6 places restantes),
- *   boursiers devant les non-boursiers si la priorité est retenue, mérite de la catégorie (C1 : % des crédits puis
- *   moyenne ; C6 : moyenne), puis le départage paramétré (le plus jeune, comportement = note de conduite).
+ *   boursiers devant les non-boursiers si la priorité est retenue (paramétrage général), mérite de la catégorie (C1 :
+ *   % des crédits puis moyenne ; C6 : moyenne), puis le départage paramétré (le plus jeune, comportement = note de conduite).
  *   Les catégories C2 à C5 (rang du PV, clubs, cas sociaux, comité) demandent des listes qui ne sont pas encore
  *   saisies : leurs candidats figurent en C6. Le départage « excellence » n'a pas encore de donnée et est ignoré.
  *
@@ -42,30 +43,35 @@ class ClassementProvisoire
         $candidats = collect($etudiants)
             ->filter(fn (Etudiant $etudiant) => $etudiant->derniereDemande && (string) $etudiant->derniereDemande->campagne_id === (string) $campagne->getKey());
         $general = $this->regles($campagne, 'general');
+        $boursiers = (bool) ($general['priorite_boursiers'] ?? true);
 
         $resultat = [];
         foreach (array_keys(CriteresCampagne::VOLETS) as $volet) {
             $regles = $this->regles($campagne, $volet);
             $liste = $candidats->filter(fn (Etudiant $etudiant) => ($volets[(string) $etudiant->getKey()] ?? 'admission') === $volet);
-            $lignes = $volet === 'admission' ? $this->admission($liste, $regles) : $this->readmission($liste, $regles, $general);
+            $lignes = $volet === 'admission' ? $this->admission($liste, $regles, $boursiers) : $this->readmission($liste, $regles, $general, $boursiers);
             $resultat[$volet] = $lignes->values()->map(fn (array $ligne, int $index) => ['rang' => $index + 1] + $ligne)->all();
         }
 
         return $resultat;
     }
 
-    /** Admission : mérite (en % du maximum), puis départage paramétré. */
-    private function admission(Collection $etudiants, array $regles): Collection
+    /** Admission : boursiers (si prioritaires), mérite (en % du maximum), puis départage paramétré. */
+    private function admission(Collection $etudiants, array $regles, bool $boursiers): Collection
     {
         $departage = $regles['classement']['departage'] ?? CriteresCampagne::DEPARTAGE_DEFAUT['admission'];
         $reference = $this->normaliser($regles['admission']['ville_bac'] ?? '');
 
-        return $etudiants->map(function (Etudiant $etudiant) use ($departage, $reference) {
+        return $etudiants->map(function (Etudiant $etudiant) use ($departage, $reference, $boursiers) {
             $demande = $etudiant->derniereDemande;
             $merite = $this->meriteAdmission($demande);
             $ville = trim((string) $demande->ville_bac);
             $horsVille = $ville !== '' && $reference !== '' && $this->normaliser($ville) !== $reference;
-            $cles = [$merite === null ? INF : -$merite['pourcentage']];
+            $boursier = (bool) $demande->boursier;
+            $cles = [
+                $boursiers ? ($boursier ? 0 : 1) : 0,
+                $merite === null ? INF : -$merite['pourcentage'],
+            ];
             foreach ($departage as $critere) {
                 $cles[] = match ($critere) {
                     'hors_ville_bac' => $horsVille ? 0 : 1,
@@ -75,16 +81,15 @@ class ClassementProvisoire
             }
             $cles[] = $this->cleDepot($demande);
 
-            return ['etudiant' => $etudiant, 'merite' => $merite, 'ville_bac' => $ville !== '' ? $ville : null, 'hors_ville' => $horsVille, 'cles' => $cles];
+            return ['etudiant' => $etudiant, 'boursier' => $boursier, 'merite' => $merite, 'ville_bac' => $ville !== '' ? $ville : null, 'hors_ville' => $horsVille, 'cles' => $cles];
         })->sort(fn (array $a, array $b) => $a['cles'] <=> $b['cles'])
             ->map(fn (array $ligne) => collect($ligne)->except('cles')->all());
     }
 
     /** Réadmission : catégorie, boursiers (si prioritaires), mérite de la catégorie, puis départage paramétré. */
-    private function readmission(Collection $etudiants, array $regles, array $general): Collection
+    private function readmission(Collection $etudiants, array $regles, array $general, bool $boursiers): Collection
     {
         $classement = $regles['classement'] ?? [];
-        $boursiers = ($classement['priorite_boursiers'] ?? 'categorie') === 'categorie';
         $departage = $classement['departage'] ?? CriteresCampagne::DEPARTAGE_DEFAUT['readmission'];
         $categories = $this->criteres->categories($general, $regles);
         $filieres = collect($regles['readmission']['credits']['filieres'] ?? [])->keyBy(fn ($ligne) => (string) ($ligne['filiere_id'] ?? ''));

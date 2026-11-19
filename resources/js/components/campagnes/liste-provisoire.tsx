@@ -1,11 +1,11 @@
 import { Link } from '@inertiajs/react';
-import { Eye, ListOrdered } from 'lucide-react';
+import { CircleCheck, Eye, FileCheck2, FileClock, FileX2, ListOrdered } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
@@ -26,12 +26,23 @@ export type LigneClassement = {
     merite: { libelle: string; valeur: number; max: number; pourcentage: number } | null;
     ville_bac: string | null;
     hors_ville: boolean | null;
+    /** Classé devant les non-boursiers quand la priorité aux boursiers est retenue (paramétrage général). */
+    boursier: boolean | null;
     /** Réadmission. */
     categorie: { code: string; libelle: string } | null;
-    boursier: boolean | null;
     moyenne: number | null;
     credits: number | null;
+    /** État des pièces du dossier ; envoyé seulement avec le droit de voir les documents (null : aucune pièce demandée ni déposée). */
+    documents: PiecesDossier | null;
     url: string | null;
+};
+
+export type PiecesDossier = {
+    statut: 'valide' | 'incomplet' | 'en_verification';
+    valides: number;
+    rejetes: number;
+    en_verification: number;
+    absents: number;
 };
 
 export type Classement = {
@@ -43,6 +54,8 @@ export type Classement = {
     lignes: Paginated<LigneClassement> | null;
     colonnes: { age: boolean };
     urls: Partial<Record<ListeRecevables, string | null>>;
+    /** Téléchargement de la liste provisoire ouverte (complète) ; null sur la liste des demandes ou sans droit. */
+    exports: { excel: string; pdf: string } | null;
 };
 
 const ONGLETS: { cle: ListeRecevables; label: string }[] = [
@@ -121,6 +134,7 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
     if (!classement.lignes) return null;
     const readmission = classement.liste === 'readmission';
     const vide = (valeur: ReactNode) => valeur ?? <span className="text-muted">—</span>;
+    const boursier: DataTableColumn<LigneClassement> = { key: 'boursier', header: 'Boursier', cell: (l) => (l.boursier ? <Badge variant="info">Oui</Badge> : <span className="text-muted">Non</span>) };
 
     const colonnes: DataTableColumn<LigneClassement>[] = [
         { key: 'rang', header: 'Rang', headClassName: 'w-16', className: 'font-medium text-gray-900 tabular-nums', cell: (l) => l.rang },
@@ -154,7 +168,7 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
                               vide(null)
                           ),
                   },
-                  { key: 'boursier', header: 'Boursier', cell: (l) => (l.boursier ? <Badge variant="info">Oui</Badge> : <span className="text-muted">Non</span>) },
+                  boursier,
                   {
                       key: 'merite',
                       header: 'Moyenne',
@@ -168,6 +182,7 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
                   },
               ] satisfies DataTableColumn<LigneClassement>[])
             : ([
+                  boursier,
                   {
                       key: 'merite',
                       header: 'Mérite',
@@ -203,12 +218,20 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
             key: 'actions',
             header: <span className="sr-only">Actions</span>,
             className: 'text-right',
-            cell: (l) =>
-                l.url && (
-                    <Link href={l.url} className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'whitespace-nowrap')}>
-                        <Eye className="size-4" aria-hidden /> Suivre le dossier
-                    </Link>
-                ),
+            cell: (l) => (
+                <div className="flex items-center justify-end gap-1">
+                    {l.documents && <IconePieces pieces={l.documents} />}
+                    {/* Validation du dossier : action à venir. */}
+                    <Button variant="ghost" size="icon" aria-label={`Valider le dossier de ${l.name}`} title="Valider le dossier">
+                        <CircleCheck {...ICON} aria-hidden />
+                    </Button>
+                    {l.url && (
+                        <Link href={l.url} aria-label={`Suivre le dossier de ${l.name}`} title="Suivre le dossier" className={buttonVariants({ variant: 'ghost', size: 'icon' })}>
+                            <Eye {...ICON} aria-hidden />
+                        </Link>
+                    )}
+                </div>
+            ),
         },
     ];
 
@@ -228,5 +251,27 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
                 </span>
             }
         />
+    );
+}
+
+/** Pièces du dossier : vert si toutes validées, rouge si au moins une rejetée ou une pièce obligatoire absente, orange en attente de vérification. */
+function IconePieces({ pieces }: { pieces: PiecesDossier }) {
+    const details = [
+        pieces.valides > 0 && `${pieces.valides} validée${pieces.valides > 1 ? 's' : ''}`,
+        pieces.rejetes > 0 && `${pieces.rejetes} rejetée${pieces.rejetes > 1 ? 's' : ''}`,
+        pieces.absents > 0 && `${pieces.absents} absente${pieces.absents > 1 ? 's' : ''}`,
+        pieces.en_verification > 0 && `${pieces.en_verification} en vérification`,
+    ].filter(Boolean);
+    const { Icone, classe, libelle } = {
+        valide: { Icone: FileCheck2, classe: 'text-primary', libelle: 'Pièces validées' },
+        incomplet: { Icone: FileX2, classe: 'text-red-600', libelle: 'Pièces rejetées ou absentes' },
+        en_verification: { Icone: FileClock, classe: 'text-amber-600', libelle: 'Pièces en vérification' },
+    }[pieces.statut];
+    const titre = `${libelle} : ${details.join(', ')}`;
+
+    return (
+        <span role="img" aria-label={titre} title={titre} className={cn('inline-flex size-9 items-center justify-center', classe)}>
+            <Icone {...ICON} aria-hidden />
+        </span>
     );
 }

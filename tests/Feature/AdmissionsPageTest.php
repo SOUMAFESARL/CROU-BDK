@@ -91,7 +91,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->agentLimite();
 
         $parNom = $this->page('liste', ['etat' => 'toutes'], query: ['q' => 'konan'])['props'];
-        $this->assertSame(['q' => 'konan', 'etat_dossier' => ''], $parNom['filters']);
+        $this->assertSame(['q' => 'konan', 'etat_dossier' => '', 'type' => ''], $parNom['filters']);
         $this->assertSame(['student'], collect($parNom['dossiers']['data'])->pluck('id')->all());
         $this->assertSame(['student'], collect($this->page('liste', ['etat' => 'toutes'], query: ['q' => 'M-001'])['props']['dossiers']['data'])->pluck('id')->all());
 
@@ -424,6 +424,14 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         ]]);
         $recevables = fn (array $query = []) => $this->page('liste', ['etat' => 'recevables'], '/admin/gestion-hebergement/campagnes_admissions/liste/recevables', $query)['props'];
 
+        // Filtre par type de demande (calculé, non stocké) ; un type inconnu est ignoré.
+        $parType = fn (string $type) => $this->page('liste', ['etat' => 'toutes'], query: ['type' => $type])['props'];
+        $this->assertSame(['ancien', 'ancien2'], collect($parType('readmission')['dossiers']['data'])->pluck('id')->sort()->values()->all());
+        $this->assertSame(['other', 'student'], collect($parType('admission')['dossiers']['data'])->pluck('id')->sort()->values()->all());
+        $this->assertSame('readmission', $parType('readmission')['filters']['type']);
+        $this->assertSame(['', 4], [$parType('pirate')['filters']['type'], $parType('pirate')['dossiers']['total']]);
+        $this->assertSame(2, $this->page('liste', ['etat' => 'recevables'], '/admin/gestion-hebergement/campagnes_admissions/liste/recevables', ['type' => 'admission'])['props']['dossiers']['total']);
+
         // Liste des demandes : type de demande de chaque dossier, compteurs des onglets.
         $props = $recevables();
         $this->assertSame('demandes', $props['classement']['liste']);
@@ -440,8 +448,69 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertTrue($admission['lignes']['data'][0]['hors_ville']);
         $this->assertSame(20, $admission['lignes']['data'][0]['age']);
 
+        // Téléchargement de la liste provisoire ouverte : Excel et PDF à imprimer, liste complète.
+        $this->assertNull($props['classement']['exports']);
+        $this->assertStringEndsWith('/liste-provisoire/admission/excel', $admission['exports']['excel']);
+        $excel = $this->get($admission['exports']['excel']);
+        $excel->assertOk()->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        $this->assertStringContainsString('liste-provisoire-admission', (string) $excel->headers->get('content-disposition'));
+        $pdf = $this->get($admission['exports']['pdf']);
+        $pdf->assertOk()->assertHeader('content-type', 'application/pdf');
+        $this->get('/admin/gestion-hebergement/campagnes_admissions/liste-provisoire/admission/csv')->assertNotFound();
+
         $readmission = $recevables(['liste' => 'readmission'])['classement'];
         $this->assertSame([['ancien', 'C1'], ['ancien2', 'C6']], collect($readmission['lignes']['data'])->map(fn ($l) => [$l['id'], $l['categorie']['code']])->all());
+        // Même bouton « Télécharger » sur la liste provisoire des réadmissions.
+        $this->assertStringEndsWith('/liste-provisoire/readmission/excel', $readmission['exports']['excel']);
+        $this->assertStringEndsWith('/liste-provisoire/readmission/pdf', $readmission['exports']['pdf']);
+        $this->assertStringContainsString('liste-provisoire-readmission', (string) $this->get($readmission['exports']['excel'])->assertOk()->headers->get('content-disposition'));
+        $this->get($readmission['exports']['pdf'])->assertOk()->assertHeader('content-type', 'application/pdf');
+
+        // Priorité aux boursiers (paramétrage général, cochée par défaut) : un boursier passe devant le bac hors ville.
+        $demande('student')->update(['boursier' => true]);
+        $admission = $recevables(['liste' => 'admission'])['classement']['lignes']['data'];
+        $this->assertSame([['student', true], ['other', false]], collect($admission)->map(fn ($l) => [$l['id'], $l['boursier']])->all());
+        // Décochée : le classement revient au mérite puis au départage.
+        $this->enVigueur('general', ['priorite_boursiers' => false]);
+        $this->assertSame(['other', 'student'], collect($recevables(['liste' => 'admission'])['classement']['lignes']['data'])->pluck('id')->all());
+        DB::table('campagne_regles')->where('volet', 'general')->delete();
+        $demande('student')->update(['boursier' => false]);
+
+        // État des pièces de chaque ligne : aucune pièce demandée ni déposée → pas d'état.
+        $this->assertNull($admission[0]['documents']);
+        Schema::table('document_etudiant', function (Blueprint $t) {
+            $t->string('type_document')->nullable();
+            $t->string('statut')->nullable();
+            $t->string('id_campagne')->nullable();
+        });
+        Schema::create('document', function (Blueprint $t) {
+            $t->string('id_document')->primary();
+            $t->string('name');
+            $t->boolean('champs_requis')->default(false);
+            $t->timestamps();
+        });
+        Schema::create('document_campagne', function (Blueprint $t) {
+            $t->string('id_document_campagne')->primary();
+            $t->string('id_campagne');
+            $t->string('document_id');
+            $t->timestamps();
+        });
+        DB::table('document')->insert([['id_document' => 'cni', 'name' => 'CNI', 'champs_requis' => true], ['id_document' => 'photo', 'name' => 'Photo', 'champs_requis' => false]]);
+        DB::table('document_campagne')->insert([['id_document_campagne' => 'dc1', 'id_campagne' => 'campaign', 'document_id' => 'cni'], ['id_document_campagne' => 'dc2', 'id_campagne' => 'campaign', 'document_id' => 'photo']]);
+        $piece = fn (string $id, string $etudiant, string $type, string $statut, string $date) => DB::table('document_etudiant')->insert(['id_document' => $id, 'etudiant_id' => $etudiant, 'type_document' => $type, 'statut' => $statut, 'id_campagne' => 'campaign', 'created_at' => $date]);
+        // student : la CNI rejetée a été remplacée par une version validée (seule la dernière compte), photo validée → vert.
+        $piece('p1', 'student', 'CNI', 'rejete', '2026-01-01');
+        $piece('p2', 'student', 'CNI', 'valide', '2026-01-02');
+        $piece('p3', 'student', 'Photo', 'valide', '2026-01-02');
+        // other : photo validée mais CNI obligatoire absente → rouge.
+        $piece('p4', 'other', 'Photo', 'valide', '2026-01-02');
+        $pieces = collect($recevables(['liste' => 'admission'])['classement']['lignes']['data'])->pluck('documents', 'id');
+        $this->assertSame(['statut' => 'valide', 'valides' => 2, 'rejetes' => 0, 'en_verification' => 0, 'absents' => 0], $pieces['student']);
+        $this->assertSame(['incomplet', 1], [$pieces['other']['statut'], $pieces['other']['absents']]);
+        $piece('p5', 'other', 'CNI', 'en_verification', '2026-01-03');
+        $this->assertSame('en_verification', collect($recevables(['liste' => 'admission'])['classement']['lignes']['data'])->firstWhere('id', 'other')['documents']['statut']);
+        $piece('p6', 'student', 'Photo', 'rejete', '2026-01-03');
+        $this->assertSame('incomplet', collect($recevables(['liste' => 'admission'])['classement']['lignes']['data'])->firstWhere('id', 'student')['documents']['statut']);
 
         // La recherche filtre la liste ouverte sans changer les rangs.
         $recherche = $recevables(['liste' => 'admission', 'q' => 'konan'])['classement']['lignes']['data'];

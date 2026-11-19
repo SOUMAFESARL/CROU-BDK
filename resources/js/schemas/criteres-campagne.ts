@@ -96,6 +96,7 @@ export const generalSchema = z.object({
             age: entier("l’âge maximum", 15, 60, false),
         }),
     ),
+    priorite_boursiers: z.boolean(),
     appliquer: z.boolean(),
 });
 
@@ -134,6 +135,8 @@ export function valeursGenerales(
             places: texte(regles.comite.places),
         },
         age_max: codes.map((code) => ({ niveau: code, age: texte(ages.get(code)) })),
+        // Cochée par défaut (modèle CROU).
+        priorite_boursiers: regles.priorite_boursiers ?? true,
         appliquer,
     };
 }
@@ -157,6 +160,7 @@ export function generalAEnvoyer(v: GeneralFormOutput) {
         age_max: v.age_max
             .filter((ligne) => ligne.age.trim() !== "")
             .map((ligne) => ({ niveau: ligne.niveau, age: n(ligne.age) })),
+        priorite_boursiers: v.priorite_boursiers,
     };
 }
 
@@ -231,8 +235,6 @@ export const criteresSchema = z
         readmission: blocReadmission.optional(),
         admission: blocAdmission.optional(),
         classement: z.object({
-            // Case unique : priorité aux boursiers ou non.
-            priorite_boursiers: z.boolean(),
             // Critères du volet, dans l'ordre ; un critère décoché est désactivé (au moins un reste actif).
             departage: z
                 .array(
@@ -341,9 +343,6 @@ export function valeursInitiales(
                   }
                 : undefined,
         classement: {
-            // Sans objet en admission : valeurs neutres, non envoyées.
-            priorite_boursiers:
-                (c.priorite_boursiers ?? "aucune") !== "aucune",
             // Actifs dans l'ordre enregistré, puis les critères du volet désactivés.
             departage: [
                 ...c.departage
@@ -436,12 +435,7 @@ export function reglesAEnvoyer(volet: Volet, v: CriteresFormOutput) {
             age_actif: r.age_actif,
             report_places: r.report_places,
         },
-        classement: {
-            ...classement,
-            priorite_boursiers: v.classement.priorite_boursiers
-                ? "categorie"
-                : "aucune",
-        },
+        classement,
     };
 }
 
