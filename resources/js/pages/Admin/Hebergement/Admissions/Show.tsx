@@ -13,14 +13,12 @@ import {
     Info,
     ListChecks,
     Loader2,
-    Pencil,
-    Route,
     Scale,
     ShieldAlert,
     TriangleAlert,
     X,
 } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
@@ -29,9 +27,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { PageHeader } from '@/components/ui/page-header';
-import { EtudiantEditDialog, type OptionsEtudiant, type ValeursEtudiant } from '@/components/residents/etudiant-edit-dialog';
 import { Progress } from '@/components/ui/progress';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
@@ -42,16 +38,6 @@ type Regle = { label: string; campagne: string; etudiant: string; etat: 'ok' | '
 type Volet = { volet: string; poids: number; situation: string; points: number; apport: number };
 type Bareme = { score: number | null; minimum: number; volets: Volet[]; erreur: string | null; score_decision: number | null };
 type Document = { id: string; type: string; url: string; statut: string; valider: string | null; rejeter: string | null };
-type Derogation = {
-    id: string;
-    statut: 'pending' | 'approved' | 'rejected' | string;
-    demandeur: string | null;
-    date: string | null;
-    motif: string;
-    non_respectes: string[];
-    decision: { auteur: string | null; date: string; motif: string | null } | null;
-    decider: string | null;
-};
 
 /** Informations saisies par l'étudiant, par étape du formulaire de demande (`CampagnesAdmissionController::profilDemande`). */
 type ProfilDemande = {
@@ -106,36 +92,20 @@ type Props = {
         non_conformes: number;
         score: number;
         lien: string | null;
-        /** Dérogation approuvée sur la demande : irrecevable, elle est rendue recevable. */
-        derogation: { auteur: string | null; date: string | null } | null;
+        /** Demande dérogée (bouton « Déroger ») : irrecevable ou refusée, elle est rendue recevable. */
+        derogation: { auteur: string | null; date: string | null; motif: string | null } | null;
     } | null;
     /** Score du barème de scoring actif (seul score comparé au minimum de la décision automatique). */
     bareme: Bareme | null;
     documents: Document[] | null;
-    derogations: { liste: Derogation[]; demander: string | null } | null;
-    suivi: {
-        labels: Record<string, string>;
-        proposition: { chambre: string | null; jusqu_au: string | null } | null;
-        actions: { etat: string; label: string }[];
-        transition: string | null;
-        /** Levée en un clic d'un refus automatique (barème de scoring). */
-        rendre_eligible: string | null;
-        /** Décision du barème à l'origine de l'état actuel. */
-        decision: { etat: string; score: number; minimum: number } | null;
-        /** Motif du refus (ou de l'annulation) en cours : rejet depuis une liste provisoire, la liste validée ou le suivi. */
-        refus: { etat: string; motif: string; auteur: string | null; date: string | null } | null;
-        assignation_id: string | null;
-        historique: { date: string | null; etat: string; auteur: string | null; motif: string | null }[] | null;
-    } | null;
     profil: ProfilDemande | null;
     historique: { id: string; numero: string | null; campagne_id: string | null; annee: string | null; date: string | null; etat: string | null }[] | null;
-    /** Valeurs et référentiels du formulaire de modification (`null` sans le droit de modifier). */
-    edition: ValeursEtudiant | null;
-    options: OptionsEtudiant | null;
-    urls: { admissions: string | null; contrat: string | null; modifier: string | null };
+    /**
+     * `deroger` : bouton « Déroger » (demande des listes « Demandes irrecevables » ou « Demandes refusées », liste des
+     * demandes validées de son volet pas encore approuvée en commission) ; null sinon ou sans le droit de déroger.
+     */
+    urls: { admissions: string | null; deroger: string | null };
 };
-
-const PARCOURS = ['soumis', 'eligible', 'confirme', 'attribue_definitif'];
 
 const ETATS_REGLE = {
     ok: { label: 'Conforme', variant: 'success', icone: CircleCheck },
@@ -150,12 +120,6 @@ const STATUTS_DOCUMENT: Record<string, { label: string; variant: 'success' | 'da
     rejete: { label: 'Rejeté', variant: 'danger', icone: CircleX },
 };
 
-const STATUTS_DEROGATION: Record<string, { label: string; variant: 'success' | 'danger' | 'warning'; icone: typeof Clock }> = {
-    pending: { label: 'En attente', variant: 'warning', icone: Clock },
-    approved: { label: 'Approuvée', variant: 'success', icone: CircleCheck },
-    rejected: { label: 'Refusée', variant: 'danger', icone: CircleX },
-};
-
 const STATUTS_INSCRIPTION: Record<string, [string, 'success' | 'warning' | 'info' | 'danger']> = {
     residents: ['Résident', 'success'],
     en_attente: ['En attente', 'warning'],
@@ -165,14 +129,8 @@ const STATUTS_INSCRIPTION: Record<string, [string, 'success' | 'warning' | 'info
 
 /** Traitement d'un dossier de candidature (remplace `admission/traiter-demande.blade.php`, `derogations.blade.php` et le mode admin de `dossier-cycle`). */
 export default function AdmissionShow(props: Props) {
-    const { etudiant, demande, discipline, eligibilite, bareme, documents, derogations, suivi, profil, historique, edition, options, urls } = props;
-    const [enEdition, setEnEdition] = useState(false);
-    // Objet stable : la fenêtre réinitialise son formulaire à chaque ouverture (et après rechargement des valeurs).
-    const etudiantEdite = useMemo(
-        () => (enEdition && urls.modifier && edition ? { name: etudiant.name, url: urls.modifier, valeurs: edition } : null),
-        [enEdition, urls.modifier, edition, etudiant.name],
-    );
-    const modifiable = !!(urls.modifier && edition && options);
+    const { etudiant, demande, discipline, eligibilite, bareme, documents, profil, historique, urls } = props;
+    const [aDeroger, setADeroger] = useState(false);
 
     return (
         <AdminLayout title="Traiter la demande">
@@ -191,7 +149,7 @@ export default function AdmissionShow(props: Props) {
                     </div>
                 }
                 actions={
-                    (urls.contrat || urls.admissions || modifiable) && (
+                    (urls.admissions || urls.deroger) && (
                         <>
                             {urls.admissions && (
                                 <Link
@@ -201,21 +159,10 @@ export default function AdmissionShow(props: Props) {
                                     <ArrowLeft {...ICON} aria-hidden /> Retour aux admissions
                                 </Link>
                             )}
-                            {modifiable && (
-                                <Button className="h-10 px-4" onClick={() => setEnEdition(true)} title="Corriger les informations saisies par l’étudiant">
-                                    <Pencil {...ICON} aria-hidden /> Modifier les informations
+                            {urls.deroger && (
+                                <Button className="h-10 px-4" onClick={() => setADeroger(true)} title="Rendre la demande recevable par dérogation">
+                                    <Scale {...ICON} aria-hidden /> Déroger
                                 </Button>
-                            )}
-                            {urls.contrat && (
-                                <a
-                                    href={urls.contrat}
-                                    target="_blank"
-                                    rel="noopener"
-                                    title="Ouvrir le contrat PDF généré depuis le dossier dans un nouvel onglet"
-                                    className="inline-flex h-10 items-center gap-2 rounded-brand border border-primary bg-white px-4 text-sm font-medium text-primary hover:bg-soft"
-                                >
-                                    <FileText {...ICON} aria-hidden /> Consulter le contrat
-                                </a>
                             )}
                         </>
                     )
@@ -236,8 +183,6 @@ export default function AdmissionShow(props: Props) {
                     {bareme && <ScoreBareme {...bareme} />}
                     {eligibilite && <Eligibilite {...eligibilite} />}
                     {documents && <Documents documents={documents} />}
-                    {derogations && demande && <Derogations {...derogations} demandeId={demande.id} />}
-                    {suivi && demande && <Suivi suivi={suivi} etat={demande.etat} />}
                 </div>
 
                 <aside className="flex flex-col gap-6">
@@ -246,7 +191,7 @@ export default function AdmissionShow(props: Props) {
                 </aside>
             </div>
 
-            {modifiable && options && <EtudiantEditDialog etudiant={etudiantEdite} options={options} onClose={() => setEnEdition(false)} />}
+            {urls.deroger && <DialogueDerogation url={urls.deroger} nom={etudiant.name} open={aDeroger} onOpenChange={setADeroger} />}
         </AdminLayout>
     );
 }
@@ -385,9 +330,10 @@ function Eligibilite({ volet_libelle, campagne, origine, regles, conformes, non_
                         {conformes} critère(s) conforme(s) sur {regles.length}.
                         {non_conformes > 0 &&
                             (derogation
-                                ? ` Dérogation approuvée${derogation.auteur ? ` par ${derogation.auteur}` : ''}${derogation.date ? ` le ${dateFr(derogation.date)}` : ''}.`
-                                : ' Corrigez les informations de la demande ou demandez une dérogation pour la rendre recevable.')}
+                                ? ` Demande dérogée${derogation.auteur ? ` par ${derogation.auteur}` : ''}${derogation.date ? ` le ${dateFr(derogation.date)}` : ''}.`
+                                : '')}
                     </p>
+                    {derogation?.motif && <p className="mt-1 text-sm whitespace-pre-line text-muted">Motif de la dérogation : {derogation.motif}</p>}
                 </div>
             </div>
             <div className="overflow-hidden rounded-brand border">
@@ -505,355 +451,58 @@ function Documents({ documents }: { documents: Document[] }) {
     );
 }
 
-function Derogations({ liste, demander, demandeId }: NonNullable<Props['derogations']> & { demandeId: string }) {
+/** Fenêtre du bouton « Déroger » : motif obligatoire ; la demande passe en tête de la liste provisoire (badge « Dérogé »). */
+function DialogueDerogation({ url, nom, open, onOpenChange }: { url: string; nom: string; open: boolean; onOpenChange: (open: boolean) => void }) {
     const [motif, setMotif] = useState('');
     const [erreur, setErreur] = useState<string | null>(null);
     const [enCours, setEnCours] = useState(false);
 
-    const demanderDerogation = async () => {
-        if (!demander) return;
+    const deroger = async () => {
         if (motif.trim() === '') {
             setErreur('Le motif de la dérogation est obligatoire.');
             return;
         }
         setEnCours(true);
-        const ok = await envoyer(demander, { demande_id: demandeId, reason: motif.trim() }, { onError: (erreurs) => setErreur(erreurs.reason ?? Object.values(erreurs)[0] ?? null) });
+        const ok = await envoyer(url, { motif: motif.trim() }, { onError: (erreurs) => setErreur(erreurs.motif ?? Object.values(erreurs)[0] ?? null) });
         setEnCours(false);
-        if (ok) setMotif('');
-    };
-
-    return (
-        <Carte icone={<Scale size={18} strokeWidth={1.25} />} teinte="bg-[#FEEBC0] text-[#6B3F00]" titre="Dérogation à la recevabilité" meta={`${liste.length} enregistrée(s)`}>
-            <p className="mb-4 text-sm text-muted">
-                Une demande irrecevable (au moins un critère non conforme) peut être rendue recevable par dérogation. La dérogation doit être motivée et validée par un autre Sous-DAL ou Chef du service
-                logement habilité. Elle ne réserve aucune chambre et ne supprime aucun contrôle de disponibilité.
-            </p>
-
-            {demander && (
-                <div className="mb-4 flex flex-col gap-3 rounded-brand bg-surface p-4">
-                    <Field id="derogation-motif" label="Motif de la dérogation" required error={erreur ?? undefined} hint="2 000 caractères maximum.">
-                        <Textarea
-                            id="derogation-motif"
-                            rows={3}
-                            maxLength={2000}
-                            invalid={!!erreur}
-                            value={motif}
-                            onChange={(event) => {
-                                setMotif(event.target.value);
-                                setErreur(null);
-                            }}
-                        />
-                    </Field>
-                    <div>
-                        <Button size="sm" variant="accent" className="h-10" disabled={enCours} onClick={demanderDerogation}>
-                            {enCours && <Loader2 className="size-4 animate-spin" aria-hidden />}
-                            Demander une dérogation
-                        </Button>
-                    </div>
-                </div>
-            )}
-
-            {liste.length === 0 ? (
-                <p className="text-sm text-muted">Aucune dérogation enregistrée.</p>
-            ) : (
-                <div className="flex flex-col gap-3">
-                    {liste.map((derogation) => (
-                        <ArticleDerogation key={derogation.id} derogation={derogation} />
-                    ))}
-                </div>
-            )}
-        </Carte>
-    );
-}
-
-function ArticleDerogation({ derogation }: { derogation: Derogation }) {
-    const [motif, setMotif] = useState('');
-    const [erreur, setErreur] = useState<string | null>(null);
-    const [enCours, setEnCours] = useState<'approve' | 'reject' | null>(null);
-    const statut = STATUTS_DEROGATION[derogation.statut] ?? { label: derogation.statut, variant: 'warning' as const, icone: Info };
-
-    const decider = async (decision: 'approve' | 'reject') => {
-        if (!derogation.decider) return;
-        if (motif.trim() === '') {
-            setErreur('Le motif de la décision est obligatoire.');
-            return;
+        if (ok) {
+            setMotif('');
+            onOpenChange(false);
         }
-        setEnCours(decision);
-        await envoyer(derogation.decider, { decision, reason: motif.trim() }, { onError: (erreurs) => setErreur(erreurs.reason ?? Object.values(erreurs)[0] ?? null) });
-        setEnCours(null);
     };
 
     return (
-        <article className="rounded-brand border p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-                <Badge variant={statut.variant}>
-                    <statut.icone className="size-3.5" aria-hidden /> {statut.label}
-                </Badge>
-                <span className="text-xs text-muted">
-                    {derogation.demandeur} — {dateFr(derogation.date)} {derogation.date?.slice(11, 16)}
-                </span>
-            </div>
-            <p className="mt-2 text-sm whitespace-pre-line">{derogation.motif}</p>
-            {derogation.non_respectes.length > 0 && (
-                <ul className="mt-2 list-disc pl-5 text-sm text-red-700">
-                    {derogation.non_respectes.map((label) => (
-                        <li key={label}>{label}</li>
-                    ))}
-                </ul>
-            )}
-            <div className="mt-3 border-t pt-3 text-sm">
-                {derogation.decision ? (
-                    <p className="text-muted">
-                        Décision de {derogation.decision.auteur} — {dateFr(derogation.decision.date)} {derogation.decision.date.slice(11, 16)} : {derogation.decision.motif}
-                    </p>
-                ) : derogation.decider ? (
-                    <div className="flex flex-col gap-3">
-                        <Field id={`decision-${derogation.id}`} label="Motif de la décision" required error={erreur ?? undefined}>
-                            <Textarea
-                                id={`decision-${derogation.id}`}
-                                rows={2}
-                                maxLength={2000}
-                                invalid={!!erreur}
-                                value={motif}
-                                onChange={(event) => {
-                                    setMotif(event.target.value);
-                                    setErreur(null);
-                                }}
-                            />
-                        </Field>
-                        <div className="flex flex-wrap gap-2">
-                            <Button size="sm" disabled={enCours !== null} onClick={() => decider('approve')}>
-                                {enCours === 'approve' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />} Approuver la dérogation
-                            </Button>
-                            <Button size="sm" variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" disabled={enCours !== null} onClick={() => decider('reject')}>
-                                {enCours === 'reject' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <X className="size-4" aria-hidden />} Refuser
-                            </Button>
-                        </div>
-                    </div>
-                ) : (
-                    <p className="text-muted">Validation attendue d’un autre responsable habilité.</p>
-                )}
-            </div>
-        </article>
+        <ConfirmDialog
+            open={open}
+            onOpenChange={(ouvert) => {
+                onOpenChange(ouvert);
+                if (!ouvert) setErreur(null);
+            }}
+            title="Déroger à la recevabilité ?"
+            description={`La demande de ${nom} sera rendue recevable et passera en tête de la liste provisoire avec le badge « Dérogé ». Aucune chambre n’est réservée.`}
+            confirmLabel="Déroger"
+            confirmIcon={<Scale className="size-4" aria-hidden />}
+            processing={enCours}
+            onConfirm={deroger}
+        >
+            <Field id="derogation-motif" label="Motif de la dérogation" required error={erreur ?? undefined} hint="2 000 caractères maximum.">
+                <Textarea
+                    id="derogation-motif"
+                    rows={4}
+                    maxLength={2000}
+                    invalid={!!erreur}
+                    value={motif}
+                    onChange={(event) => {
+                        setMotif(event.target.value);
+                        setErreur(null);
+                    }}
+                />
+            </Field>
+        </ConfirmDialog>
     );
 }
 
 const scoreFr = (valeur: number) => valeur.toLocaleString('fr-FR', { maximumFractionDigits: 2 });
-
-/** Transitions pour lesquelles `DossierWorkflow` exige un motif (ainsi que toute sortie de l'état « refusé »). */
-const ETATS_AVEC_MOTIF = ['incomplet', 'refuse', 'annule', 'expire'];
-
-function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: string | null }) {
-    const [action, setAction] = useState('');
-    const [motif, setMotif] = useState('');
-    const [erreurs, setErreurs] = useState<{ etat?: string; motif?: string }>({});
-    const [enCours, setEnCours] = useState(false);
-    const [confirmerLevee, setConfirmerLevee] = useState(false);
-    const [motifLevee, setMotifLevee] = useState('');
-    const [erreurLevee, setErreurLevee] = useState<string | null>(null);
-    // « En étude » ne subsiste que sur les dossiers de l'ancien parcours : affiché au niveau « Soumis ».
-    const position = etat ? PARCOURS.indexOf(etat === 'en_etude' ? 'soumis' : etat) : -1;
-
-    const enregistrer = async () => {
-        const nouvelles: typeof erreurs = {};
-        if (!action) nouvelles.etat = 'Choisissez une action.';
-        // Motif exigé par le workflow (le serveur le revérifie).
-        if ((ETATS_AVEC_MOTIF.includes(action) || etat === 'refuse') && motif.trim() === '') nouvelles.motif = 'Un motif est obligatoire pour cette étape.';
-        setErreurs(nouvelles);
-        if (Object.keys(nouvelles).length || !suivi.transition) return;
-
-        setEnCours(true);
-        const ok = await envoyer(
-            suivi.transition,
-            { etat: action, motif: motif.trim(), ...(suivi.assignation_id ? { assignation_id: suivi.assignation_id } : {}) },
-            { onError: (retour) => setErreurs({ etat: retour.etat, motif: retour.motif ?? (!retour.etat ? Object.values(retour)[0] : undefined) }) },
-        );
-        setEnCours(false);
-        if (ok) {
-            setAction('');
-            setMotif('');
-        }
-    };
-
-    const leverRefus = async () => {
-        if (!suivi.rendre_eligible) return;
-        // Dérogation au barème : motif obligatoire (le serveur le revérifie).
-        if (motifLevee.trim() === '') {
-            setErreurLevee('Le motif de la dérogation est obligatoire.');
-            return;
-        }
-        setEnCours(true);
-        const ok = await envoyer(
-            suivi.rendre_eligible,
-            { etat: 'eligible', motif: motifLevee.trim() },
-            { onError: (retour) => setErreurLevee(retour.motif ?? Object.values(retour)[0] ?? null) },
-        );
-        setEnCours(false);
-        if (ok) {
-            setConfirmerLevee(false);
-            setMotifLevee('');
-        }
-    };
-
-    return (
-        <Carte icone={<Route size={18} strokeWidth={1.25} />} teinte="bg-[#F8E4EF] text-[#6E1F4E]" titre="Suivi du dossier">
-            <ol aria-label="Parcours du dossier" className="mb-4 flex flex-wrap gap-2">
-                {PARCOURS.map((etape, index) => {
-                    const fait = position >= 0 && index < position;
-                    const courant = position === index;
-                    return (
-                        <li
-                            key={etape}
-                            aria-current={courant ? 'step' : undefined}
-                            className={cn(
-                                'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs',
-                                fait && 'border-secondary bg-soft text-primary',
-                                courant && 'border-primary bg-primary text-white',
-                                !fait && !courant && 'text-muted',
-                            )}
-                        >
-                            {fait && <Check className="size-3" aria-hidden />}
-                            {suivi.labels[etape] ?? etape}
-                        </li>
-                    );
-                })}
-            </ol>
-
-            <div className="flex flex-col gap-2 text-sm">
-                <p>
-                    État actuel : <strong className="font-medium">{(etat && suivi.labels[etat]) ?? etat ?? '—'}</strong>
-                </p>
-                {suivi.proposition && (
-                    <p>
-                        Proposition : chambre <strong className="font-medium">{suivi.proposition.chambre}</strong>
-                        {suivi.proposition.jusqu_au && ` — valable jusqu’au ${dateFr(suivi.proposition.jusqu_au)} ${suivi.proposition.jusqu_au.slice(11, 16)}`}
-                    </p>
-                )}
-                {etat === 'accepte' && <p className="text-muted">La proposition a été acceptée. La validation définitive reste à effectuer par le service Logement.</p>}
-                {suivi.decision && (
-                    <p className="text-muted">
-                        Décision automatique du barème : score <strong className="font-medium text-gray-900">{scoreFr(suivi.decision.score)}/100</strong> pour un minimum de{' '}
-                        {scoreFr(suivi.decision.minimum)}/100.
-                    </p>
-                )}
-            </div>
-
-            {suivi.refus && (
-                <div role="note" className="mt-4 rounded-brand border border-red-200 bg-red-50 p-4 text-sm">
-                    <p className="flex items-center gap-2 font-medium text-red-700">
-                        <CircleX size={18} strokeWidth={1.25} aria-hidden />
-                        {suivi.refus.etat === 'Annulé' ? 'Motif de l’annulation' : 'Motif du rejet'}
-                    </p>
-                    <p className="mt-2 whitespace-pre-line text-gray-900">{suivi.refus.motif}</p>
-                    {(suivi.refus.auteur || suivi.refus.date) && (
-                        <p className="mt-2 text-xs text-muted">
-                            {suivi.refus.auteur ?? 'Administration'}
-                            {suivi.refus.date && ` — ${dateFr(suivi.refus.date)} ${suivi.refus.date.slice(11, 16)}`}
-                        </p>
-                    )}
-                </div>
-            )}
-
-            {suivi.rendre_eligible && (
-                <div className="mt-4 flex flex-col gap-3 rounded-brand border border-[#C6E3A6] bg-soft p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-[#004D00]">Ce dossier a été refusé automatiquement (score insuffisant). Vous pouvez le rendre éligible.</p>
-                    <Button size="sm" className="h-10 shrink-0" disabled={enCours} onClick={() => setConfirmerLevee(true)}>
-                        <CircleCheck className="size-4" aria-hidden /> Rendre éligible
-                    </Button>
-                </div>
-            )}
-            <ConfirmDialog
-                open={confirmerLevee}
-                onOpenChange={(ouvert) => {
-                    setConfirmerLevee(ouvert);
-                    if (!ouvert) setErreurLevee(null);
-                }}
-                title="Rendre ce dossier éligible ?"
-                description="Le refus automatique sera levé : le dossier passe en « Recevable » et l’étudiant devra confirmer son intérêt."
-                confirmLabel="Rendre éligible"
-                confirmIcon={<CircleCheck className="size-4" aria-hidden />}
-                processing={enCours}
-                onConfirm={leverRefus}
-            >
-                <Field id="levee-motif" label="Motif de la dérogation" required error={erreurLevee ?? undefined} hint="2 000 caractères maximum.">
-                    <Textarea
-                        id="levee-motif"
-                        rows={3}
-                        maxLength={2000}
-                        invalid={!!erreurLevee}
-                        value={motifLevee}
-                        onChange={(event) => {
-                            setMotifLevee(event.target.value);
-                            setErreurLevee(null);
-                        }}
-                    />
-                </Field>
-            </ConfirmDialog>
-
-            {suivi.actions.length > 0 && (
-                <div className="mt-4 flex flex-col gap-3 rounded-brand bg-surface p-4">
-                    <Field id="transition-etat" label="Action" required error={erreurs.etat}>
-                        <Select
-                            value={action || undefined}
-                            onValueChange={(valeur) => {
-                                setAction(valeur);
-                                setErreurs({});
-                            }}
-                        >
-                            <SelectTrigger id="transition-etat" invalid={!!erreurs.etat}>
-                                <SelectValue placeholder="Choisir" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {suivi.actions.map((item) => (
-                                    <SelectItem key={item.etat} value={item.etat}>
-                                        {item.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </Field>
-                    <Field
-                        id="transition-motif"
-                        label="Motif ou éléments à compléter"
-                        error={erreurs.motif}
-                        hint="Un motif est obligatoire pour déclarer le dossier incomplet, le refuser, l’annuler ou rouvrir son étude."
-                    >
-                        <Textarea id="transition-motif" rows={2} maxLength={5000} invalid={!!erreurs.motif} value={motif} onChange={(event) => setMotif(event.target.value)} />
-                    </Field>
-                    <div>
-                        <Button size="sm" className="h-10" disabled={enCours} onClick={enregistrer}>
-                            {enCours ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
-                            Enregistrer cette étape
-                        </Button>
-                    </div>
-                </div>
-            )}
-
-            {suivi.historique && (
-                <details className="mt-4 text-sm">
-                    <summary className="cursor-pointer font-medium text-primary">Historique du dossier</summary>
-                    {suivi.historique.length === 0 ? (
-                        <p className="mt-2 text-muted">Aucune transition enregistrée.</p>
-                    ) : (
-                        <ol className="mt-3 flex flex-col gap-3 border-l pl-4">
-                            {suivi.historique.map((transition, index) => (
-                                <li key={index}>
-                                    <p>
-                                        <span className="text-muted">
-                                            {dateFr(transition.date)} {transition.date?.slice(11, 16)}
-                                        </span>{' '}
-                                        — <strong className="font-medium">{transition.etat}</strong> ({transition.auteur})
-                                    </p>
-                                    {transition.motif && <p className="mt-0.5 whitespace-pre-line text-muted">{transition.motif}</p>}
-                                </li>
-                            ))}
-                        </ol>
-                    )}
-                </details>
-            )}
-        </Carte>
-    );
-}
 
 /** Texte saisi, ou mention « non renseigné » en gris. */
 const valeur = (texte: string | null | undefined, vide = 'Non renseigné') => (texte != null && texte !== '' ? texte : <span className="text-muted">{vide}</span>);

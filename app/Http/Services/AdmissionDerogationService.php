@@ -2,7 +2,7 @@
 namespace App\Http\Services;
 
 use App\Models\{AdmissionDerogation, Campagne, DemandeEtudiant, Etudiant, User};
-use App\Http\Services\Eligibilite\ConformiteDemande;
+use App\Http\Services\Eligibilite\{ConformiteDemande, CriteresCampagne, RecevabiliteDemandes, VerrouListeProvisoire};
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -54,6 +54,73 @@ class AdmissionDerogationService
         $evaluation = app(ConformiteDemande::class)->evaluer($student, $request, true);
 
         return ['volet' => $evaluation['volet'] ?? null, 'regles' => array_values($evaluation['regles'] ?? [])];
+    }
+
+    /** États du dossier depuis lesquels une demande peut être dérogée (un refus est d'abord rouvert en « Soumis »). */
+    public const ETATS_DEROGEABLES = ['soumis', 'en_etude', 'refuse'];
+
+    public const MESSAGE_CLOTURE = 'La liste des demandes validées a déjà été approuvée en commission : aucune dérogation n’est plus possible.';
+
+    /**
+     * Obstacle à la dérogation de la dernière demande de l'étudiant (bouton « Déroger » de la fiche du dossier), null si
+     * elle est possible : demande d'une campagne active classée « Demandes irrecevables » ou « Demandes refusées »
+     * (`RecevabiliteDemandes`), dossier « Soumis », « En étude » ou « Refusé », et liste provisoire de son volet pas
+     * encore clôturée (liste des demandes validées approuvée en commission, `VerrouListeProvisoire`).
+     */
+    public function obstacle(Etudiant $student): ?string
+    {
+        $request = $student->derniereDemande;
+        $campaign = $request?->campagne;
+        if (! $request || ! $campaign || $campaign->statut !== 'active' || ! in_array($request->etat_dossier, self::ETATS_DEROGEABLES, true)) {
+            return 'La dérogation ne concerne que la demande courante, non validée, d’une campagne active.';
+        }
+        $classe = app(RecevabiliteDemandes::class)->classe($student);
+        if (! in_array($classe, [RecevabiliteDemandes::REJETEE, RecevabiliteDemandes::REFUSEE], true)) {
+            return 'Seule une demande irrecevable ou refusée peut être dérogée.';
+        }
+        $volet = app(CriteresCampagne::class)->voletsDemandes([$request])[(string) $student->getKey()] ?? null;
+        if (in_array($volet, app(VerrouListeProvisoire::class)->voletsClotures((string) $campaign->getKey()), true)) {
+            return self::MESSAGE_CLOTURE;
+        }
+
+        return null;
+    }
+
+    /**
+     * Dérogation (bouton « Déroger » de la fiche du dossier, motif obligatoire) : la demande irrecevable ou refusée est
+     * rendue recevable sur-le-champ (dérogation enregistrée approuvée, avec le constat de recevabilité) et passe en tête
+     * de la liste provisoire de son volet avec le badge « Dérogé ». Un dossier refusé revient d'abord en « Soumis »
+     * (`DossierWorkflow`, motif conservé dans l'historique). Aucune chambre n'est réservée.
+     */
+    public function deroger(User $actor, string $studentId, string $reason): AdmissionDerogation
+    {
+        $reason = trim($reason);
+        if ($reason === '' || mb_strlen($reason) > 2000) {
+            throw ValidationException::withMessages(['motif' => 'Le motif de la dérogation est obligatoire (2 000 caractères maximum).']);
+        }
+
+        return DB::transaction(function () use ($actor, $studentId, $reason) {
+            $student = Etudiant::whereKey($studentId)->lockForUpdate()->firstOrFail();
+            app(DisciplinaryImpactService::class)->verifier($student);
+            $request = DemandeEtudiant::with('campagne')->where('etudiant_id', $studentId)->latest('created_at')->lockForUpdate()->first();
+            $student->setRelation('derniereDemande', $request);
+            if ($obstacle = $this->obstacle($student)) {
+                throw ValidationException::withMessages(['motif' => $obstacle]);
+            }
+            $eligibility = $this->evaluate($student, $request, $request->campagne);
+            if ($request->etat_dossier === 'refuse') {
+                app(DossierWorkflow::class)->admin($request->getKey(), 'soumis', 'Dérogation : '.$reason);
+            }
+
+            return AdmissionDerogation::create([
+                'id' => (string) Str::uuid(), 'etudiant_id' => $studentId, 'demande_id' => $request->getKey(),
+                'campagne_id' => $request->campagne_id, 'requested_by' => $actor->getKey(),
+                'requester_name' => $actor->name ?? $actor->getKey(), 'reason' => $reason,
+                'eligibility' => $eligibility, 'status' => 'approved',
+                'decided_by' => $actor->getKey(), 'decider_name' => $actor->name ?? $actor->getKey(),
+                'decision_reason' => $reason, 'decided_at' => now(),
+            ]);
+        }, 3);
     }
 
     public function request(User $actor, string $studentId, string $requestId, string $reason): AdmissionDerogation

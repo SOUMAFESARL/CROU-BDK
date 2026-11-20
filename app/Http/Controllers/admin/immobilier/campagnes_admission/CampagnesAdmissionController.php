@@ -199,8 +199,12 @@ class CampagnesAdmissionController extends Controller
         $derniere = $etudiant->derniereDemande;
         $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
         $voirAdmissions = $admin->hasPermission('hebergement.admissions.view');
-        $derogations = $voirAdmissions ? \App\Models\AdmissionDerogation::where('etudiant_id', $id)->latest()->get() : collect();
-        $peutApprouver = app(\App\Http\Services\AdmissionDerogationService::class)->canApprove($admin);
+        // Bouton « Déroger » : demande des listes « Demandes irrecevables » ou « Demandes refusées », tant que la liste
+        // des demandes validées de son volet n'est pas approuvée en commission (`AdmissionDerogationService::obstacle`).
+        $routeDeroger = 'admin.hebergement.campagnes_admission.derogations.store';
+        $deroger = $voirAdmissions && $derniere && $access->allows($admin, $routeDeroger)
+            && app(\App\Http\Services\AdmissionDerogationService::class)->obstacle($etudiant) === null
+            ? route($routeDeroger, ['student' => $etudiant->getKey()]) : null;
         // Dérogation approuvée sur la demande courante : la demande irrecevable est rendue recevable.
         $derogationApprouvee = $derniere ? \App\Models\AdmissionDerogation::where('demande_id', $derniere->getKey())
             ->where('status', 'approved')->latest('decided_at')->first() : null;
@@ -209,9 +213,6 @@ class CampagnesAdmissionController extends Controller
         $historique = $vues->allows($admin, 'admissions.history');
 
         $statutDisciplinaire = $vues->allows($admin, 'housing.discipline') ? $etudiant->statut_disciplinaire : 'aucune';
-        // Modification des informations de l'étudiant : valeurs et référentiels envoyés seulement avec le droit de modifier.
-        $modifiable = $access->allows($admin, 'admin.hebergement.campagnes_admission.update_etudiant');
-        $edition = app(\App\Http\Services\EtudiantEditionService::class);
 
         return Inertia::render('Admin/Hebergement/Admissions/Show', [
             'etudiant' => [
@@ -238,6 +239,7 @@ class CampagnesAdmissionController extends Controller
                     'derogation' => $derogationApprouvee ? [
                         'auteur' => $derogationApprouvee->decider_name,
                         'date' => $derogationApprouvee->decided_at?->format('Y-m-d H:i'),
+                        'motif' => $derogationApprouvee->reason,
                     ] : null,
                 ]
                 : null,
@@ -252,33 +254,6 @@ class CampagnesAdmissionController extends Controller
                 'rejeter' => !in_array($document['statut'], ['valide', 'rejete'], true)
                     ? $url('admin.hebergement.campagnes_admission.validate_document', ['documentId' => $document['id_document'], 'statut' => 'rejete']) : null,
             ])->values() : null,
-            'derogations' => $voirAdmissions ? [
-                'liste' => $derogations->map(fn ($derogation) => [
-                    'id' => (string) $derogation->id,
-                    'statut' => $derogation->status,
-                    'demandeur' => $derogation->requester_name,
-                    'date' => $derogation->created_at?->format('Y-m-d H:i'),
-                    'motif' => $derogation->reason,
-                    // Critères non conformes au moment de la demande (`etat` : constat de recevabilité ; `ok` : anciennes dérogations).
-                    'non_respectes' => collect($derogation->eligibility['regles'] ?? [])
-                        ->filter(fn ($regle) => array_key_exists('etat', $regle) ? $regle['etat'] === 'nok' : !($regle['ok'] ?? false))
-                        ->map(fn ($regle) => $regle['label'] ?? 'Critère non respecté')->values(),
-                    'decision' => $derogation->decided_at ? [
-                        'auteur' => $derogation->decider_name,
-                        'date' => $derogation->decided_at->format('Y-m-d H:i'),
-                        'motif' => $derogation->decision_reason,
-                    ] : null,
-                    // Le demandeur ne peut pas valider sa propre dérogation.
-                    'decider' => !$derogation->decided_at && $peutApprouver && (string) $derogation->requested_by !== (string) $admin->getKey()
-                        ? $url('admin.hebergement.campagnes_admission.derogations.decide', ['derogation' => $derogation->id]) : null,
-                ])->values(),
-                // Seule une demande irrecevable (au moins un critère non conforme, sans dérogation approuvée) peut être rendue recevable.
-                'demander' => in_array($derniere?->etat_dossier, ['soumis', 'en_etude'], true)
-                    && !$derogations->where('demande_id', $derniere->getKey())->contains('status', 'pending')
-                    && app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classe($etudiant) === \App\Http\Services\Eligibilite\RecevabiliteDemandes::REJETEE
-                    ? $url('admin.hebergement.campagnes_admission.derogations.store', ['student' => $etudiant->getKey()]) : null,
-            ] : null,
-            'suivi' => $voirAdmissions && $derniere ? $this->suiviDossier($derniere, $admin) : null,
             'profil' => $personnel ? $this->profilDemande($etudiant, $derniere) : null,
             // Toutes les demandes de l'étudiant, toutes campagnes confondues.
             'historique' => $historique ? $etudiant->demandes->sortByDesc('created_at')->values()->map(fn ($item) => [
@@ -289,12 +264,9 @@ class CampagnesAdmissionController extends Controller
                 'date' => $item->created_at ? Carbon::parse($item->created_at)->toDateString() : null,
                 'etat' => $item->etat_dossier,
             ]) : null,
-            'edition' => $modifiable ? $edition->valeurs(Etudiant::with('derniereDemande')->findOrFail($etudiant->getKey())) : null,
-            'options' => $modifiable ? $edition->options() : null,
             'urls' => [
                 'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
-                'contrat' => $url('admin.etudiant.contrat', ['etudiant' => $etudiant->id_etudiant]),
-                'modifier' => $url('admin.hebergement.campagnes_admission.update_etudiant', ['etudiant' => $etudiant->id_etudiant]),
+                'deroger' => $deroger,
             ],
         ]);
     }
@@ -492,7 +464,7 @@ class CampagnesAdmissionController extends Controller
         $approuvees = $type === 'validee'
             ? collect($voletFiltre ? [$voletFiltre] : $volets)->flatMap(fn (string $volet) => $partage['definitives'][$volet] ?? [])
             : collect();
-        // Validation / rejet (même action que le suivi du dossier) depuis la liste provisoire et pour une demande en
+        // Validation / rejet (transition `admin.dossiers.transition`) depuis la liste provisoire et pour une demande en
         // attente, rejet seul pour une demande validée, aucune action sur la liste définitive ; mise en attente depuis la
         // liste provisoire et depuis les demandes validées (le dossier revient alors en « Soumis »).
         $peutDecider = $type !== 'definitive' && $access->allows($admin, 'admin.dossiers.transition');
@@ -562,6 +534,8 @@ class CampagnesAdmissionController extends Controller
                     'credits' => $ligne['credits'] ?? null,
                     'documents' => $pieces[(string) $etudiant->id_etudiant] ?? null,
                     'url' => $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant]),
+                    // Demande rendue recevable par dérogation : en tête de la liste provisoire, badge « Dérogé ».
+                    'derogee' => (bool) ($ligne['derogee'] ?? false),
                     // Décision de la commission : demande validée ou en attente (date de la mise en attente).
                     'commission' => $commission ? [
                         'decision' => $commission,
@@ -764,6 +738,10 @@ class CampagnesAdmissionController extends Controller
             $criteres->voletsDemandes($classees->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)),
         );
         $partage = ['provisoires' => $vides, 'validees' => $vides, 'definitives' => $vides];
+        // Demandes rendues recevables par dérogation (badge « Dérogé ») : en tête de la liste provisoire de leur volet,
+        // dans l'ordre du classement.
+        $derogees = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)
+            ->derogationsApprouvees($classees->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)->filter());
         // Rang propre à chaque onglet : renumérotation à partir de 1 dans l'ordre du classement, par liste d'origine
         // (`commission`) pour la décision de la commission et les listes définitives. L'ordre du classement ne dépend
         // que de chaque demande : il est le même que celui d'un classement de l'onglet seul.
@@ -778,9 +756,11 @@ class CampagnesAdmissionController extends Controller
             })->values()->all();
         };
         foreach ($listes as $volet => $lignes) {
-            $lignes = collect($lignes);
+            $lignes = collect($lignes)->map(fn (array $ligne) => $ligne + [
+                'derogee' => in_array((string) $ligne['etudiant']->derniereDemande?->getKey(), $derogees, true),
+            ]);
             $dans = fn (array $ids) => $lignes->filter(fn (array $ligne) => in_array((string) $ligne['etudiant']->getKey(), $ids, true))->values();
-            $partage['provisoires'][$volet] = $rangs($dans($classement['recevables']));
+            $partage['provisoires'][$volet] = $rangs($dans($classement['recevables'])->sortBy(fn (array $ligne) => $ligne['derogee'] ? 0 : 1)->values());
             // Décision de la commission : demandes validées et en attente, dans l'ordre du classement.
             $partage['validees'][$volet] = $rangs($dans([...$classement['validees'], ...$classement['en_attente']])
                 ->map(fn (array $ligne) => $ligne + ['commission' => in_array((string) $ligne['etudiant']->getKey(), $classement['en_attente'], true) ? 'attente' : 'validee']));
@@ -1143,65 +1123,6 @@ class CampagnesAdmissionController extends Controller
         }
 
         return back()->with($resultat['eligibles'] > 0 ? 'success' : 'error', $message);
-    }
-
-    /** Suivi du dossier (équivalent admin du partiel `dossier-cycle`) : parcours, actions permises et historique. */
-    private function suiviDossier($dossier, $admin): array
-    {
-        // La levée d'un refus automatique a son propre bouton (motif de dérogation obligatoire) ; un refus prononcé par un agent passe par « Soumis ».
-        $refusAutomatique = $dossier->etat_dossier === 'refuse' && app(DecisionAutomatiqueDossier::class)->estRefusAutomatique($dossier->getKey());
-        $actions = array_values(array_intersect(DossierWorkflow::NEXT[$dossier->etat_dossier] ?? [], ['soumis', 'incomplet', 'eligible', 'refuse', 'annule']));
-        if ($dossier->etat_dossier === 'refuse') $actions = array_values(array_diff($actions, ['eligible']));
-        // Demande d'une liste provisoire clôturée (liste des demandes validées approuvée en commission) : plus de validation.
-        if (in_array('eligible', $actions, true) && app(\App\Http\Services\Eligibilite\VerrouListeProvisoire::class)->bloque($dossier)) {
-            $actions = array_values(array_diff($actions, ['eligible']));
-        }
-        $peutChanger = app(AdminAccess::class)->allows($admin, 'admin.dossiers.transition');
-        $proposition = in_array($dossier->etat_dossier, ['pre_attribue', 'accepte', 'attribue_definitif'], true) ? $dossier->proposition : null;
-
-        return [
-            'labels' => DossierWorkflow::LABELS,
-            'proposition' => $proposition ? [
-                'chambre' => $proposition->chambre?->numero_chambre ?? $proposition->chambre_id,
-                'jusqu_au' => $proposition->date_fin ? Carbon::parse($proposition->date_fin)->format('Y-m-d H:i') : null,
-            ] : null,
-            'actions' => $peutChanger ? array_map(fn ($etat) => ['etat' => $etat, 'label' => $etat === 'soumis' ? 'Réexaminer (retour à « Soumis »)' : (DossierWorkflow::LABELS[$etat] ?? $etat)], $actions) : [],
-            'transition' => $peutChanger && $actions ? route('admin.dossiers.transition', $dossier) : null,
-            'rendre_eligible' => $peutChanger && $refusAutomatique ? route('admin.dossiers.transition', $dossier) : null,
-            'decision' => $this->decisionAutomatique($dossier),
-            'refus' => $this->motifRefus($dossier),
-            'assignation_id' => $dossier->assignation_id,
-            'historique' => $admin->hasPermission('hebergement.admissions.history')
-                ? $dossier->transitions->map(fn ($transition) => [
-                    'date' => $transition->created_at?->format('Y-m-d H:i'),
-                    'etat' => DossierWorkflow::LABELS[$transition->nouvel_etat] ?? $transition->nouvel_etat,
-                    'auteur' => $transition->details['auteur_nom'] ?? $transition->acteur_type,
-                    'motif' => $transition->motif,
-                ])->values()
-                : null,
-        ];
-    }
-
-    /**
-     * Motif du refus ou de l'annulation en cours (dernière transition vers l'état actuel), affiché sur la fiche
-     * indépendamment de l'historique : rejet depuis une liste provisoire ou la liste validée, refus depuis le suivi…
-     */
-    private function motifRefus($dossier): ?array
-    {
-        if (! in_array($dossier->etat_dossier, \App\Http\Services\Eligibilite\RecevabiliteDemandes::ETATS_REFUS, true)) {
-            return null;
-        }
-        $transition = $dossier->transitions->where('nouvel_etat', $dossier->etat_dossier)->sortBy('id')->last();
-        if (! $transition || trim((string) $transition->motif) === '') {
-            return null;
-        }
-
-        return [
-            'etat' => DossierWorkflow::LABELS[$dossier->etat_dossier] ?? $dossier->etat_dossier,
-            'motif' => $transition->motif,
-            'auteur' => $transition->details['auteur_nom'] ?? ($transition->acteur_type === 'systeme' ? 'Traitement automatique' : null),
-            'date' => $transition->created_at?->format('Y-m-d H:i'),
-        ];
     }
 
     /** Filtres de la liste des campagnes (statut en base, `tous` = aucun filtre). */

@@ -26,6 +26,12 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->creerTablesEditionEtudiant();
         Schema::table('admission_derogations', function (Blueprint $t) {
             $t->string('etudiant_id')->nullable();
+            $t->string('campagne_id')->nullable();
+            $t->string('requested_by')->nullable();
+            $t->string('requester_name')->nullable();
+            $t->text('reason')->nullable();
+            $t->string('decider_name')->nullable();
+            $t->text('decision_reason')->nullable();
             $t->timestamps();
         });
         DB::table('etudiants')->update(['statut_inscription' => 'demande']);
@@ -163,15 +169,18 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
     public function test_demande_irrecevable_rendue_recevable_par_derogation(): void
     {
-        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.create']);
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate']);
         $ids = fn (string $etat) => collect($this->page('liste', ['etat' => $etat])['props']['dossiers']['data'])->pluck('id')->all();
         // Nouveau bachelier : 9/20 = 180/400 sous le seuil du modèle CROU (200/400) → irrecevable.
         DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 9]);
         $id = (string) DB::table('demande')->where('etudiant_id', 'student')->value('id_demande');
 
         $props = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props'];
-        $this->assertNotNull($props['derogations']['demander']);
+        $this->assertSame(route('admin.hebergement.campagnes_admission.derogations.store', ['student' => 'student']), $props['urls']['deroger']);
         $this->assertNull($props['eligibilite']['derogation']);
+        // Carte « Dérogation à la recevabilité » et « Modifier les informations » retirées de la fiche.
+        $this->assertArrayNotHasKey('derogations', $props);
+        $this->assertArrayNotHasKey('edition', $props);
 
         // Dérogation en attente : la demande reste irrecevable ; approuvée : elle devient recevable.
         DB::table('admission_derogations')->insert(['id' => 'derog', 'demande_id' => $id, 'etudiant_id' => 'student', 'status' => 'pending']);
@@ -183,15 +192,116 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $props = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props'];
         $this->assertSame(1, $props['eligibilite']['non_conformes']);
         $this->assertSame('2026-11-18 10:00', $props['eligibilite']['derogation']['date']);
-        $this->assertNull($props['derogations']['demander']);
+        $this->assertNull($props['urls']['deroger']);
     }
 
     public function test_pas_de_derogation_pour_une_demande_recevable(): void
     {
-        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.create']);
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate']);
         DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12]);
 
-        $this->assertNull($this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['derogations']['demander']);
+        $this->assertNull($this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['urls']['deroger']);
+        $this->post(route('admin.hebergement.campagnes_admission.derogations.store', ['student' => 'student']), ['motif' => 'Motif'])->assertSessionHasErrors('motif');
+        $this->assertSame(0, DB::table('admission_derogations')->count());
+    }
+
+    /** Migrations de la décision de la commission (approbation, mise en attente, liste d'origine) et de la ville du bac. */
+    private function tablesCommission(): void
+    {
+        foreach (['2026_11_17_000001_add_ville_bac_to_demande.php', '2026_11_20_000001_add_approbation_commission_to_demande.php',
+            '2026_11_20_000002_add_attente_commission_to_demande.php', '2026_11_20_000003_add_liste_approbation_commission_to_demande.php'] as $migration) {
+            (require database_path('migrations/'.$migration))->up();
+        }
+    }
+
+    public function test_deroger_une_demande_irrecevable_la_place_en_tete_de_la_liste_provisoire(): void
+    {
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate']);
+        $this->tablesCommission();
+        $this->dossier('other');
+        DB::table('etudiants')->where('id_etudiant', 'other')->update(['name' => 'Yao Marc', 'nationalite' => 'IVOIRIENNE', 'date_naissance' => now()->subYears(20)->toDateString()]);
+        // « other » recevable (14/20) ; « student » irrecevable (9/20 = 180/400 sous le seuil de 200/400).
+        DB::table('demande')->where('etudiant_id', 'other')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 14, 'ville_bac' => 'Bondoukou']);
+        DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 9, 'ville_bac' => 'Bondoukou']);
+        $fiche = fn (string $id) => $this->page('show', ['id' => $id], '/admin/gestion-hebergement/campagnes_admissions/'.$id)['props'];
+        $ids = fn (string $etat) => collect($this->page('liste', ['etat' => $etat])['props']['dossiers']['data'])->pluck('id')->all();
+        $provisoire = fn () => collect($this->page('liste', ['etat' => 'recevables'], '/admin/gestion-hebergement/campagnes_admissions/liste/recevables', ['liste' => 'admission'])['props']['classement']['lignes']['data'])
+            ->map(fn ($l) => [$l['id'], $l['rang'], $l['derogee']])->all();
+        $this->assertSame([['other', 1, false]], $provisoire());
+
+        // Bouton « Déroger » : demande irrecevable seulement.
+        $url = $fiche('student')['urls']['deroger'];
+        $this->assertSame(route('admin.hebergement.campagnes_admission.derogations.store', ['student' => 'student']), $url);
+        $this->assertNull($fiche('other')['urls']['deroger']);
+
+        // Motif obligatoire.
+        $this->post($url, ['motif' => '  '])->assertSessionHasErrors('motif');
+        $this->assertSame(['student'], $ids('rejetees'));
+
+        // Dérogée : recevable sur-le-champ, en tête de la liste provisoire avec le badge « Dérogé » ; le dossier reste « Soumis ».
+        $this->post($url, ['motif' => 'Situation sociale particulière.'])->assertSessionHasNoErrors()->assertSessionHas('success');
+        $this->assertSame([], $ids('rejetees'));
+        $this->assertSame([['student', 1, true], ['other', 2, false]], $provisoire());
+        $this->assertSame('soumis', DB::table('demande')->where('etudiant_id', 'student')->value('etat_dossier'));
+        $derogation = DB::table('admission_derogations')->where('etudiant_id', 'student')->first();
+        $this->assertSame(['approved', 'Situation sociale particulière.', 'limite'], [$derogation->status, $derogation->reason, $derogation->decided_by]);
+        $props = $fiche('student');
+        $this->assertSame('Situation sociale particulière.', $props['eligibilite']['derogation']['motif']);
+        $this->assertNull($props['urls']['deroger']);
+    }
+
+    public function test_deroger_une_demande_refusee_la_rouvre(): void
+    {
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate', 'hebergement.admissions.validate']);
+        $this->tablesCommission();
+        DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12, 'ville_bac' => 'Bondoukou']);
+        $demande = DB::table('demande')->where('etudiant_id', 'student');
+        $ids = fn (string $etat) => collect($this->page('liste', ['etat' => $etat])['props']['dossiers']['data'])->pluck('id')->all();
+        // Rejetée par la commission depuis la liste provisoire : « Demandes refusées ».
+        $this->post(route('admin.dossiers.transition', $demande->value('id_demande')), ['etat' => 'refuse', 'motif' => 'Désistement constaté.'])->assertRedirect();
+        $this->assertSame(['student'], $ids('refusees'));
+
+        $url = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['urls']['deroger'];
+        $this->assertNotNull($url);
+        $this->post($url, ['motif' => 'Désistement annulé par l’étudiant.'])->assertSessionHasNoErrors();
+
+        // Le dossier revient en « Soumis » (motif dans l'historique) et la demande en tête de la liste provisoire.
+        $this->assertSame('soumis', $demande->value('etat_dossier'));
+        $this->assertSame('Dérogation : Désistement annulé par l’étudiant.', DB::table('dossier_transitions')->orderByDesc('id')->value('motif'));
+        $this->assertSame([], $ids('refusees'));
+        $ligne = $this->page('liste', ['etat' => 'recevables'], '/admin/gestion-hebergement/campagnes_admissions/liste/recevables', ['liste' => 'admission'])['props']['classement']['lignes']['data'][0];
+        $this->assertSame(['student', 1, true], [$ligne['id'], $ligne['rang'], $ligne['derogee']]);
+    }
+
+    public function test_aucune_derogation_apres_l_approbation_de_la_liste_en_commission(): void
+    {
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate']);
+        $this->tablesCommission();
+        $this->dossier('other');
+        DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 9]);
+        // Liste des demandes validées (admission) approuvée en commission pour la campagne.
+        DB::table('demande')->where('etudiant_id', 'other')->update([
+            'niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'etat_dossier' => 'eligible',
+            'date_approbation_commission' => now(), 'liste_approbation_commission' => 'validees',
+        ]);
+        $url = route('admin.hebergement.campagnes_admission.derogations.store', ['student' => 'student']);
+
+        $this->assertNull($this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['urls']['deroger']);
+        $this->post($url, ['motif' => 'Motif'])->assertSessionHasErrors(['motif' => \App\Http\Services\AdmissionDerogationService::MESSAGE_CLOTURE]);
+        $this->assertSame(0, DB::table('admission_derogations')->count());
+
+        // File d'attente approuvée seule : la liste provisoire n'est pas clôturée.
+        DB::table('demande')->where('etudiant_id', 'other')->update(['liste_approbation_commission' => 'attente']);
+        $this->assertSame($url, $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['urls']['deroger']);
+    }
+
+    public function test_deroger_exige_le_droit_de_deroger(): void
+    {
+        $this->agentEligibilite(['hebergement.admissions.eligibility']);
+        DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 9]);
+
+        $this->assertNull($this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['urls']['deroger']);
+        $this->post(route('admin.hebergement.campagnes_admission.derogations.store', ['student' => 'student']), ['motif' => 'Motif'])->assertForbidden();
     }
 
     public function test_traitement_d_une_demande_avec_droits_limites(): void
@@ -210,28 +320,20 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNull($props['profil']);
         $this->assertNull($props['historique']);
         $this->assertNull($props['discipline']);
-        // Suivi du dossier : pas d'action sans le droit de transition, historique masqué sans `admissions.history`.
-        $this->assertSame([], $props['suivi']['actions']);
-        $this->assertNull($props['suivi']['historique']);
-        $this->assertSame([], $props['derogations']['liste']);
-        $this->assertNull($props['derogations']['demander']);
-        // Sans le droit de modifier : ni bouton, ni valeurs, ni référentiels.
-        $this->assertNull($props['urls']['modifier']);
-        $this->assertNull($props['edition']);
-        $this->assertNull($props['options']);
+        // Section « Suivi du dossier » supprimée de la fiche : plus envoyée au navigateur.
+        $this->assertArrayNotHasKey('suivi', $props);
+        // Sans le droit de déroger : pas de bouton « Déroger » ; plus de modification des informations sur la fiche.
+        $this->assertNull($props['urls']['deroger']);
+        $this->assertArrayNotHasKey('modifier', $props['urls']);
+        $this->assertArrayNotHasKey('edition', $props);
+        $this->assertArrayNotHasKey('options', $props);
     }
 
     public function test_l_administration_modifie_les_informations_saisies_par_l_etudiant(): void
     {
         $this->agentLimite(['hebergement.admissions.update']);
 
-        $props = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props'];
-        $this->assertSame(route('admin.hebergement.campagnes_admission.update_etudiant', ['etudiant' => 'student']), $props['urls']['modifier']);
-        $this->assertSame('M-001', $props['edition']['matricule']);
-        $this->assertTrue($props['edition']['avec_demande']);
-        $this->assertCount(2, $props['options']['niveaux']);
-
-        $this->put($props['urls']['modifier'], ['name' => 'Konan Awa Marie', 'genre_id' => 2, 'matricule' => 'M-001', 'telephone1' => '0700000001',
+        $this->put(route('admin.hebergement.campagnes_admission.update_etudiant', ['etudiant' => 'student']), ['name' => 'Konan Awa Marie', 'genre_id' => 2, 'matricule' => 'M-001', 'telephone1' => '0700000001',
             'niveau_etude_actuel_code' => 'L1', 'moyenne' => '12'])
             ->assertSessionHasNoErrors()->assertSessionHas('success');
 
@@ -272,9 +374,9 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNull($demande()->credit_valider);
         $this->assertNull(DB::table('etudiants')->where('id_etudiant', 'student')->value('matricule'));
         // La note est restituée sur 400 dans le formulaire ; la Terminale est signalée comme niveau d'un nouveau bachelier.
-        $props = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props'];
-        $this->assertSame('245', $props['edition']['moyenne']);
-        $this->assertTrue(collect($props['options']['niveaux'])->firstWhere('id', 'TLE')['terminale']);
+        $edition = app(\App\Http\Services\EtudiantEditionService::class);
+        $this->assertSame('245', $edition->valeurs(\App\Models\Etudiant::with('derniereDemande')->findOrFail('student'))['moyenne']);
+        $this->assertTrue(collect($edition->options()['niveaux'])->firstWhere('id', 'TLE')['terminale']);
 
         // La Terminale n'est pas un niveau actuel possible.
         $this->put($url, $base + ['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'TLE', 'moyenne' => '245'])
@@ -593,9 +695,8 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame([], $liste('validees')['classement']['lignes']['data']);
         $this->assertEqualsCanonicalizing(['other', 'student'], collect($this->page('liste', ['etat' => 'refusees'])['props']['dossiers']['data'])->pluck('id')->all());
 
-        // Fiche du dossier : le motif du rejet est affiché.
-        $refus = $this->page('show', ['id' => 'other'], '/admin/gestion-hebergement/campagnes_admissions/other')['props']['suivi']['refus'];
-        $this->assertSame(['Refusé', 'Désistement constaté.'], [$refus['etat'], $refus['motif']]);
+        // Motif du rejet enregistré sur la transition du dossier.
+        $this->assertSame('Désistement constaté.', DB::table('dossier_transitions')->where('nouvel_etat', 'refuse')->orderByDesc('id')->value('motif'));
 
         // Sans le droit de changer l'état du dossier : pas de menu d'actions.
         DB::table('demande')->where('etudiant_id', 'student')->update(['etat_dossier' => 'soumis']);
@@ -690,8 +791,6 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->post($transition, ['etat' => 'soumis', 'motif' => 'Réexamen.'])->assertRedirect();
         $ligne = $liste('recevables')['classement']['lignes']['data'][0];
         $this->assertSame(['other', false, null, true], [$ligne['id'], $ligne['decision']['valider'], $ligne['decision']['attente'], $ligne['decision']['rejeter']]);
-        // Fiche du dossier : « Recevable » n'est plus proposé.
-        $this->assertNotContains('eligible', array_column($this->page('show', ['id' => 'other'], '/admin/gestion-hebergement/campagnes_admissions/other')['props']['suivi']['actions'], 'etat'));
         $this->post($transition, ['etat' => 'eligible'])->assertSessionHasErrors('etat');
         $this->post(route('admin.hebergement.campagnes_admission.mettre_en_attente', $demande->id_demande))->assertSessionHasErrors('attente');
         $this->assertSame('soumis', DB::table('demande')->where('etudiant_id', 'other')->value('etat_dossier'));
@@ -864,18 +963,5 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->put(route('admin.hebergement.campagnes_admission.update_etudiant', ['etudiant' => 'student']), ['name' => 'Pirate'])
             ->assertForbidden();
         $this->assertSame('Konan Awa', DB::table('etudiants')->where('id_etudiant', 'student')->value('name'));
-    }
-
-    public function test_suivi_propose_les_transitions_permises(): void
-    {
-        $this->agentLimite(['hebergement.admissions.validate', 'hebergement.admissions.history']);
-
-        $page = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student');
-
-        $suivi = $page['props']['suivi'];
-        // Depuis « soumis », l'agent peut passer à : incomplet, éligible, refusé, annulé (pas « expiré », réservé au système).
-        $this->assertSame(['incomplet', 'eligible', 'refuse', 'annule'], array_column($suivi['actions'], 'etat'));
-        $this->assertNotNull($suivi['transition']);
-        $this->assertNotEmpty($suivi['historique']);
     }
 }

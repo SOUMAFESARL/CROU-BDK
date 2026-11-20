@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { CircleCheck, CirclePause, CircleX, EllipsisVertical, Eye, FileCheck2, FileClock, FileX2, Loader, ListOrdered } from 'lucide-react';
+import { CircleCheck, CirclePause, CircleX, EllipsisVertical, Eye, FileCheck2, FileClock, FileX2, Loader, ListOrdered, Scale } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
@@ -52,6 +52,8 @@ export type LigneClassement = {
     /** État des pièces du dossier ; envoyé seulement avec le droit de voir les documents (null : aucune pièce demandée ni déposée). */
     documents: PiecesDossier | null;
     url: string | null;
+    /** Demande rendue recevable par dérogation (bouton « Déroger » de la fiche) : en tête de la liste provisoire. */
+    derogee: boolean;
     /** Décision de la commission : demande validée ou en attente (date de la mise en attente) ; null ailleurs. */
     commission: { decision: DecisionCommission; date: string | null } | null;
     /**
@@ -267,6 +269,12 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
     };
 
     const vide = (valeur: ReactNode) => valeur ?? <span className="text-muted">—</span>;
+    const derogee = (l: LigneClassement) =>
+        l.derogee && (
+            <Badge variant="warning" title="Demande rendue recevable par dérogation">
+                <Scale className="size-3.5" aria-hidden /> Dérogé
+            </Badge>
+        );
     const boursier: DataTableColumn<LigneClassement> = { key: 'boursier', header: 'Boursier', cell: (l) => (l.boursier ? <Badge variant="info">Oui</Badge> : <span className="text-muted">Non</span>) };
     // Réadmission : catégorie, puis moyenne et crédits ; admission : note du bac ou crédits, puis ville du bac.
     const categorie: DataTableColumn<LigneClassement> = {
@@ -363,7 +371,16 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
               rang,
               { key: 'matricule', header: 'Matricule', className: 'whitespace-nowrap tabular-nums', cell: (l) => vide(l.matricule) },
               { key: 'civilite', header: 'Civilité', cell: (l) => vide(l.civilite) },
-              { key: 'nom', header: 'Nom & prénoms', cell: (l) => <span className="font-medium text-gray-900">{l.name}</span> },
+              {
+                  key: 'nom',
+                  header: 'Nom & prénoms',
+                  cell: (l) => (
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-gray-900">{l.name}</span>
+                          {derogee(l)}
+                      </span>
+                  ),
+              },
               ...(classement.colonnes.age
                   ? ([
                         { key: 'date_naissance', header: 'Date de naissance', className: 'whitespace-nowrap tabular-nums', cell: (l) => (l.date_naissance ? dateFr(l.date_naissance) : vide(null)) },
@@ -384,7 +401,10 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
                               {initiales(l.name)}
                           </span>
                           <div className="min-w-0">
-                              <p className="font-medium text-gray-900">{l.name}</p>
+                              <p className="flex flex-wrap items-center gap-2 font-medium text-gray-900">
+                                  {l.name}
+                                  {derogee(l)}
+                              </p>
                               {l.numero_demande && <p className="text-xs text-muted">#{l.numero_demande}</p>}
                           </div>
                       </div>

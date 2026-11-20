@@ -50,7 +50,7 @@ return [
         'admin.hebergement.campagnes_admission.campagnes' => 'hebergement.admissions.view',
         'admin.hebergement.campagnes_admission.create_campagne' => 'hebergement.admissions.create',
         'admin.hebergement.campagnes_admission.derogations.decide' => 'hebergement.admissions.derogations.validate',
-        'admin.hebergement.campagnes_admission.derogations.store' => 'hebergement.admissions.create',
+        'admin.hebergement.campagnes_admission.derogations.store' => 'hebergement.admissions.derogations.validate',
         'admin.hebergement.campagnes_admission.destroy_campagne' => 'hebergement.admissions.delete',
         'admin.hebergement.campagnes_admission.edit_campagne' => 'hebergement.admissions.update',
         'admin.hebergement.campagnes_admission.lever_refus_automatiques' => 'hebergement.admissions.validate',
