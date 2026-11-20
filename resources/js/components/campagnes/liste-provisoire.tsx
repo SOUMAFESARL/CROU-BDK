@@ -1,11 +1,15 @@
 import { Link } from '@inertiajs/react';
-import { CircleCheck, Eye, FileCheck2, FileClock, FileX2, ListOrdered } from 'lucide-react';
+import { CircleCheck, CircleX, EllipsisVertical, Eye, FileCheck2, FileClock, FileX2, ListOrdered } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
-import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
+import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Field } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/textarea';
+import { envoyer } from '@/lib/inertia-form';
 import { initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
@@ -35,6 +39,12 @@ export type LigneClassement = {
     /** État des pièces du dossier ; envoyé seulement avec le droit de voir les documents (null : aucune pièce demandée ni déposée). */
     documents: PiecesDossier | null;
     url: string | null;
+    /**
+     * Décision depuis la liste provisoire (`admin.dossiers.transition`) : validation (dossier « Recevable », la demande
+     * passe dans la « Liste validée ») et rejet (« Refusé », motif obligatoire, la demande passe dans « Demandes refusées »).
+     * Sur la liste validée, seul le rejet est proposé. Null sans le droit de changer l'état du dossier ou si aucune n'est permise.
+     */
+    decision: { url: string; valider: boolean; rejeter: boolean } | null;
 };
 
 export type PiecesDossier = {
@@ -47,6 +57,8 @@ export type PiecesDossier = {
 
 export type Classement = {
     liste: ListeRecevables;
+    /** « Liste validée » : demandes validées, un onglet par volet (sans la liste des demandes). */
+    validee: boolean;
     /** Onglets affichés : la liste des demandes, puis une liste provisoire par volet ouvert par la campagne. */
     onglets: ListeRecevables[];
     campagne: string | null;
@@ -58,10 +70,10 @@ export type Classement = {
     exports: { excel: string; pdf: string } | null;
 };
 
-const ONGLETS: { cle: ListeRecevables; label: string }[] = [
-    { cle: 'demandes', label: 'Liste des demandes' },
-    { cle: 'admission', label: 'Liste provisoire admissions' },
-    { cle: 'readmission', label: 'Liste provisoire réadmissions' },
+const ONGLETS: { cle: ListeRecevables; label: string; validee: string }[] = [
+    { cle: 'demandes', label: 'Liste des demandes', validee: 'Liste des demandes' },
+    { cle: 'admission', label: 'Liste provisoire admissions', validee: 'Admissions' },
+    { cle: 'readmission', label: 'Liste provisoire réadmissions', validee: 'Réadmissions' },
 ];
 
 /**
@@ -89,8 +101,9 @@ export function OngletsRecevables({ classement, actif, onSelect }: { classement:
     }, [actif]);
 
     return (
-        <nav ref={navRef} aria-label="Demandes recevables" className="relative -mb-px ml-auto flex max-w-full flex-wrap items-center gap-1">
-            {ONGLETS.filter(({ cle }) => classement.onglets.includes(cle)).map(({ cle, label }) => {
+        <nav ref={navRef} aria-label={classement.validee ? 'Liste validée' : 'Demandes recevables'} className="relative -mb-px ml-auto flex max-w-full flex-wrap items-center gap-1">
+            {ONGLETS.filter(({ cle }) => classement.onglets.includes(cle)).map(({ cle, label: libelle, validee }) => {
+                const label = classement.validee ? validee : libelle;
                 const courant = cle === actif;
                 const url = classement.urls[cle];
                 const classes = cn(
@@ -129,10 +142,48 @@ export function OngletsRecevables({ classement, actif, onSelect }: { classement:
     );
 }
 
-/** Tableau d'une liste provisoire (admission ou réadmission), dans l'ordre du classement. */
+/** Décision demandée depuis le menu « Plus d'actions » d'une ligne. */
+type Decision = { ligne: LigneClassement; action: 'valider' | 'rejeter' };
+
+/**
+ * Tableau d'une liste provisoire (admission ou réadmission) ou de la liste validée, dans l'ordre du classement.
+ * Chaque ligne se termine par le suivi du dossier, l’état des pièces, puis le menu « Plus d’actions » (validation, rejet) — sur la liste validée, une icône de rejet directe.
+ */
 export function TableauClassement({ classement, toolbar, filtre }: { classement: Classement; toolbar: ReactNode; filtre: boolean }) {
+    const [aDecider, setADecider] = useState<Decision | null>(null);
+    const [motif, setMotif] = useState('');
+    const [erreur, setErreur] = useState<string | null>(null);
+    const [envoi, setEnvoi] = useState(false);
+
     if (!classement.lignes) return null;
     const readmission = classement.liste === 'readmission';
+    // Menu présent sur au moins une ligne : les autres gardent sa place pour aligner les icônes.
+    const avecMenu = classement.lignes.data.some((l) => l.decision);
+
+    const ouvrir = (decision: Decision) => {
+        setADecider(decision);
+        setMotif('');
+        setErreur(null);
+    };
+
+    const decider = async () => {
+        if (!aDecider?.ligne.decision) return;
+        const rejet = aDecider.action === 'rejeter';
+        // Rejet : motif obligatoire (le serveur le revérifie).
+        if (rejet && motif.trim() === '') {
+            setErreur('Le motif du rejet est obligatoire.');
+            return;
+        }
+        setEnvoi(true);
+        const ok = await envoyer(
+            aDecider.ligne.decision.url,
+            { etat: rejet ? 'refuse' : 'eligible', ...(rejet ? { motif: motif.trim() } : {}) },
+            { onError: (retour) => setErreur(retour.motif ?? Object.values(retour)[0] ?? null) },
+        );
+        setEnvoi(false);
+        if (ok) setADecider(null);
+    };
+
     const vide = (valeur: ReactNode) => valeur ?? <span className="text-muted">—</span>;
     const boursier: DataTableColumn<LigneClassement> = { key: 'boursier', header: 'Boursier', cell: (l) => (l.boursier ? <Badge variant="info">Oui</Badge> : <span className="text-muted">Non</span>) };
 
@@ -202,40 +253,73 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
                   {
                       key: 'ville_bac',
                       header: 'Ville du bac',
-                      cell: (l) => (
-                          <>
-                              {vide(l.ville_bac)}
-                              {l.hors_ville && <p className="text-xs text-primary">Hors ville de référence</p>}
-                          </>
-                      ),
+                      cell: (l) => vide(l.ville_bac),
                   },
               ] satisfies DataTableColumn<LigneClassement>[])),
         ...(classement.colonnes.age
             ? ([{ key: 'age', header: 'Âge', className: 'whitespace-nowrap tabular-nums', cell: (l) => (l.age === null ? vide(null) : `${l.age} ans`) }] satisfies DataTableColumn<LigneClassement>[])
             : []),
-        { key: 'etat', header: 'État du dossier', cell: (l) => <EtatDossierBadge etat={l.etat_dossier} /> },
         {
             key: 'actions',
             header: <span className="sr-only">Actions</span>,
             className: 'text-right',
             cell: (l) => (
                 <div className="flex items-center justify-end gap-1">
-                    {l.documents && <IconePieces pieces={l.documents} />}
-                    {/* Validation du dossier : action à venir. */}
-                    <Button variant="ghost" size="icon" aria-label={`Valider le dossier de ${l.name}`} title="Valider le dossier">
-                        <CircleCheck {...ICON} aria-hidden />
-                    </Button>
                     {l.url && (
                         <Link href={l.url} aria-label={`Suivre le dossier de ${l.name}`} title="Suivre le dossier" className={buttonVariants({ variant: 'ghost', size: 'icon' })}>
                             <Eye {...ICON} aria-hidden />
                         </Link>
+                    )}
+                    {l.documents && <IconePieces pieces={l.documents} />}
+                    {l.decision && classement.validee ? (
+                        // Liste validée : rejet seul, icône directe (pas de menu).
+                        l.decision.rejeter && (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-red-600 hover:text-red-700"
+                                aria-label={`Rejeter le dossier de ${l.name}`}
+                                title="Rejeter"
+                                onClick={() => ouvrir({ ligne: l, action: 'rejeter' })}
+                            >
+                                <CircleX {...ICON} aria-hidden />
+                            </Button>
+                        )
+                    ) : l.decision ? (
+                        // Non modal : la fenêtre de confirmation s'ouvre dès la fermeture du menu.
+                        <DropdownMenu modal={false}>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" aria-label={`Plus d’actions pour ${l.name}`} title="Plus d’actions">
+                                    <EllipsisVertical {...ICON} aria-hidden />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                                {l.decision.valider && (
+                                    <DropdownMenuItem className="cursor-pointer" onSelect={() => ouvrir({ ligne: l, action: 'valider' })}>
+                                        <CircleCheck aria-hidden className="text-primary" />
+                                        Validation
+                                    </DropdownMenuItem>
+                                )}
+                                {l.decision.rejeter && (
+                                    <DropdownMenuItem variant="destructive" className="cursor-pointer" onSelect={() => ouvrir({ ligne: l, action: 'rejeter' })}>
+                                        <CircleX aria-hidden />
+                                        Rejet
+                                    </DropdownMenuItem>
+                                )}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    ) : (
+                        avecMenu && <span className="size-9 shrink-0" aria-hidden />
                     )}
                 </div>
             ),
         },
     ];
 
+    const rejet = aDecider?.action === 'rejeter';
+
     return (
+        <>
         <DataTable
             columns={colonnes}
             data={classement.lignes}
@@ -247,10 +331,52 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
                     <ListOrdered {...ICON} aria-hidden />
                     {filtre
                         ? 'Aucune demande ne correspond à cette recherche.'
-                        : `Aucune demande recevable de ${readmission ? 'réadmission' : 'admission'} à classer${classement.campagne ? ` pour la campagne ${classement.campagne}` : ''}.`}
+                        : classement.validee
+                          ? `Aucune demande ${readmission ? 'de réadmission' : 'd’admission'} validée${classement.campagne ? ` pour la campagne ${classement.campagne}` : ''}.`
+                          : `Aucune demande recevable de ${readmission ? 'réadmission' : 'admission'} à classer${classement.campagne ? ` pour la campagne ${classement.campagne}` : ''}.`}
                 </span>
             }
         />
+
+        <ConfirmDialog
+            open={aDecider !== null}
+            onOpenChange={(ouvert) => !ouvert && setADecider(null)}
+            title={rejet ? 'Rejeter ce dossier ?' : 'Valider ce dossier ?'}
+            description={
+                <>
+                    {rejet
+                        ? `Le dossier de ${aDecider?.ligne.name ?? ''} passe en « Refusé » et rejoint les demandes refusées.`
+                        : `Le dossier de ${aDecider?.ligne.name ?? ''} passe en « Recevable » et rejoint la liste validée ; l’étudiant reçoit ses accès et doit confirmer sa demande.`}
+                    {!rejet && erreur && (
+                        <p role="alert" className="mt-2 text-xs font-medium text-red-600">
+                            {erreur}
+                        </p>
+                    )}
+                </>
+            }
+            confirmLabel={rejet ? 'Rejeter' : 'Valider'}
+            confirmIcon={rejet ? <CircleX className="size-4" aria-hidden /> : <CircleCheck className="size-4" aria-hidden />}
+            danger={rejet}
+            processing={envoi}
+            onConfirm={decider}
+        >
+            {rejet && (
+                <Field id="rejet-motif" label="Motif du rejet" required error={erreur ?? undefined} hint="5 000 caractères maximum.">
+                    <Textarea
+                        id="rejet-motif"
+                        rows={3}
+                        maxLength={5000}
+                        invalid={!!erreur}
+                        value={motif}
+                        onChange={(event) => {
+                            setMotif(event.target.value);
+                            setErreur(null);
+                        }}
+                    />
+                </Field>
+            )}
+        </ConfirmDialog>
+        </>
     );
 }
 

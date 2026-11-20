@@ -117,7 +117,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $props = $this->page('liste', ['etat' => 'rejetees'])['props'];
         $this->assertSame('rejetees', $props['etat']);
         $this->assertSame(['student'], collect($props['dossiers']['data'])->pluck('id')->all());
-        $this->assertSame(['toutes' => 1, 'recevables' => 0, 'rejetees' => 1, 'refusees' => 0], $props['stats']);
+        $this->assertSame(['toutes' => 1, 'recevables' => 0, 'rejetees' => 1, 'refusees' => 0, 'validees' => 0], $props['stats']);
         $this->assertSame([], $ids('recevables'));
 
         // 12/20 = 240/400 : tous les critères conformes → recevable.
@@ -143,7 +143,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $props = $this->page('liste', ['etat' => 'refusees'])['props'];
         $this->assertSame('refusees', $props['etat']);
         $this->assertSame(['student'], collect($props['dossiers']['data'])->pluck('id')->all());
-        $this->assertSame(['toutes' => 1, 'recevables' => 0, 'rejetees' => 0, 'refusees' => 1], $props['stats']);
+        $this->assertSame(['toutes' => 1, 'recevables' => 0, 'rejetees' => 0, 'refusees' => 1, 'validees' => 0], $props['stats']);
         $this->assertSame([], $ids('recevables'));
 
         // Refus automatique (barème) ou annulation par l'étudiant : pas une décision de l'administration.
@@ -533,6 +533,62 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
         // Pas d'onglets de classement hors des demandes recevables.
         $this->assertNull($this->page('liste', ['etat' => 'toutes'])['props']['classement']);
+    }
+
+    public function test_validation_et_rejet_depuis_la_liste_provisoire(): void
+    {
+        $this->agentEligibilite(['hebergement.admissions.validate']);
+        (require database_path('migrations/2026_11_17_000001_add_ville_bac_to_demande.php'))->up();
+        $this->dossier('other');
+        DB::table('etudiants')->where('id_etudiant', 'other')->update(['name' => 'Yao Marc', 'nationalite' => 'IVOIRIENNE', 'date_naissance' => now()->subYears(20)->toDateString()]);
+        DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12, 'ville_bac' => 'Bondoukou']);
+        DB::table('demande')->where('etudiant_id', 'other')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12, 'ville_bac' => 'Abidjan']);
+        $liste = fn (string $etat) => $this->page('liste', ['etat' => $etat], '/admin/gestion-hebergement/campagnes_admissions/liste/'.$etat, ['liste' => 'admission'])['props'];
+
+        // Liste provisoire : « Validation » et « Rejet » sur chaque dossier soumis.
+        $lignes = collect($liste('recevables')['classement']['lignes']['data'])->keyBy('id');
+        $this->assertSame(['other', 'student'], $lignes->keys()->all());
+        $this->assertSame([true, true], [$lignes['other']['decision']['valider'], $lignes['other']['decision']['rejeter']]);
+
+        // Validation : le dossier passe « Recevable » et rejoint la liste validée, avec son rang.
+        $this->post($lignes['other']['decision']['url'], ['etat' => 'eligible'])->assertRedirect();
+        $this->assertSame('eligible', DB::table('demande')->where('etudiant_id', 'other')->value('etat_dossier'));
+        $recevables = $liste('recevables');
+        $this->assertSame([['student', 2]], collect($recevables['classement']['lignes']['data'])->map(fn ($l) => [$l['id'], $l['rang']])->all());
+        $this->assertSame(['recevables' => 1, 'validees' => 1], array_intersect_key($recevables['stats'], ['recevables' => 0, 'validees' => 0]));
+        $validees = $liste('validees');
+        $this->assertSame('validees', $validees['etat']);
+        $this->assertTrue($validees['classement']['validee']);
+        $this->assertSame(['admission', 'readmission'], $validees['classement']['onglets']);
+        $this->assertSame([['other', 1]], collect($validees['classement']['lignes']['data'])->map(fn ($l) => [$l['id'], $l['rang']])->all());
+        // Liste validée : rejet seul (pas de nouvelle validation), pas de téléchargement.
+        $decision = $validees['classement']['lignes']['data'][0]['decision'];
+        $this->assertSame([false, true], [$decision['valider'], $decision['rejeter']]);
+        $this->assertNull($validees['classement']['exports']);
+
+        // Rejet : motif obligatoire, puis la demande passe dans « Demandes refusées ».
+        $url = $lignes['student']['decision']['url'];
+        $this->post($url, ['etat' => 'refuse'])->assertSessionHasErrors('etat_dossier');
+        $this->post($url, ['etat' => 'refuse', 'motif' => 'Pièces falsifiées.'])->assertRedirect();
+        $props = $liste('recevables');
+        $this->assertSame([], $props['classement']['lignes']['data']);
+        $this->assertSame(['student'], collect($this->page('liste', ['etat' => 'refusees'])['props']['dossiers']['data'])->pluck('id')->all());
+
+        // Rejet depuis la liste validée : motif obligatoire, la demande sort de la liste validée pour « Demandes refusées ».
+        $this->post($decision['url'], ['etat' => 'refuse'])->assertSessionHasErrors('etat_dossier');
+        $this->post($decision['url'], ['etat' => 'refuse', 'motif' => 'Désistement constaté.'])->assertRedirect();
+        $this->assertSame([], $liste('validees')['classement']['lignes']['data']);
+        $this->assertEqualsCanonicalizing(['other', 'student'], collect($this->page('liste', ['etat' => 'refusees'])['props']['dossiers']['data'])->pluck('id')->all());
+
+        // Fiche du dossier : le motif du rejet est affiché.
+        $refus = $this->page('show', ['id' => 'other'], '/admin/gestion-hebergement/campagnes_admissions/other')['props']['suivi']['refus'];
+        $this->assertSame(['Refusé', 'Désistement constaté.'], [$refus['etat'], $refus['motif']]);
+
+        // Sans le droit de changer l'état du dossier : pas de menu d'actions.
+        DB::table('demande')->where('etudiant_id', 'student')->update(['etat_dossier' => 'soumis']);
+        DB::table('dossier_transitions')->where('demande_id', DB::table('demande')->where('etudiant_id', 'student')->value('id_demande'))->delete();
+        $this->agentLimite(['hebergement.admissions.personal', 'hebergement.admissions.documents']);
+        $this->assertNull($liste('recevables')['classement']['lignes']['data'][0]['decision']);
     }
 
     public function test_modification_refusee_sans_le_droit_de_modifier_les_admissions(): void

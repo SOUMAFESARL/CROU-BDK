@@ -50,10 +50,11 @@ class CampagnesAdmissionController extends Controller
     /**
      * Filtres de la liste des admissions : toutes les demandes, demandes recevables (tous les critères de la campagne
      * conformes), demandes irrecevables (au moins un critère non conforme) et demandes refusées (refusées ou annulées
-     * par l'administration pendant la validation), selon `RecevabiliteDemandes`.
+     * par l'administration pendant la validation), selon `RecevabiliteDemandes` ; s'y ajoute la « Liste validée »
+     * (onglet à part : demandes recevables validées depuis une liste provisoire, dossier « Recevable »).
      * Les étudiants logés et les dossiers en vérification sont suivis sur la page « Résidents & contrats ».
      */
-    private const FILTRES_ADMISSION = ['toutes', 'recevables', 'rejetees', 'refusees'];
+    private const FILTRES_ADMISSION = ['toutes', 'recevables', 'rejetees', 'refusees', 'validees'];
 
     /** Anciens filtres (liens enregistrés) : nouvelles demandes, en attente, rejetées. */
     private const FILTRES_ADMISSION_ANCIENS = ['nouvelles_demandes' => 'toutes', 'en_attente' => 'recevables', 'annuler' => 'rejetees'];
@@ -111,6 +112,7 @@ class CampagnesAdmissionController extends Controller
             'recevables' => $classement['recevables'],
             'rejetees' => $classement['rejetees'],
             'refusees' => $classement['refusees'],
+            'validees' => $classement['validees'],
             default => null,
         };
         if ($typeDemande !== '') {
@@ -129,8 +131,9 @@ class CampagnesAdmissionController extends Controller
         // Type de demande (admission / réadmission) : volet de l'étudiant dans la campagne de sa demande.
         $dossiers->getCollection()->load('derniereDemande.campagne');
         $types = $criteres->voletsDemandes(collect($dossiers->items())->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande));
-        $listesProvisoires = $etat === 'recevables'
-            ? $this->classementProvisoire($request, $population->whereIn('id_etudiant', $classement['recevables']), $campagne, $recherche, $personnel, $vues->allows($admin, 'admissions.documents'), $url, $access, $admin)
+        // Demandes recevables : listes provisoires ; liste validée : demandes validées depuis ces listes (mêmes rangs).
+        $listesProvisoires = in_array($etat, ['recevables', 'validees'], true)
+            ? $this->classementProvisoire($request, $etat === 'validees', $population, $classement, $campagne, $recherche, $personnel, $vues->allows($admin, 'admissions.documents'), $url, $access, $admin)
             : null;
 
         return Inertia::render('Admin/Hebergement/Admissions/Index', [
@@ -156,6 +159,7 @@ class CampagnesAdmissionController extends Controller
                 'recevables' => count($classement['recevables']),
                 'rejetees' => count($classement['rejetees']),
                 'refusees' => count($classement['refusees']),
+                'validees' => count($classement['validees']),
             ],
             'etat' => $etat,
             'classement' => $listesProvisoires,
@@ -400,20 +404,32 @@ class CampagnesAdmissionController extends Controller
      * campagne active (sinon celle de la demande recevable la plus récente), une par volet ouvert par la campagne
      * (une campagne d'admission seule n'a pas de liste de réadmission). Onglet ouvert : `?liste=` (un volet fermé ramène à la liste des demandes) ; la
      * recherche (`q`) filtre la liste ouverte sans changer les rangs. L'âge n'est envoyé qu'avec les données personnelles.
+     *
+     * `$validee` : « Liste validée » — mêmes onglets par volet (sans la liste des demandes), limités aux demandes validées.
+     * Le rang est calculé sur les demandes recevables et validées ensemble : valider une demande ne renumérote pas les autres.
+     * Sur une liste provisoire, chaque ligne porte les actions « Valider » (dossier « Recevable ») et « Rejeter » (« Refusé »,
+     * motif obligatoire) permises par `DossierWorkflow`, avec le droit de changer l'état du dossier ; sur la liste validée,
+     * seul le rejet est proposé (la demande passe alors dans « Demandes refusées »).
+     *
+     * @param  array{recevables: string[], validees: string[]}  $classement  `RecevabiliteDemandes::classer()`
      */
-    private function classementProvisoire(Request $request, EloquentCollection $recevables, ?Campagne $campagne, string $recherche, bool $personnel, bool $documents, \Closure $url, AdminAccess $access, $admin): array
+    private function classementProvisoire(Request $request, bool $validee, EloquentCollection $population, array $classement, ?Campagne $campagne, string $recherche, bool $personnel, bool $documents, \Closure $url, AdminAccess $access, $admin): array
     {
-        [$campagne, $volets, $listes] = $this->listesProvisoires($recevables, $campagne);
+        [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $campagne);
+        $listes = $listes[$validee ? 'validees' : 'provisoires'];
         // Onglets selon le type de campagne : une liste provisoire par volet ouvert (admission seule → pas de réadmission).
-        $onglets = ['demandes', ...$volets];
-        $liste = in_array($request->query('liste'), $onglets, true) ? $request->query('liste') : 'demandes';
+        $onglets = $validee ? $volets : ['demandes', ...$volets];
+        $liste = in_array($request->query('liste'), $onglets, true) ? $request->query('liste') : ($onglets[0] ?? 'demandes');
         $lien = fn (string $onglet) => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
-            ? route('admin.hebergement.campagnes_admission.admission', ['etat' => 'recevables'] + ($onglet === 'demandes' ? [] : ['liste' => $onglet]))
+            ? route('admin.hebergement.campagnes_admission.admission', ['etat' => $validee ? 'validees' : 'recevables'] + ($onglet === 'demandes' ? [] : ['liste' => $onglet]))
             : null;
         // Téléchargement de la liste provisoire ouverte (Excel, PDF imprimable).
-        $exports = $liste !== 'demandes' && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_provisoire_export')
+        $exports = ! $validee && $liste !== 'demandes' && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_provisoire_export')
             ? collect(['excel', 'pdf'])->mapWithKeys(fn ($format) => [$format => route('admin.hebergement.campagnes_admission.liste_provisoire_export', ['volet' => $liste, 'format' => $format])])->all()
             : null;
+        // Validation / rejet depuis la liste provisoire, rejet seul depuis la liste validée (même action que le suivi du dossier).
+        $peutDecider = $access->allows($admin, 'admin.dossiers.transition');
+        $proposees = $validee ? ['refuse'] : ['eligible', 'refuse'];
 
         $lignes = null;
         if ($liste !== 'demandes') {
@@ -429,9 +445,13 @@ class CampagnesAdmissionController extends Controller
             $lignes = (new LengthAwarePaginator($courantes, $filtrees->count(), 10, $page, [
                 'path' => $request->url(),
                 'query' => $request->query(),
-            ]))->through(function (array $ligne) use ($personnel, $url, $pieces) {
+            ]))->through(function (array $ligne) use ($personnel, $url, $pieces, $peutDecider, $proposees) {
                 $etudiant = $ligne['etudiant'];
                 $demande = $etudiant->derniereDemande;
+                // Un refus ne se lève pas depuis la liste : il passe par le réexamen sur la fiche du dossier.
+                $decisions = $peutDecider && $demande && $demande->etat_dossier !== 'refuse'
+                    ? array_values(array_intersect($proposees, DossierWorkflow::NEXT[$demande->etat_dossier] ?? []))
+                    : [];
 
                 return [
                     'id' => (string) $etudiant->id_etudiant,
@@ -450,16 +470,22 @@ class CampagnesAdmissionController extends Controller
                     'credits' => $ligne['credits'] ?? null,
                     'documents' => $pieces[(string) $etudiant->id_etudiant] ?? null,
                     'url' => $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant]),
+                    'decision' => $decisions ? [
+                        'url' => route('admin.dossiers.transition', $demande),
+                        'valider' => in_array('eligible', $decisions, true),
+                        'rejeter' => in_array('refuse', $decisions, true),
+                    ] : null,
                 ];
             });
         }
 
         return [
             'liste' => $liste,
+            'validee' => $validee,
             'onglets' => $onglets,
             'campagne' => $campagne?->annee_campagne,
             'compteurs' => [
-                'demandes' => $recevables->count(),
+                'demandes' => count($classement['recevables']),
                 'admission' => count($listes['admission']),
                 'readmission' => count($listes['readmission']),
             ],
@@ -525,29 +551,37 @@ class CampagnesAdmissionController extends Controller
     }
 
     /**
-     * Campagne des listes provisoires (campagne active, sinon celle de la demande recevable la plus récente), volets
-     * qu'elle ouvre et demandes recevables classées par volet (`ClassementProvisoire`).
+     * Campagne des listes provisoires (campagne active, sinon celle de la demande recevable ou validée la plus récente),
+     * volets qu'elle ouvre et demandes classées par volet (`ClassementProvisoire`) : le classement porte sur les demandes
+     * recevables et validées ensemble (rangs stables), puis il est partagé entre les listes provisoires (demandes encore
+     * à valider) et la liste validée.
      *
-     * @return array{0: ?Campagne, 1: list<string>, 2: array{admission: array, readmission: array}}
+     * @param  array{recevables: string[], validees: string[]}  $classement  `RecevabiliteDemandes::classer()`
+     * @return array{0: ?Campagne, 1: list<string>, 2: array{provisoires: array{admission: array, readmission: array}, validees: array{admission: array, readmission: array}}}
      */
-    private function listesProvisoires(EloquentCollection $recevables, ?Campagne $campagne): array
+    private function listesProvisoires(EloquentCollection $population, array $classement, ?Campagne $campagne): array
     {
-        $campagne ??= $recevables->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)->filter()
+        $classees = $population->whereIn('id_etudiant', [...$classement['recevables'], ...$classement['validees']]);
+        $campagne ??= $classees->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)->filter()
             ->sortByDesc('created_at')->first()?->campagne;
         $criteres = app(\App\Http\Services\Eligibilite\CriteresCampagne::class);
+        $vides = ['admission' => [], 'readmission' => []];
         if (! $campagne) {
-            return [null, [], ['admission' => [], 'readmission' => []]];
+            return [null, [], ['provisoires' => $vides, 'validees' => $vides]];
+        }
+        $listes = app(\App\Http\Services\Eligibilite\ClassementProvisoire::class)->classer(
+            $classees,
+            $campagne,
+            $criteres->voletsDemandes($classees->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)),
+        );
+        $partage = ['provisoires' => $vides, 'validees' => $vides];
+        foreach ($listes as $volet => $lignes) {
+            [$validees, $provisoires] = collect($lignes)->partition(fn (array $ligne) => in_array((string) $ligne['etudiant']->getKey(), $classement['validees'], true));
+            $partage['provisoires'][$volet] = $provisoires->values()->all();
+            $partage['validees'][$volet] = $validees->values()->all();
         }
 
-        return [
-            $campagne,
-            array_keys(array_filter($criteres->volets($campagne))),
-            app(\App\Http\Services\Eligibilite\ClassementProvisoire::class)->classer(
-                $recevables,
-                $campagne,
-                $criteres->voletsDemandes($recevables->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)),
-            ),
-        ];
+        return [$campagne, array_keys(array_filter($criteres->volets($campagne))), $partage];
     }
 
     /**
@@ -559,8 +593,10 @@ class CampagnesAdmissionController extends Controller
         $admin = $request->user('admin');
         $personnel = app(AdminViewAccess::class)->allows($admin, 'admissions.personal');
         $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes();
-        $recevables = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population)['recevables'];
-        [$campagne, $volets, $listes] = $this->listesProvisoires($population->whereIn('id_etudiant', $recevables), $this->campagneActive());
+        $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
+        [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $this->campagneActive());
+        // Liste provisoire : demandes encore à valider (les demandes validées figurent dans la « Liste validée »).
+        $listes = $listes['provisoires'];
         if (! in_array($volet, $volets, true)) {
             return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'recevables'])
                 ->with('error', 'Cette liste provisoire n’est pas disponible pour la campagne.');
@@ -659,6 +695,7 @@ class CampagnesAdmissionController extends Controller
             'transition' => $peutChanger && $actions ? route('admin.dossiers.transition', $dossier) : null,
             'rendre_eligible' => $peutChanger && $refusAutomatique ? route('admin.dossiers.transition', $dossier) : null,
             'decision' => $this->decisionAutomatique($dossier),
+            'refus' => $this->motifRefus($dossier),
             'assignation_id' => $dossier->assignation_id,
             'historique' => $admin->hasPermission('hebergement.admissions.history')
                 ? $dossier->transitions->map(fn ($transition) => [
@@ -668,6 +705,28 @@ class CampagnesAdmissionController extends Controller
                     'motif' => $transition->motif,
                 ])->values()
                 : null,
+        ];
+    }
+
+    /**
+     * Motif du refus ou de l'annulation en cours (dernière transition vers l'état actuel), affiché sur la fiche
+     * indépendamment de l'historique : rejet depuis une liste provisoire ou la liste validée, refus depuis le suivi…
+     */
+    private function motifRefus($dossier): ?array
+    {
+        if (! in_array($dossier->etat_dossier, \App\Http\Services\Eligibilite\RecevabiliteDemandes::ETATS_REFUS, true)) {
+            return null;
+        }
+        $transition = $dossier->transitions->where('nouvel_etat', $dossier->etat_dossier)->sortBy('id')->last();
+        if (! $transition || trim((string) $transition->motif) === '') {
+            return null;
+        }
+
+        return [
+            'etat' => DossierWorkflow::LABELS[$dossier->etat_dossier] ?? $dossier->etat_dossier,
+            'motif' => $transition->motif,
+            'auteur' => $transition->details['auteur_nom'] ?? ($transition->acteur_type === 'systeme' ? 'Traitement automatique' : null),
+            'date' => $transition->created_at?->format('Y-m-d H:i'),
         ];
     }
 
@@ -740,6 +799,7 @@ class CampagnesAdmissionController extends Controller
             'urls' => [
                 'hebergement' => route('admin.hebergement.index'),
                 'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
+                'validees' => $url('admin.hebergement.campagnes_admission.admission', ['etat' => 'validees']),
                 'create' => $url('admin.hebergement.campagnes_admission.create_campagne'),
                 'filtres' => collect(self::FILTRES_CAMPAGNE)
                     // Changer de statut conserve la recherche et l'année universitaire en cours.

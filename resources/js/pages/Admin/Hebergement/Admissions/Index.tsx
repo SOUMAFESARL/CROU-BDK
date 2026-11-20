@@ -5,7 +5,6 @@ import { OngletsCampagnesAdmissions } from '@/components/campagnes/onglets-campa
 import { OngletsRecevables, TableauClassement, type Classement } from '@/components/campagnes/liste-provisoire';
 import { Badge } from '@/components/ui/badge';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
-import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
@@ -25,9 +24,10 @@ import type { Paginated } from '@/types/global';
 
 /**
  * Toutes les demandes, demandes recevables (tous les critères conformes), demandes irrecevables (au moins un critère
- * non conforme), demandes refusées (refusées ou annulées par l'administration pendant la validation).
+ * non conforme), demandes refusées (refusées ou annulées par l'administration pendant la validation), et la liste
+ * validée (onglet à part : demandes validées depuis une liste provisoire).
  */
-type Filtre = 'toutes' | 'recevables' | 'rejetees' | 'refusees';
+type Filtre = 'toutes' | 'recevables' | 'rejetees' | 'refusees' | 'validees';
 
 type Dossier = {
     id: string;
@@ -71,6 +71,7 @@ const TITRES: Record<Filtre, string> = {
     recevables: 'Demandes recevables',
     rejetees: 'Demandes irrecevables',
     refusees: 'Demandes refusées',
+    validees: 'Liste validée',
 };
 
 /**
@@ -78,7 +79,9 @@ const TITRES: Record<Filtre, string> = {
  * Les étudiants déjà logés sont suivis sur la page « Résidents & contrats ».
  */
 export default function AdmissionsIndex({ dossiers, stats, etat, classement, filters, etatsDossier, colonnes, campagneActive, urls }: Props) {
-    /** Onglet « Liste provisoire » ouvert (admission ou réadmission) : le classement remplace la liste des demandes. */
+    /** Onglet « Liste validée » : demandes validées depuis les listes provisoires (sans les indicateurs de la liste des demandes). */
+    const validee = etat === 'validees';
+    /** Onglet « Liste provisoire » ouvert (admission ou réadmission) ou liste validée : le classement remplace la liste des demandes. */
     const listeProvisoire = classement !== null && classement.liste !== 'demandes';
     const [recherche, setRecherche] = useState(filters.q);
     /** Onglet choisi (mis à jour dès le clic) ; il diffère de `classement.liste` le temps du chargement. */
@@ -229,7 +232,6 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                     vide(null)
                 ),
         },
-        { key: 'etat', header: 'État du dossier', cell: (d) => <EtatDossierBadge etat={d.etat_dossier} /> },
         {
             key: 'actions',
             header: <span className="sr-only">Actions</span>,
@@ -243,8 +245,8 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                     )}
                     {/* « Toutes les demandes » : pas de bouton « Suivre le dossier » (le clic sur la ligne ouvre le dossier). */}
                     {d.url && etat !== 'toutes' && (
-                        <Link href={d.url} className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'whitespace-nowrap')}>
-                            <Eye className="size-4" aria-hidden /> Suivre le dossier
+                        <Link href={d.url} aria-label={`Suivre le dossier de ${d.name}`} title="Suivre le dossier" className={buttonVariants({ variant: 'ghost', size: 'icon' })}>
+                            <Eye {...ICON} aria-hidden />
                         </Link>
                     )}
                 </div>
@@ -258,8 +260,8 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
 
             {/* Campagne active : à droite, sur la ligne des onglets Campagnes / Admissions. */}
             <OngletsCampagnesAdmissions
-                actif="admissions"
-                urls={{ campagnes: urls.campagnes, admissions: urls.filtres?.toutes ?? null }}
+                actif={validee ? 'validees' : 'admissions'}
+                urls={{ campagnes: urls.campagnes, admissions: urls.filtres?.toutes ?? null, validees: urls.filtres?.validees ?? null }}
                 aside={
                     campagneActive ? (
                         <>
@@ -277,7 +279,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                 }
             />
 
-            {urls.filtres && (
+            {urls.filtres && !validee && (
                 <KpiFilters
                     label="Filtrer les dossiers"
                     active={etat}

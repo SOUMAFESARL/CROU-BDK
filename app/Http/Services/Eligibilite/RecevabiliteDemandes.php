@@ -22,6 +22,9 @@ use Illuminate\Support\Facades\Schema;
  * - « refusée » : demande refusée ou annulée par l'administration pendant la validation (état actuel « Refusé » ou
  *   « Annulé », dernière transition faite par un agent). Elle sort des listes recevables / irrecevables ;
  *   une annulation par l'étudiant ou un refus automatique (barème) n'en fait pas partie.
+ * - « validée » : demande recevable dont le dossier est passé « Recevable » (`eligible`), validée par un agent depuis
+ *   une liste provisoire (ou par une dérogation approuvée) ; elle sort des demandes recevables pour la « Liste validée »
+ *   et y reste jusqu'à la confirmation de l'étudiant.
  *
  * Le classement est le même pour tous les agents : la situation disciplinaire (note de conduite, sanction bloquante)
  * est toujours prise en compte, même si l'agent ne peut pas la consulter.
@@ -37,6 +40,11 @@ class RecevabiliteDemandes
 
     public const REFUSEE = 'refusee';
 
+    public const VALIDEE = 'validee';
+
+    /** État du dossier d'une demande validée (`DossierWorkflow`, « Recevable »). */
+    public const ETAT_VALIDE = 'eligible';
+
     /** États du dossier d'une demande refusée par l'administration (`DossierWorkflow`). */
     public const ETATS_REFUS = ['refuse', 'annule'];
 
@@ -44,7 +52,7 @@ class RecevabiliteDemandes
 
     /**
      * @param  iterable<Etudiant>  $etudiants  avec `derniereDemande` (et sa campagne) chargée
-     * @return array{recevables: string[], rejetees: string[], refusees: string[]} identifiants des étudiants
+     * @return array{recevables: string[], rejetees: string[], refusees: string[], validees: string[]} identifiants des étudiants
      */
     public function classer(iterable $etudiants): array
     {
@@ -52,13 +60,14 @@ class RecevabiliteDemandes
         $demandes = $etudiants->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)->filter()->all();
         $refusParAgent = $this->refusParAgent($demandes);
         $derogations = $this->derogationsApprouvees($demandes);
-        $resultat = ['recevables' => [], 'rejetees' => [], 'refusees' => []];
+        $resultat = ['recevables' => [], 'rejetees' => [], 'refusees' => [], 'validees' => []];
         foreach ($etudiants as $etudiant) {
             $classe = $this->classe($etudiant, $refusParAgent, $derogations);
             $liste = match ($classe) {
                 self::RECEVABLE => 'recevables',
                 self::REJETEE => 'rejetees',
                 self::REFUSEE => 'refusees',
+                self::VALIDEE => 'validees',
                 default => null,
             };
             if ($liste !== null) {
@@ -88,15 +97,18 @@ class RecevabiliteDemandes
         // Dérogation approuvée : recevable quels que soient les critères non conformes.
         $derogations ??= $this->derogationsApprouvees([$demande]);
         if (in_array((string) $demande->getKey(), $derogations, true)) {
-            return self::RECEVABLE;
+            $classe = self::RECEVABLE;
+        } else {
+            $regles = collect($this->conformite->evaluer($etudiant, $demande, true)['regles']);
+            $classe = match (true) {
+                $regles->contains('etat', 'nok') => self::REJETEE,
+                $regles->every(fn (array $regle) => $regle['etat'] === 'ok') => self::RECEVABLE,
+                default => self::A_COMPLETER,
+            };
         }
-        $regles = collect($this->conformite->evaluer($etudiant, $demande, true)['regles']);
 
-        return match (true) {
-            $regles->contains('etat', 'nok') => self::REJETEE,
-            $regles->every(fn (array $regle) => $regle['etat'] === 'ok') => self::RECEVABLE,
-            default => self::A_COMPLETER,
-        };
+        // Demande recevable validée par l'administration : « Liste validée ».
+        return $classe === self::RECEVABLE && $demande->etat_dossier === self::ETAT_VALIDE ? self::VALIDEE : $classe;
     }
 
     /**

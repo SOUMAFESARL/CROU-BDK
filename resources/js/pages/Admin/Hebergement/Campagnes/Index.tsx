@@ -124,7 +124,7 @@ export default function CampagnesIndex({ campagnes, stats, etat, filters, annees
         <AdminLayout title="Campagnes">
             <PageHeader title="Campagnes" description="Planifiez les campagnes d’admission et de réadmission, leurs critères et les résidences ouvertes." />
 
-            <OngletsCampagnesAdmissions actif="campagnes" urls={{ campagnes: urls.filtres.tous, admissions: urls.admissions }} />
+            <OngletsCampagnesAdmissions actif="campagnes" urls={{ campagnes: urls.filtres.tous, admissions: urls.admissions, validees: urls.validees }} />
 
             {urls.create && (
                 <div className="mb-6 flex flex-wrap items-center justify-end gap-2">

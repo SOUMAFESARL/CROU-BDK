@@ -92,6 +92,8 @@ export type CampagnesProps = {
     urls: {
         hebergement: string;
         admissions: string | null;
+        /** Onglet « Liste validée » (demandes validées depuis les listes provisoires). */
+        validees: string | null;
         create: string | null;
         filtres: Record<FiltreCampagne, string>;
     };

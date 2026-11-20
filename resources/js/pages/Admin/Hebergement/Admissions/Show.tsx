@@ -122,6 +122,8 @@ type Props = {
         rendre_eligible: string | null;
         /** Décision du barème à l'origine de l'état actuel. */
         decision: { etat: string; score: number; minimum: number } | null;
+        /** Motif du refus (ou de l'annulation) en cours : rejet depuis une liste provisoire, la liste validée ou le suivi. */
+        refus: { etat: string; motif: string; auteur: string | null; date: string | null } | null;
         assignation_id: string | null;
         historique: { date: string | null; etat: string; auteur: string | null; motif: string | null }[] | null;
     } | null;
@@ -735,6 +737,22 @@ function Suivi({ suivi, etat }: { suivi: NonNullable<Props['suivi']>; etat: stri
                     </p>
                 )}
             </div>
+
+            {suivi.refus && (
+                <div role="note" className="mt-4 rounded-brand border border-red-200 bg-red-50 p-4 text-sm">
+                    <p className="flex items-center gap-2 font-medium text-red-700">
+                        <CircleX size={18} strokeWidth={1.25} aria-hidden />
+                        {suivi.refus.etat === 'Annulé' ? 'Motif de l’annulation' : 'Motif du rejet'}
+                    </p>
+                    <p className="mt-2 whitespace-pre-line text-gray-900">{suivi.refus.motif}</p>
+                    {(suivi.refus.auteur || suivi.refus.date) && (
+                        <p className="mt-2 text-xs text-muted">
+                            {suivi.refus.auteur ?? 'Administration'}
+                            {suivi.refus.date && ` — ${dateFr(suivi.refus.date)} ${suivi.refus.date.slice(11, 16)}`}
+                        </p>
+                    )}
+                </div>
+            )}
 
             {suivi.rendre_eligible && (
                 <div className="mt-4 flex flex-col gap-3 rounded-brand border border-[#C6E3A6] bg-soft p-4 text-sm sm:flex-row sm:items-center sm:justify-between">

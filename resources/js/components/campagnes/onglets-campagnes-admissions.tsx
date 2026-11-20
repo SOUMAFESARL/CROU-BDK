@@ -1,22 +1,24 @@
 import { Link } from '@inertiajs/react';
-import { CalendarDays, ClipboardList } from 'lucide-react';
+import { CalendarDays, ClipboardCheck, ClipboardList } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ICON } from '@/components/layout/app-sidebar';
 import { cn } from '@/lib/utils';
 
-type Onglet = 'campagnes' | 'admissions';
+type Onglet = 'campagnes' | 'admissions' | 'validees';
 
 const ONGLETS: { cle: Onglet; label: string; icone: typeof CalendarDays }[] = [
     { cle: 'campagnes', label: 'Campagnes', icone: CalendarDays },
-    { cle: 'admissions', label: 'Admissions', icone: ClipboardList },
+    { cle: 'admissions', label: 'Liste des demandes', icone: ClipboardList },
+    { cle: 'validees', label: 'Liste validée', icone: ClipboardCheck },
 ];
 
 /**
- * Onglets du menu « Campagnes & admission » : la liste des campagnes d'abord, puis les admissions.
+ * Onglets du menu « Campagnes & admission » : la liste des campagnes, la liste des demandes, puis la liste validée
+ * (demandes validées depuis les listes provisoires).
  * Chaque onglet est une page à part (navigation Inertia) ; un onglet sans lien (droit manquant) est masqué.
  * `aside` : contenu aligné à droite sur la ligne des onglets (ex. campagne active).
  */
-export function OngletsCampagnesAdmissions({ actif, urls, aside }: { actif: Onglet; urls: Record<Onglet, string | null>; aside?: ReactNode }) {
+export function OngletsCampagnesAdmissions({ actif, urls, aside }: { actif: Onglet; urls: Partial<Record<Onglet, string | null>>; aside?: ReactNode }) {
     const visibles = ONGLETS.filter((onglet) => onglet.cle === actif || urls[onglet.cle]);
 
     return (
