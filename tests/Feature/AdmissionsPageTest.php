@@ -550,11 +550,11 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame(['other', 'student'], $lignes->keys()->all());
         $this->assertSame([true, true], [$lignes['other']['decision']['valider'], $lignes['other']['decision']['rejeter']]);
 
-        // Validation : le dossier passe « Recevable » et rejoint la liste validée, avec son rang.
+        // Validation : le dossier passe « Recevable » et rejoint la liste validée, chaque liste a son propre classement.
         $this->post($lignes['other']['decision']['url'], ['etat' => 'eligible'])->assertRedirect();
         $this->assertSame('eligible', DB::table('demande')->where('etudiant_id', 'other')->value('etat_dossier'));
         $recevables = $liste('recevables');
-        $this->assertSame([['student', 2]], collect($recevables['classement']['lignes']['data'])->map(fn ($l) => [$l['id'], $l['rang']])->all());
+        $this->assertSame([['student', 1]], collect($recevables['classement']['lignes']['data'])->map(fn ($l) => [$l['id'], $l['rang']])->all());
         $this->assertSame(['recevables' => 1, 'validees' => 1], array_intersect_key($recevables['stats'], ['recevables' => 0, 'validees' => 0]));
         $validees = $liste('validees');
         $this->assertSame('validees', $validees['etat']);
@@ -564,6 +564,13 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         // Le type de demande filtré est conservé en changeant d'onglet.
         $this->assertStringContainsString('type=admission', $this->page('liste', ['etat' => 'validees'], '/admin/gestion-hebergement/campagnes_admissions/liste/validees', ['type' => 'admission'])['props']['classement']['urls']['attente']);
         $this->assertSame([['other', 'admission', 1]], collect($validees['classement']['lignes']['data'])->map(fn ($l) => [$l['id'], $l['volet'], $l['rang']])->all());
+        // Colonnes des demandes validées : matricule et filière de la demande.
+        DB::table('etudiants')->where('id_etudiant', 'other')->update(['matricule' => 'M-002']);
+        DB::table('demande')->where('etudiant_id', 'other')->update(['filiere_code' => '1']);
+        $ligneValidee = $liste('validees')['classement']['lignes']['data'][0];
+        $this->assertSame(['M-002', 'Informatique'], [$ligneValidee['matricule'], $ligneValidee['filiere']]);
+        // Civilité (genre) et date de naissance (données personnelles : l'administrateur a tous les droits).
+        $this->assertSame(['Masculin', now()->subYears(20)->toDateString()], [$ligneValidee['civilite'], $ligneValidee['date_naissance']]);
         $parType = fn (string $type) => $this->page('liste', ['etat' => 'validees'], '/admin/gestion-hebergement/campagnes_admissions/liste/validees', ['type' => $type])['props']['classement'];
         $this->assertSame(['admission', ['other']], [$parType('admission')['volet'], collect($parType('admission')['lignes']['data'])->pluck('id')->all()]);
         $this->assertSame(['readmission', []], [$parType('readmission')['volet'], $parType('readmission')['lignes']['data']]);
@@ -602,11 +609,14 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->agentEligibilite(['hebergement.admissions.validate']);
         (require database_path('migrations/2026_11_17_000001_add_ville_bac_to_demande.php'))->up();
         (require database_path('migrations/2026_11_20_000001_add_approbation_commission_to_demande.php'))->up();
+        (require database_path('migrations/2026_11_20_000002_add_attente_commission_to_demande.php'))->up();
+        (require database_path('migrations/2026_11_20_000003_add_liste_approbation_commission_to_demande.php'))->up();
+        (require database_path('migrations/2026_11_20_000004_create_publication_liste_definitive_table.php'))->up();
         $this->dossier('other');
         DB::table('etudiants')->where('id_etudiant', 'other')->update(['name' => 'Yao Marc', 'nationalite' => 'IVOIRIENNE', 'date_naissance' => now()->subYears(20)->toDateString()]);
         DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12, 'ville_bac' => 'Bondoukou']);
         DB::table('demande')->where('etudiant_id', 'other')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12, 'ville_bac' => 'Abidjan']);
-        $liste = fn (string $etat) => $this->page('liste', ['etat' => $etat], '/admin/gestion-hebergement/campagnes_admissions/liste/'.$etat, ['liste' => 'admission'])['props'];
+        $liste = fn (string $etat, array $query = []) => $this->page('liste', ['etat' => $etat], '/admin/gestion-hebergement/campagnes_admissions/liste/'.$etat, ['liste' => 'admission', ...$query])['props'];
         $rangs = fn (array $props) => collect($props['classement']['lignes']['data'])->map(fn ($l) => [$l['id'], $l['rang']])->all();
 
         // Les deux dossiers sont validés depuis la liste provisoire : ils rejoignent la liste validée en commission.
@@ -624,46 +634,94 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
         // Approbation : toute la liste passe dans la liste définitive, avec ses rangs ; l'état du dossier ne change pas.
         $this->post($url)->assertRedirect(route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives']));
-        $this->assertSame([], $liste('validees')['classement']['lignes']['data']);
+        $validees = $liste('validees')['classement'];
+        $this->assertSame([], $validees['lignes']['data']);
+        // Onglet vide après approbation : la liste est signalée comme déjà approuvée pour la campagne.
+        $this->assertSame(['validees' => 2, 'attente' => 0], $validees['approuvees']);
         $definitives = $liste('definitives');
         $this->assertSame(['definitives', 'definitive'], [$definitives['etat'], $definitives['classement']['type']]);
-        // Liste unique (admissions et réadmissions), sans onglets.
-        $this->assertSame(['toutes', []], [$definitives['classement']['liste'], $definitives['classement']['onglets']]);
+        $this->assertNull($definitives['classement']['approuvees']);
+        // Listes définitives : onglets « Demandes validées » (par défaut) et « File d'attente », selon la liste approuvée.
+        $this->assertSame(['validees', ['validees', 'attente']], [$definitives['classement']['liste'], $definitives['classement']['onglets']]);
         $this->assertSame([['other', 1], ['student', 2]], $rangs($definitives));
+        $this->assertSame(['validees' => 2, 'attente' => 0], array_intersect_key($definitives['classement']['compteurs'], ['validees' => 0, 'attente' => 0]));
+        $this->assertSame([], $liste('definitives', ['liste' => 'attente'])['classement']['lignes']['data'] ?? null);
         $this->assertSame(['validees' => 0, 'definitives' => 2], array_intersect_key($definitives['stats'], ['validees' => 0, 'definitives' => 0]));
-        // Liste définitive : aucune action, ni approbation, ni téléchargement.
+        // Listes définitives : aucune action ni approbation ; téléchargement Excel ou PDF de l'onglet ouvert.
         $this->assertNull($definitives['classement']['lignes']['data'][0]['decision']);
+        $this->assertNull($definitives['classement']['lignes']['data'][0]['commission']);
+        // Listes définitives : pas d'icône d'état des pièces du dossier.
+        $this->assertNull($definitives['classement']['lignes']['data'][0]['documents']);
         $this->assertNull($definitives['classement']['approbation']);
+        // Liste pas encore publiée : bouton « Publier », pas de téléchargement (refusé côté serveur).
+        $publier = route('admin.hebergement.campagnes_admission.liste_definitive_publier', ['liste' => 'validees', 'volet' => 'toutes']);
+        $this->assertSame(['publiee' => false, 'date' => null, 'url' => $publier, 'nombre' => 2], $definitives['classement']['publication']);
         $this->assertNull($definitives['classement']['exports']);
+        $this->get(route('admin.hebergement.campagnes_admission.liste_definitive_export', ['liste' => 'validees', 'volet' => 'toutes', 'format' => 'excel']))
+            ->assertRedirect()->assertSessionHas('error');
+        // File d'attente vide : rien à publier.
+        $this->post(route('admin.hebergement.campagnes_admission.liste_definitive_publier', ['liste' => 'attente', 'volet' => 'toutes']))->assertSessionHasErrors('publication');
+        // Publication : le téléchargement apparaît, le bouton « Publier » disparaît.
+        $this->post($publier)->assertRedirect(route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives']))->assertSessionHasNoErrors();
+        // Une publication par volet ayant des demandes approuvées (ici les admissions seules).
+        $this->assertSame(['admission'], DB::table('publication_liste_definitive')->where('liste', 'validees')->pluck('volet')->all());
+        $definitives = $liste('definitives');
+        $this->assertTrue($definitives['classement']['publication']['publiee']);
+        $this->assertNotNull($definitives['classement']['publication']['date']);
+        $this->assertNull($definitives['classement']['publication']['url']);
+        $this->post($publier)->assertSessionHasErrors('publication');
+        $this->assertStringEndsWith('/liste-definitive/validees/toutes/excel', $definitives['classement']['exports']['excel']);
+        $this->assertStringContainsString('liste-definitive-validees-toutes', (string) $this->get($definitives['classement']['exports']['excel'])->assertOk()->headers->get('content-disposition'));
+        $this->get($definitives['classement']['exports']['pdf'])->assertOk()->assertHeader('content-type', 'application/pdf');
+        // File d'attente vide, donc jamais publiée : pas de téléchargement.
+        $this->get(route('admin.hebergement.campagnes_admission.liste_definitive_export', ['liste' => 'attente', 'volet' => 'admission', 'format' => 'excel']))->assertRedirect();
         $demande = DB::table('demande')->where('etudiant_id', 'other')->first();
-        $this->assertSame(['eligible', 'limite'], [$demande->etat_dossier, $demande->approbation_commission_par]);
+        $this->assertSame(['eligible', 'limite', 'validees'], [$demande->etat_dossier, $demande->approbation_commission_par, $demande->liste_approbation_commission]);
         $this->assertNotNull($demande->date_approbation_commission);
 
         // Liste validée vide : rien à approuver.
         $this->post($url)->assertSessionHasErrors('approbation');
 
-        // Dossier rejeté, réexaminé puis revalidé : il revient dans la liste validée et doit être approuvé à nouveau.
+        // Dossier rejeté puis réexaminé : il revient dans la liste provisoire, désormais clôturée (liste des demandes
+        // validées approuvée) : il ne peut plus y être validé ni mis en attente, seulement rejeté.
         $this->travel(1)->minutes();
         $transition = route('admin.dossiers.transition', $demande->id_demande);
         $this->post($transition, ['etat' => 'refuse', 'motif' => 'Erreur de saisie.'])->assertRedirect();
         $this->post($transition, ['etat' => 'soumis', 'motif' => 'Réexamen.'])->assertRedirect();
-        $this->post($transition, ['etat' => 'eligible'])->assertRedirect();
-        $this->assertSame([['other', 1]], $rangs($liste('validees')));
-        $this->assertSame([['student', 2]], $rangs($liste('definitives')));
+        $ligne = $liste('recevables')['classement']['lignes']['data'][0];
+        $this->assertSame(['other', false, null, true], [$ligne['id'], $ligne['decision']['valider'], $ligne['decision']['attente'], $ligne['decision']['rejeter']]);
+        // Fiche du dossier : « Recevable » n'est plus proposé.
+        $this->assertNotContains('eligible', array_column($this->page('show', ['id' => 'other'], '/admin/gestion-hebergement/campagnes_admissions/other')['props']['suivi']['actions'], 'etat'));
+        $this->post($transition, ['etat' => 'eligible'])->assertSessionHasErrors('etat');
+        $this->post(route('admin.hebergement.campagnes_admission.mettre_en_attente', $demande->id_demande))->assertSessionHasErrors('attente');
+        $this->assertSame('soumis', DB::table('demande')->where('etudiant_id', 'other')->value('etat_dossier'));
+        $this->assertSame([], $liste('validees')['classement']['lignes']['data']);
+        $this->assertSame([['student', 1]], $rangs($liste('definitives')));
+        $this->assertTrue($liste('definitives')['classement']['publication']['publiee']);
 
-        // Sans le droit de valider les admissions : pas de bouton « Approuver », action refusée.
+        // Sans le droit de valider les admissions : pas de bouton « Approuver » ni « Publier », actions refusées.
         $this->agentLimite(['hebergement.admissions.personal']);
         $this->assertNull($liste('validees')['classement']['approbation']);
         $this->post($url)->assertForbidden();
-        // L'ancienne approbation (antérieure à la revalidation) reste ignorée.
+        $this->post($publier)->assertForbidden();
+        // L'ancienne approbation (antérieure au rejet) reste ignorée.
         $this->assertSame($demande->date_approbation_commission, DB::table('demande')->where('etudiant_id', 'other')->value('date_approbation_commission'));
-        $this->assertSame([['other', 1]], $rangs($liste('validees')));
+
+        // Approbation postérieure à la publication : la liste doit être publiée à nouveau avant d'être téléchargée.
+        $this->agentLimite(['hebergement.admissions.personal', 'hebergement.admissions.validate']);
+        $this->travel(1)->minutes();
+        DB::table('demande')->where('etudiant_id', 'student')->update(['date_approbation_commission' => now()]);
+        $definitives = $liste('definitives')['classement'];
+        $this->assertSame([false, $publier, 1], [$definitives['publication']['publiee'], $definitives['publication']['url'], $definitives['publication']['nombre']]);
+        $this->assertNull($definitives['exports']);
+        $this->post($publier)->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertNotNull($liste('definitives')['classement']['exports']);
     }
 
     public function test_mise_en_attente_par_la_commission(): void
     {
         $this->agentEligibilite(['hebergement.admissions.validate']);
-        foreach (['2026_11_17_000001_add_ville_bac_to_demande.php', '2026_11_20_000001_add_approbation_commission_to_demande.php', '2026_11_20_000002_add_attente_commission_to_demande.php'] as $migration) {
+        foreach (['2026_11_17_000001_add_ville_bac_to_demande.php', '2026_11_20_000001_add_approbation_commission_to_demande.php', '2026_11_20_000002_add_attente_commission_to_demande.php', '2026_11_20_000003_add_liste_approbation_commission_to_demande.php', '2026_11_20_000004_create_publication_liste_definitive_table.php'] as $migration) {
             (require database_path('migrations/'.$migration))->up();
         }
         $this->dossier('other');
@@ -679,14 +737,14 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $attente = route('admin.hebergement.campagnes_admission.mettre_en_attente', $idOther);
         $this->assertSame([true, $attente, true], [$lignes['other']['decision']['valider'], $lignes['other']['decision']['attente'], $lignes['other']['decision']['rejeter']]);
 
-        // Mise en attente (sans motif) : la demande passe dans la décision de la commission, avec son rang ; l'état du
+        // Mise en attente (sans motif) : la demande passe dans la décision de la commission, classée dans son onglet ; l'état du
         // dossier ne change pas.
         $this->post($attente)->assertRedirect()->assertSessionHasNoErrors();
         $demande = DB::table('demande')->where('id_demande', $idOther)->first();
         $this->assertSame(['soumis', 'limite'], [$demande->etat_dossier, $demande->attente_commission_par]);
         $this->assertNotNull($demande->date_attente_commission);
         $recevables = $liste('recevables');
-        $this->assertSame([['student', 2, null]], $decisions($recevables));
+        $this->assertSame([['student', 1, null]], $decisions($recevables));
         $this->assertSame(['recevables' => 1, 'validees' => 1], array_intersect_key($recevables['stats'], ['recevables' => 0, 'validees' => 0]));
         // Décision de la commission : onglets « Demandes validées » (par défaut) puis « File d'attente ».
         $validees = $liste('validees')['classement'];
@@ -705,9 +763,9 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame(0, $validees['approbation']['nombre']);
         $this->post($attente)->assertSessionHasErrors('attente');
 
-        // L'autre demande est validée : chaque onglet garde ses demandes, avec leur rang.
+        // L'autre demande est validée : chaque onglet garde ses demandes, classées à partir de 1 dans chaque onglet.
         $this->post($lignes['student']['decision']['url'], ['etat' => 'eligible'])->assertRedirect();
-        $this->assertSame([['student', 2, 'validee']], $decisions($liste('validees')));
+        $this->assertSame([['student', 1, 'validee']], $decisions($liste('validees')));
         $this->assertSame([['other', 1, 'attente']], $decisions($liste('validees', ['liste' => 'attente'])));
         $this->assertSame(['validees' => 1, 'attente' => 1], array_intersect_key($liste('validees')['classement']['compteurs'], ['validees' => 0, 'attente' => 0]));
 
@@ -715,36 +773,48 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->post(route('admin.hebergement.campagnes_admission.liste_validee_approuver', ['volet' => 'toutes']))->assertRedirect();
         $this->assertSame([], $liste('validees')['classement']['lignes']['data']);
         $this->assertSame([['other', 1, 'attente']], $decisions($liste('validees', ['liste' => 'attente'])));
-        $this->assertSame([['student', 2, null]], $decisions($liste('definitives')));
+        $this->assertSame([['student', 1, null]], $decisions($liste('definitives')));
         $this->assertNull(DB::table('demande')->where('id_demande', $idOther)->value('date_approbation_commission'));
 
-        // Rejet d'une demande en attente puis réexamen : elle revient dans la liste provisoire.
+        // Validation depuis la file d'attente (toujours permise après l'approbation de la liste des demandes validées) :
+        // la demande passe dans « Demandes validées ».
         $this->travel(1)->minutes();
         $transition = route('admin.dossiers.transition', $idOther);
-        $this->post($transition, ['etat' => 'refuse', 'motif' => 'Pièce non conforme.'])->assertRedirect();
-        $this->assertSame([], $liste('validees', ['liste' => 'attente'])['classement']['lignes']['data']);
-        $this->post($transition, ['etat' => 'soumis', 'motif' => 'Réexamen.'])->assertRedirect();
-        $this->assertSame([['other', 1, null]], $decisions($liste('recevables')));
-
-        // Validation depuis la décision de la commission d'une demande remise en attente.
-        $this->travel(1)->minutes();
-        $this->post($attente)->assertRedirect()->assertSessionHasNoErrors();
-        $this->post($transition, ['etat' => 'eligible'])->assertRedirect();
+        $this->post($transition, ['etat' => 'eligible'])->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame([['other', 1, 'validee']], $decisions($liste('validees')));
 
-        // Approbation de la file d'attente : la demande est validée (« Recevable ») puis passe dans la liste définitive.
-        $this->travel(1)->minutes();
-        $this->post($transition, ['etat' => 'refuse', 'motif' => 'Doublon.'])->assertRedirect();
-        $this->post($transition, ['etat' => 'soumis', 'motif' => 'Réexamen.'])->assertRedirect();
+        // Approbation de la file d'attente : la demande (remise en attente depuis « Demandes validées ») est validée
+        // (« Recevable ») puis passe dans la liste définitive.
         $this->travel(1)->minutes();
         $this->post($attente)->assertRedirect()->assertSessionHasNoErrors();
         $this->assertSame([['other', 1, 'attente']], $decisions($liste('validees', ['liste' => 'attente'])));
-        $this->post($approuverAttente)->assertRedirect(route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives']));
-        $this->assertSame('eligible', DB::table('demande')->where('id_demande', $idOther)->value('etat_dossier'));
-        $this->assertSame([], $liste('validees', ['liste' => 'attente'])['classement']['lignes']['data']);
-        $this->assertSame([['other', 1, null], ['student', 2, null]], $decisions($liste('definitives')));
+        $this->post($approuverAttente)->assertRedirect(route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives', 'liste' => 'attente']));
+        $this->assertSame(['eligible', 'attente'], [DB::table('demande')->where('id_demande', $idOther)->value('etat_dossier'), DB::table('demande')->where('id_demande', $idOther)->value('liste_approbation_commission')]);
+        $fileVide = $liste('validees', ['liste' => 'attente'])['classement'];
+        $this->assertSame([], $fileVide['lignes']['data']);
+        $this->assertSame(1, $fileVide['approuvees']['attente']);
+        // Listes définitives : chaque demande figure dans l'onglet de la liste approuvée.
+        $this->assertSame([['student', 1, null]], $decisions($liste('definitives')));
+        $fileDefinitive = $liste('definitives', ['liste' => 'attente'])['classement'];
+        $this->assertSame([['other', 1, null]], $decisions(['classement' => $fileDefinitive]));
+        // File d'attente des listes définitives : téléchargeable une fois publiée.
+        $this->assertNull($fileDefinitive['exports']);
+        $this->post($fileDefinitive['publication']['url'])->assertRedirect(route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives', 'liste' => 'attente']));
+        $this->assertStringEndsWith('/liste-definitive/attente/toutes/pdf', $liste('definitives', ['liste' => 'attente'])['classement']['exports']['pdf']);
         // File d'attente vide : rien à approuver.
         $this->post($approuverAttente)->assertSessionHasErrors('approbation');
+
+        // Rejet puis réexamen après l'approbation de la liste des demandes validées : la demande revient dans la liste
+        // provisoire, clôturée : elle ne peut plus y être validée ni mise en attente, seulement rejetée.
+        $this->travel(1)->minutes();
+        $this->post($transition, ['etat' => 'refuse', 'motif' => 'Pièce non conforme.'])->assertRedirect();
+        $this->assertSame([], $liste('definitives', ['liste' => 'attente'])['classement']['lignes']['data']);
+        $this->post($transition, ['etat' => 'soumis', 'motif' => 'Réexamen.'])->assertRedirect();
+        $this->assertSame([['other', 1, null]], $decisions($liste('recevables')));
+        $ligne = $liste('recevables')['classement']['lignes']['data'][0];
+        $this->assertSame([false, null, true], [$ligne['decision']['valider'], $ligne['decision']['attente'], $ligne['decision']['rejeter']]);
+        $this->post($attente)->assertSessionHasErrors('attente');
+        $this->post($transition, ['etat' => 'eligible'])->assertSessionHasErrors('etat');
 
         // Sans le droit de valider les admissions : pas de mise en attente ni d'approbation de la file d'attente.
         DB::table('demande')->where('id_demande', $idOther)->update(['etat_dossier' => 'soumis', 'date_attente_commission' => null, 'date_approbation_commission' => null]);

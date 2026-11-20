@@ -55,6 +55,8 @@ return [
         'admin.hebergement.campagnes_admission.edit_campagne' => 'hebergement.admissions.update',
         'admin.hebergement.campagnes_admission.lever_refus_automatiques' => 'hebergement.admissions.validate',
         'admin.hebergement.campagnes_admission.liste_provisoire_export' => 'hebergement.admissions.view',
+        'admin.hebergement.campagnes_admission.liste_definitive_export' => 'hebergement.admissions.view',
+        'admin.hebergement.campagnes_admission.liste_definitive_publier' => 'hebergement.admissions.validate',
         'admin.hebergement.campagnes_admission.liste_validee_approuver' => 'hebergement.admissions.validate',
         'admin.hebergement.campagnes_admission.mettre_en_attente' => 'hebergement.admissions.validate',
         'admin.hebergement.campagnes_admission.file_attente_approuver' => 'hebergement.admissions.validate',

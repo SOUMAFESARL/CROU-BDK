@@ -52,8 +52,8 @@ class CampagnesAdmissionController extends Controller
      * conformes), demandes irrecevables (au moins un critère non conforme) et demandes refusées (refusées ou annulées
      * par l'administration pendant la validation), selon `RecevabiliteDemandes` ; s'y ajoutent la « Décision de la
      * commission » (onglet à part, filtre `validees` : demandes recevables validées — dossier « Recevable » — ou mises en
-     * attente depuis une liste provisoire) et la « Liste définitive » (onglet à part : demandes validées approuvées en
-     * commission).
+     * attente depuis une liste provisoire) et les « Listes définitives » (onglet à part : demandes approuvées en
+     * commission, depuis les demandes validées ou la file d'attente).
      * Les étudiants logés et les dossiers en vérification sont suivis sur la page « Résidents & contrats ».
      */
     private const FILTRES_ADMISSION = ['toutes', 'recevables', 'rejetees', 'refusees', 'validees', 'definitives'];
@@ -413,11 +413,12 @@ class CampagnesAdmissionController extends Controller
      * recherche (`q`) filtre la liste ouverte sans changer les rangs. L'âge n'est envoyé qu'avec les données personnelles.
      *
      * `$type` : `provisoire` (listes provisoires des demandes recevables), `validee` (« Décision de la commission ») ou
-     * `definitive` (« Liste définitive ») — la décision de la commission et la liste définitive mêlent les volets ouverts
-     * (admissions puis réadmissions, chacune avec son rang), filtrables par type de demande (`$typeDemande`,
-     * `?type=admission|readmission`) ; la décision de la commission a deux onglets (`?liste=validees|attente`) : les
-     * demandes validées, puis la file d'attente ; la liste définitive est une liste unique (`liste` = `toutes`). Le rang est calculé sur les demandes recevables, validées, en attente et approuvées
-     * ensemble : décider ou approuver ne renumérote pas les autres.
+     * `definitive` (« Listes définitives ») — la décision de la commission et les listes définitives mêlent les volets
+     * ouverts (admissions puis réadmissions, chacune avec son rang), filtrables par type de demande (`$typeDemande`,
+     * `?type=admission|readmission`) ; toutes deux ont deux onglets (`?liste=validees|attente`) : les demandes validées,
+     * puis la file d'attente (sur les listes définitives : demandes approuvées depuis l'une ou l'autre, téléchargeables
+     * en Excel ou PDF). Chaque onglet a son propre classement (rangs à partir de 1 par volet) : décider ou approuver
+     * une demande renumérote les onglets qu'elle quitte et qu'elle rejoint.
      * Sur une liste provisoire, chaque ligne porte les trois décisions de la commission : « Valider » (dossier
      * « Recevable », `DossierWorkflow`), « Mettre en attente » (l'état du dossier ne change pas) et « Rejeter » (« Refusé »,
      * motif obligatoire), avec le droit de changer l'état du dossier ; sur la décision de la commission, une demande en
@@ -431,31 +432,28 @@ class CampagnesAdmissionController extends Controller
      */
     private function classementProvisoire(Request $request, string $type, EloquentCollection $population, array $classement, ?Campagne $campagne, string $recherche, string $typeDemande, bool $personnel, bool $documents, \Closure $url, AdminAccess $access, $admin): array
     {
-        [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $campagne);
-        $listes = $listes[['provisoire' => 'provisoires', 'validee' => 'validees', 'definitive' => 'definitives'][$type]];
+        [$campagne, $volets, $partage] = $this->listesProvisoires($population, $classement, $campagne);
+        $listes = $partage[['provisoire' => 'provisoires', 'validee' => 'validees', 'definitive' => 'definitives'][$type]];
         $provisoire = $type === 'provisoire';
         // Décision de la commission et liste définitive : admissions et réadmissions dans une même liste, filtrable par
         // type de demande.
         $unique = $type !== 'provisoire';
         // Onglets : sur les demandes recevables, une liste provisoire par volet ouvert par la campagne (admission seule →
-        // pas de réadmission) ; sur la décision de la commission, les demandes validées puis la file d'attente ; aucun
-        // sur la liste définitive.
-        $onglets = match ($type) {
-            'provisoire' => ['demandes', ...$volets],
-            'validee' => ['validees', 'attente'],
-            default => [],
-        };
+        // pas de réadmission) ; sur la décision de la commission et les listes définitives, les demandes validées puis la
+        // file d'attente.
+        $onglets = $provisoire ? ['demandes', ...$volets] : ['validees', 'attente'];
         $liste = $onglets === [] ? 'toutes' : (in_array($request->query('liste'), $onglets, true) ? $request->query('liste') : $onglets[0]);
         $voletFiltre = $unique && in_array($typeDemande, $volets, true) ? $typeDemande : null;
-        // Décision de la commission : l'onglet ouvert retient les demandes validées ou la file d'attente.
-        $decisionFiltre = $type === 'validee' ? ($liste === 'attente' ? 'attente' : 'validee') : null;
+        // Décision de la commission / listes définitives : l'onglet ouvert retient les demandes validées ou la file
+        // d'attente (listes définitives : liste d'origine de l'approbation).
+        $decisionFiltre = $unique ? ($liste === 'attente' ? 'attente' : 'validee') : null;
         // Lignes de la liste ouverte, chacune avec son volet (rang propre à chaque volet).
         $lignesVolets = collect($unique ? ($voletFiltre ? [$voletFiltre] : $volets) : ($liste === 'demandes' ? [] : [$liste]))
             ->flatMap(fn (string $volet) => collect($listes[$volet] ?? [])->map(fn (array $ligne) => $ligne + ['volet' => $volet]))
             ->values();
         $source = $decisionFiltre ? $lignesVolets->where('commission', $decisionFiltre)->values() : $lignesVolets;
         $etat = ['provisoire' => 'recevables', 'validee' => 'validees', 'definitive' => 'definitives'][$type];
-        // Changer d'onglet de la décision de la commission conserve le type de demande filtré.
+        // Changer d'onglet de la décision de la commission ou des listes définitives conserve le type de demande filtré.
         $lien = fn (string $onglet) => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
             ? route('admin.hebergement.campagnes_admission.admission', ['etat' => $etat] + ($onglet === 'demandes' ? [] : ['liste' => $onglet]) + ($voletFiltre ? ['type' => $voletFiltre] : []))
             : null;
@@ -469,16 +467,40 @@ class CampagnesAdmissionController extends Controller
                 'nombre' => $lignesVolets->where('commission', $decisionFiltre)->count(),
             ]
             : null;
-        // Téléchargement de la liste provisoire ouverte (Excel, PDF imprimable).
-        $exports = $provisoire && $liste !== 'demandes' && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_provisoire_export')
-            ? collect(['excel', 'pdf'])->mapWithKeys(fn ($format) => [$format => route('admin.hebergement.campagnes_admission.liste_provisoire_export', ['volet' => $liste, 'format' => $format])])->all()
-            : null;
+        // Listes définitives : publication de l'onglet ouvert (type de demande filtré) ; tant qu'elle n'est pas publiée,
+        // elle ne se télécharge pas.
+        $etatPublication = $type === 'definitive' ? $this->etatPublication($campagne, $partage['definitives'], $voletFiltre ? [$voletFiltre] : $volets, $liste) : null;
+        $publication = $etatPublication === null ? null : [
+            'publiee' => $etatPublication['publiee'],
+            'date' => $etatPublication['date'],
+            'url' => ! $etatPublication['publiee'] && $volets !== [] && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_definitive_publier')
+                ? route('admin.hebergement.campagnes_admission.liste_definitive_publier', ['liste' => $liste, 'volet' => $voletFiltre ?? 'toutes'])
+                : null,
+            'nombre' => $source->count(),
+        ];
+        // Téléchargement de la liste provisoire ou de la liste définitive ouverte, une fois publiée (Excel, PDF
+        // imprimable) ; liste définitive : type de demande filtré.
+        $exports = match (true) {
+            $provisoire && $liste !== 'demandes' && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_provisoire_export') => collect(['excel', 'pdf'])
+                ->mapWithKeys(fn ($format) => [$format => route('admin.hebergement.campagnes_admission.liste_provisoire_export', ['volet' => $liste, 'format' => $format])])->all(),
+            $type === 'definitive' && $etatPublication['publiee'] && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_definitive_export') => collect(['excel', 'pdf'])
+                ->mapWithKeys(fn ($format) => [$format => route('admin.hebergement.campagnes_admission.liste_definitive_export', ['liste' => $liste, 'volet' => $voletFiltre ?? 'toutes', 'format' => $format])])->all(),
+            default => null,
+        };
+        // Décision de la commission : demandes déjà approuvées pour la campagne depuis chaque onglet (type de demande
+        // filtré) ; un onglet vide dont la liste a déjà été approuvée l'indique au lieu de « Aucune demande ».
+        $approuvees = $type === 'validee'
+            ? collect($voletFiltre ? [$voletFiltre] : $volets)->flatMap(fn (string $volet) => $partage['definitives'][$volet] ?? [])
+            : collect();
         // Validation / rejet (même action que le suivi du dossier) depuis la liste provisoire et pour une demande en
         // attente, rejet seul pour une demande validée, aucune action sur la liste définitive ; mise en attente depuis la
         // liste provisoire et depuis les demandes validées (le dossier revient alors en « Soumis »).
         $peutDecider = $type !== 'definitive' && $access->allows($admin, 'admin.dossiers.transition');
         $peutMettreEnAttente = ($provisoire || ($type === 'validee' && $liste === 'validees'))
             && $access->allows($admin, 'admin.hebergement.campagnes_admission.mettre_en_attente');
+        // Liste provisoire clôturée : la liste des demandes validées du volet a été approuvée en commission ; ses
+        // demandes ne peuvent plus être validées ni mises en attente (seulement rejetées).
+        $clotures = $provisoire ? app(\App\Http\Services\Eligibilite\VerrouListeProvisoire::class)->voletsClotures($campagne ? (string) $campagne->getKey() : null) : [];
 
         $lignes = null;
         if ($liste !== 'demandes') {
@@ -489,22 +511,29 @@ class CampagnesAdmissionController extends Controller
             ))->values();
             $page = max(1, (int) $request->query('page', 1));
             $courantes = $filtrees->forPage($page, 10)->values();
-            // État des pièces du dossier (envoyé seulement avec le droit de voir les documents).
-            $pieces = $documents ? $this->etatPieces($courantes->map(fn (array $ligne) => $ligne['etudiant']), $campagne) : [];
+            // État des pièces du dossier (envoyé seulement avec le droit de voir les documents ; pas sur les listes
+            // définitives, déjà approuvées en commission).
+            $pieces = $documents && $type !== 'definitive' ? $this->etatPieces($courantes->map(fn (array $ligne) => $ligne['etudiant']), $campagne) : [];
+            // Filières des demandes de la page (colonne « Filière » des demandes validées), en une requête.
+            $codesFilieres = $courantes->map(fn (array $ligne) => $ligne['etudiant']->derniereDemande?->filiere_code)->filter(fn ($code) => filled($code))->unique()->values();
+            $filieres = $codesFilieres->isEmpty() ? collect() : \App\Models\Filiere::query()->whereKey($codesFilieres->all())->pluck('name', 'id_filiere');
+            // Civilité des étudiants de la page (colonne « Civilité » des demandes validées).
+            EloquentCollection::make($courantes->map(fn (array $ligne) => $ligne['etudiant'])->all())->loadMissing('civilite');
             $lignes = (new LengthAwarePaginator($courantes, $filtrees->count(), 10, $page, [
                 'path' => $request->url(),
                 'query' => $request->query(),
-            ]))->through(function (array $ligne) use ($personnel, $url, $pieces, $peutDecider, $peutMettreEnAttente) {
+            ]))->through(function (array $ligne) use ($type, $personnel, $url, $pieces, $filieres, $peutDecider, $peutMettreEnAttente, $clotures) {
                 $etudiant = $ligne['etudiant'];
                 $demande = $etudiant->derniereDemande;
-                $commission = $ligne['commission'] ?? null;
-                $proposees = $commission === 'validee' ? ['refuse'] : ['eligible', 'refuse'];
+                // Listes définitives : `commission` est la liste d'origine de l'approbation (pas une décision en cours).
+                $commission = $type === 'validee' ? ($ligne['commission'] ?? null) : null;
+                $proposees = $commission === 'validee' || in_array($ligne['volet'], $clotures, true) ? ['refuse'] : ['eligible', 'refuse'];
                 // Un refus ne se lève pas depuis la liste : il passe par le réexamen sur la fiche du dossier.
                 $decisions = $peutDecider && $demande && $demande->etat_dossier !== 'refuse'
                     ? array_values(array_intersect($proposees, DossierWorkflow::NEXT[$demande->etat_dossier] ?? []))
                     : [];
                 // Mise en attente : demande recevable encore à décider, ou demande validée (retour en « Soumis » permis).
-                $attente = $peutMettreEnAttente && $demande && ($commission === 'validee'
+                $attente = $peutMettreEnAttente && $demande && ! in_array($ligne['volet'], $clotures, true) && ($commission === 'validee'
                     ? in_array('soumis', DossierWorkflow::NEXT[$demande->etat_dossier] ?? [], true)
                     : in_array($demande->etat_dossier, \App\Http\Services\Eligibilite\RecevabiliteDemandes::ETATS_ATTENTE, true))
                     ? route('admin.hebergement.campagnes_admission.mettre_en_attente', $demande)
@@ -516,6 +545,11 @@ class CampagnesAdmissionController extends Controller
                     'rang' => $ligne['rang'],
                     'name' => $etudiant->name,
                     'numero_demande' => $demande?->numero_demande,
+                    'matricule' => filled($etudiant->matricule) ? (string) $etudiant->matricule : null,
+                    'civilite' => $etudiant->civilite?->name,
+                    // Date de naissance : envoyée seulement avec le droit de voir les données personnelles (comme l'âge).
+                    'date_naissance' => $personnel ? $etudiant->date_naissance?->toDateString() : null,
+                    'filiere' => filled($demande?->filiere_code) ? ($filieres[$demande->filiere_code] ?? null) : null,
                     'niveau' => $demande?->niveauEtudiantActuel?->name,
                     'etat_dossier' => $demande?->etat_dossier,
                     'age' => $personnel && $etudiant->date_naissance ? Carbon::parse($etudiant->date_naissance)->age : null,
@@ -547,9 +581,9 @@ class CampagnesAdmissionController extends Controller
             'liste' => $liste,
             'type' => $type,
             'onglets' => $onglets,
-            // Décision de la commission / liste définitive : type de demande filtré (null : admissions et réadmissions).
+            // Décision de la commission / listes définitives : type de demande filtré (null : admissions et réadmissions).
             'volet' => $voletFiltre,
-            // Décision de la commission : décision de l'onglet ouvert (`validee` ou `attente`) ; null ailleurs.
+            // Décision de la commission / listes définitives : onglet ouvert (`validee` ou `attente`) ; null ailleurs.
             'decision' => $decisionFiltre,
             'campagne' => $campagne?->annee_campagne,
             'compteurs' => [
@@ -557,16 +591,95 @@ class CampagnesAdmissionController extends Controller
                 'admission' => count($listes['admission']),
                 'readmission' => count($listes['readmission']),
                 'toutes' => count($listes['admission']) + count($listes['readmission']),
-                // Onglets de la décision de la commission : demandes validées / file d'attente (type de demande filtré).
+                // Onglets de la décision de la commission et des listes définitives : demandes validées / file d'attente
+                // (type de demande filtré).
                 'validees' => $lignesVolets->where('commission', 'validee')->count(),
                 'attente' => $lignesVolets->where('commission', 'attente')->count(),
             ],
+            // Décision de la commission : demandes déjà approuvées pour la campagne depuis chaque onglet (type de demande
+            // filtré) ; null ailleurs.
+            'approuvees' => $type === 'validee' ? [
+                'validees' => $approuvees->where('commission', 'validee')->count(),
+                'attente' => $approuvees->where('commission', 'attente')->count(),
+            ] : null,
             'lignes' => $lignes,
             'colonnes' => ['age' => $personnel],
             'urls' => collect($onglets)->mapWithKeys(fn ($onglet) => [$onglet => $lien($onglet)]),
             'exports' => $exports,
             'approbation' => $approbation,
+            // Listes définitives : publication de l'onglet ouvert (`url` : bouton « Publier », null une fois publiée ou
+            // sans droit) ; null ailleurs.
+            'publication' => $publication,
         ];
+    }
+
+    /**
+     * Publication d'un onglet des listes définitives (`$liste` : `validees` | `attente`) pour les volets donnés : un
+     * volet est publié quand une publication enregistrée (`publication_liste_definitive`) est postérieure à la dernière
+     * approbation de ses demandes ; un volet sans demande approuvée dans l'onglet ne compte pas. La liste est publiée
+     * quand elle a au moins une demande et que tous ses volets sont publiés.
+     *
+     * @param  array{admission: array, readmission: array}  $definitives  lignes des listes définitives par volet
+     * @param  list<string>  $volets
+     * @return array{publiee: bool, date: ?string, volets: list<string>, a_publier: list<string>}
+     */
+    private function etatPublication(?Campagne $campagne, array $definitives, array $volets, string $liste): array
+    {
+        $origine = $liste === 'attente' ? 'attente' : 'validee';
+        $lignes = collect($volets)->mapWithKeys(fn (string $volet) => [$volet => collect($definitives[$volet] ?? [])->where('commission', $origine)])
+            ->filter(fn ($lignes) => $lignes->isNotEmpty());
+        $avecDemandes = $lignes->keys()->all();
+        if (! $campagne || $avecDemandes === [] || ! Schema::hasTable('publication_liste_definitive')) {
+            return ['publiee' => false, 'date' => null, 'volets' => $avecDemandes, 'a_publier' => $avecDemandes];
+        }
+        $publications = \Illuminate\Support\Facades\DB::table('publication_liste_definitive')
+            ->where('campagne_id', (string) $campagne->getKey())->where('liste', $liste)->whereIn('volet', $avecDemandes)
+            ->pluck('date_publication', 'volet');
+        $aPublier = $lignes->filter(function ($lignesVolet, string $volet) use ($publications) {
+            $publiee = $publications[$volet] ?? null;
+            $derniere = $lignesVolet->map(fn (array $ligne) => $ligne['etudiant']->derniereDemande?->date_approbation_commission)->filter()->max();
+
+            return ! $publiee || ($derniere && Carbon::parse($derniere)->gt(Carbon::parse($publiee)));
+        })->keys()->all();
+        $date = $aPublier === [] ? collect($avecDemandes)->map(fn (string $volet) => Carbon::parse($publications[$volet]))->max()?->format('Y-m-d H:i') : null;
+
+        return ['publiee' => $aPublier === [], 'date' => $date, 'volets' => $avecDemandes, 'a_publier' => $aPublier];
+    }
+
+    /**
+     * Publication d'un onglet des listes définitives (`liste` : « Demandes validées » ou « File d'attente » ; `volet` :
+     * `toutes` — les volets ouverts — ou un type de demande ; classement recalculé côté serveur) : chaque volet qui a
+     * des demandes approuvées et n'est pas encore publié (ou a reçu une approbation depuis sa publication) est publié ;
+     * la liste peut alors être téléchargée. La notification des étudiants sera ajoutée ici.
+     */
+    public function publierListeDefinitive(Request $request, string $liste, string $volet)
+    {
+        if (! Schema::hasTable('publication_liste_definitive')) {
+            throw ValidationException::withMessages(['publication' => 'La publication n’est pas encore disponible : la base de données doit être mise à jour.']);
+        }
+        $admin = $request->user('admin');
+        $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes();
+        $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
+        [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $this->campagneActive());
+        $publies = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
+        $etat = $this->etatPublication($campagne, $listes['definitives'], $publies, $liste);
+        if (! $campagne || $etat['volets'] === []) {
+            throw ValidationException::withMessages(['publication' => 'Aucune demande approuvée à publier dans cette liste.']);
+        }
+        if ($etat['publiee']) {
+            throw ValidationException::withMessages(['publication' => 'Cette liste est déjà publiée.']);
+        }
+        $table = \Illuminate\Support\Facades\DB::table('publication_liste_definitive');
+        foreach ($etat['a_publier'] as $v) {
+            $cle = ['campagne_id' => (string) $campagne->getKey(), 'liste' => $liste, 'volet' => $v];
+            $valeurs = ['date_publication' => now(), 'publiee_par' => (string) $admin?->getKey(), 'updated_at' => now()];
+            (clone $table)->where($cle)->exists()
+                ? (clone $table)->where($cle)->update($valeurs)
+                : (clone $table)->insert($cle + $valeurs + ['id' => (string) Str::uuid(), 'created_at' => now()]);
+        }
+
+        return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives'] + ($liste === 'attente' ? ['liste' => 'attente'] : []) + ($volet !== 'toutes' ? ['type' => $volet] : []))
+            ->with('success', ($liste === 'attente' ? 'File d’attente publiée' : 'Liste des demandes validées publiée').' : elle peut être téléchargée.');
     }
 
     /**
@@ -626,9 +739,11 @@ class CampagnesAdmissionController extends Controller
     /**
      * Campagne des listes provisoires (campagne active, sinon celle de la demande recevable, validée, en attente ou
      * approuvée la plus récente), volets qu'elle ouvre et demandes classées par volet (`ClassementProvisoire`) : le
-     * classement porte sur ces demandes ensemble (rangs stables), puis il est partagé entre les listes provisoires
+     * classement est partagé entre les listes provisoires
      * (demandes encore à décider), la décision de la commission (demandes validées ou en attente, chaque ligne portant sa
-     * décision : `commission` = `validee` | `attente`) et la liste définitive.
+     * décision : `commission` = `validee` | `attente`) et les listes définitives (chaque ligne portant la liste d'origine
+     * de l'approbation : `commission` = `validee` | `attente`, `validee` pour une approbation sans liste enregistrée),
+     * chaque onglet (liste et volet) étant renuméroté à partir de 1.
      *
      * @param  array{recevables: string[], validees: string[], en_attente: string[], definitives: string[]}  $classement  `RecevabiliteDemandes::classer()`
      * @return array{0: ?Campagne, 1: list<string>, 2: array<'provisoires'|'validees'|'definitives', array{admission: array, readmission: array}>}
@@ -649,15 +764,28 @@ class CampagnesAdmissionController extends Controller
             $criteres->voletsDemandes($classees->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)),
         );
         $partage = ['provisoires' => $vides, 'validees' => $vides, 'definitives' => $vides];
+        // Rang propre à chaque onglet : renumérotation à partir de 1 dans l'ordre du classement, par liste d'origine
+        // (`commission`) pour la décision de la commission et les listes définitives. L'ordre du classement ne dépend
+        // que de chaque demande : il est le même que celui d'un classement de l'onglet seul.
+        $rangs = function (\Illuminate\Support\Collection $lignes): array {
+            $compteurs = [];
+
+            return $lignes->map(function (array $ligne) use (&$compteurs) {
+                $onglet = $ligne['commission'] ?? '';
+                $compteurs[$onglet] = ($compteurs[$onglet] ?? 0) + 1;
+
+                return ['rang' => $compteurs[$onglet]] + $ligne;
+            })->values()->all();
+        };
         foreach ($listes as $volet => $lignes) {
             $lignes = collect($lignes);
             $dans = fn (array $ids) => $lignes->filter(fn (array $ligne) => in_array((string) $ligne['etudiant']->getKey(), $ids, true))->values();
-            $partage['provisoires'][$volet] = $dans($classement['recevables'])->all();
+            $partage['provisoires'][$volet] = $rangs($dans($classement['recevables']));
             // Décision de la commission : demandes validées et en attente, dans l'ordre du classement.
-            $partage['validees'][$volet] = $dans([...$classement['validees'], ...$classement['en_attente']])
-                ->map(fn (array $ligne) => $ligne + ['commission' => in_array((string) $ligne['etudiant']->getKey(), $classement['en_attente'], true) ? 'attente' : 'validee'])
-                ->all();
-            $partage['definitives'][$volet] = $dans($classement['definitives'])->all();
+            $partage['validees'][$volet] = $rangs($dans([...$classement['validees'], ...$classement['en_attente']])
+                ->map(fn (array $ligne) => $ligne + ['commission' => in_array((string) $ligne['etudiant']->getKey(), $classement['en_attente'], true) ? 'attente' : 'validee']));
+            $partage['definitives'][$volet] = $rangs($dans($classement['definitives'])
+                ->map(fn (array $ligne) => $ligne + ['commission' => $ligne['etudiant']->derniereDemande?->liste_approbation_commission === 'attente' ? 'attente' : 'validee']));
         }
 
         return [$campagne, array_keys(array_filter($criteres->volets($campagne))), $partage];
@@ -682,55 +810,174 @@ class CampagnesAdmissionController extends Controller
         }
 
         $readmission = $volet === 'readmission';
+        [$entetes, $lignes] = $this->lignesExport(collect($listes[$volet])->map(fn (array $ligne) => $ligne + ['volet' => $volet]), $volet, $personnel);
+
+        return $this->telecharger($format, [
+            'titre' => 'Liste provisoire des '.($readmission ? 'réadmissions' : 'admissions'),
+            'campagne' => $campagne->annee_campagne,
+            'entetes' => $entetes,
+            'lignes' => $lignes,
+        ], 'liste-provisoire-'.($readmission ? 'readmission' : 'admission').'-'.Str::slug((string) $campagne->annee_campagne), $readmission ? 'Réadmissions' : 'Admissions');
+    }
+
+    /**
+     * Téléchargement d'une liste définitive complète (`liste` : demandes approuvées depuis les « Demandes validées » ou la
+     * « File d'attente » ; `volet` : `toutes` — admissions puis réadmissions — ou un type de demande ; tous les rangs,
+     * sans la recherche de l'écran) : classeur Excel ou PDF à imprimer. L'âge n'y figure qu'avec le droit de voir les
+     * données personnelles.
+     */
+    public function exportListeDefinitive(Request $request, string $liste, string $volet, string $format)
+    {
+        $admin = $request->user('admin');
+        $personnel = app(AdminViewAccess::class)->allows($admin, 'admissions.personal');
+        $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes();
+        $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
+        [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $this->campagneActive());
+        $exportes = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
+        if (! $campagne || $exportes === []) {
+            return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives'])
+                ->with('error', 'Cette liste définitive n’est pas disponible pour la campagne.');
+        }
+        // Une liste définitive ne se télécharge qu'une fois publiée.
+        if (! $this->etatPublication($campagne, $listes['definitives'], $exportes, $liste)['publiee']) {
+            return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives'] + ($liste === 'attente' ? ['liste' => 'attente'] : []))
+                ->with('error', 'Cette liste définitive n’est pas encore publiée : publiez-la avant de la télécharger.');
+        }
+        $origine = $liste === 'attente' ? 'attente' : 'validee';
+        $lignes = collect($exportes)
+            ->flatMap(fn (string $v) => collect($listes['definitives'][$v])->where('commission', $origine)->map(fn (array $ligne) => $ligne + ['volet' => $v]))
+            ->values();
+        $unVolet = count($exportes) === 1 ? $exportes[0] : null;
+        // PDF des demandes validées : mêmes colonnes que l'écran (rang, matricule, nom et prénoms, filière, niveau), A4
+        // portrait ; l'Excel garde le détail complet.
+        $pdfValidees = $format === 'pdf' && $origine === 'validee';
+        [$entetes, $lignes] = $pdfValidees ? $this->lignesExportValidees($lignes, $personnel) : $this->lignesExport($lignes, $unVolet, $personnel);
+        $nomListe = $origine === 'attente' ? 'file d’attente' : 'demandes validées';
+        $type = $unVolet === null ? '' : ($unVolet === 'readmission' ? ' des réadmissions' : ' des admissions');
+
+        return $this->telecharger($format, [
+            'titre' => 'Liste définitive'.$type.' — '.$nomListe,
+            'campagne' => $campagne->annee_campagne,
+            'entetes' => $entetes,
+            'lignes' => $lignes,
+            'resume' => 'demande(s) approuvée(s) en commission',
+            'vide' => 'Aucune demande approuvée dans cette liste.',
+            'pied' => 'Liste définitive approuvée en commission : le classement ne vaut pas attribution d’une chambre.',
+        ], 'liste-definitive-'.($origine === 'attente' ? 'file-attente' : 'validees').'-'.($unVolet ?? 'toutes').'-'.Str::slug((string) $campagne->annee_campagne), $origine === 'attente' ? 'File d’attente' : 'Demandes validées', $pdfValidees ? 'portrait' : 'landscape');
+    }
+
+    /**
+     * Colonnes et lignes du PDF des demandes validées de la liste définitive, dans l'ordre du classement : rang,
+     * matricule, civilité, nom et prénoms, date de naissance (seulement avec le droit de voir les données personnelles),
+     * filière, niveau (civilités et filières chargées en une requête chacune).
+     *
+     * @param  \Illuminate\Support\Collection<int, array>  $lignes  lignes du classement
+     * @return array{0: list<string>, 1: list<list<mixed>>}
+     */
+    private function lignesExportValidees(\Illuminate\Support\Collection $lignes, bool $personnel): array
+    {
+        EloquentCollection::make($lignes->map(fn (array $ligne) => $ligne['etudiant'])->all())->loadMissing('civilite');
+        $codes = $lignes->map(fn (array $ligne) => $ligne['etudiant']->derniereDemande?->filiere_code)->filter(fn ($code) => filled($code))->unique()->values();
+        $filieres = $codes->isEmpty() ? collect() : \App\Models\Filiere::query()->whereKey($codes->all())->pluck('name', 'id_filiere');
+        $donnees = $lignes->map(function (array $ligne) use ($filieres, $personnel) {
+            $etudiant = $ligne['etudiant'];
+            $demande = $etudiant->derniereDemande;
+
+            return array_merge(
+                [$ligne['rang'], (string) $etudiant->matricule, (string) $etudiant->civilite?->name, (string) $etudiant->name],
+                $personnel ? [(string) $etudiant->date_naissance?->format('d/m/Y')] : [],
+                [
+                    filled($demande?->filiere_code) ? (string) ($filieres[$demande->filiere_code] ?? '') : '',
+                    (string) $demande?->niveauEtudiantActuel?->name,
+                ],
+            );
+        })->all();
+        $entetes = array_merge(['Rang', 'Matricule', 'Civilité', 'Nom & prénoms'], $personnel ? ['Date de naissance'] : [], ['Filière', 'Niveau']);
+
+        return [$entetes, $donnees];
+    }
+
+    /**
+     * Colonnes et lignes d'une liste téléchargée, dans l'ordre du classement. `$volet` : volet unique de la liste
+     * (colonnes propres à l'admission ou à la réadmission) ; null : admissions et réadmissions mêlées (type de demande et
+     * mérite de chaque ligne).
+     *
+     * @param  \Illuminate\Support\Collection<int, array>  $lignes  lignes du classement, chacune avec son `volet`
+     * @return array{0: list<string>, 1: list<list<mixed>>}
+     */
+    private function lignesExport(\Illuminate\Support\Collection $lignes, ?string $volet, bool $personnel): array
+    {
         $nombre = fn ($valeur) => $valeur === null ? '' : rtrim(rtrim(number_format((float) $valeur, 2, ',', ' '), '0'), ',');
+        $boursier = fn (array $ligne) => ($ligne['boursier'] ?? false) ? 'Oui' : 'Non';
+        $note = fn (array $ligne) => ($merite = $ligne['merite'] ?? null) ? $nombre($merite['valeur']).' / '.$merite['max'] : '';
         $entetes = array_merge(
-            ['Rang', 'Nom et prénoms', 'Matricule', 'N° de demande', 'Niveau'],
-            $readmission ? ['Catégorie', 'Boursier', 'Moyenne (/20)', 'Crédits validés (%)'] : ['Boursier', 'Note', '% du maximum', 'Ville du bac'],
+            ['Rang', 'Nom et prénoms', 'Matricule', 'N° de demande'],
+            $volet === null ? ['Type de demande'] : [],
+            ['Niveau'],
+            match ($volet) {
+                'readmission' => ['Catégorie', 'Boursier', 'Moyenne (/20)', 'Crédits validés (%)'],
+                'admission' => ['Boursier', 'Note', '% du maximum', 'Ville du bac'],
+                default => ['Boursier', 'Mérite', 'Ville du bac'],
+            },
             $personnel ? ['Âge'] : [],
         );
-        $lignes = collect($listes[$volet])->map(function (array $ligne) use ($readmission, $personnel, $nombre) {
+        $donnees = $lignes->map(function (array $ligne) use ($volet, $personnel, $nombre, $boursier, $note) {
             $etudiant = $ligne['etudiant'];
             $demande = $etudiant->derniereDemande;
             $merite = $ligne['merite'] ?? null;
+            $readmission = $ligne['volet'] === 'readmission';
+            $moyenne = $ligne['moyenne'] ?? null;
+            $credits = $ligne['credits'] ?? null;
 
             return array_merge(
-                [$ligne['rang'], (string) $etudiant->name, (string) $etudiant->matricule, (string) $demande?->numero_demande, (string) $demande?->niveauEtudiantActuel?->name],
-                $readmission
-                    ? [
-                        $ligne['categorie'] ? $ligne['categorie']['code'].' · '.$ligne['categorie']['libelle'] : '',
-                        ($ligne['boursier'] ?? false) ? 'Oui' : 'Non',
-                        $nombre($ligne['moyenne'] ?? null),
-                        $nombre($ligne['credits'] ?? null),
-                    ]
-                    : [
-                        ($ligne['boursier'] ?? false) ? 'Oui' : 'Non',
-                        $merite ? $nombre($merite['valeur']).' / '.$merite['max'] : '',
-                        $merite ? $nombre($merite['pourcentage']) : '',
-                        (string) ($ligne['ville_bac'] ?? ''),
+                [$ligne['rang'], (string) $etudiant->name, (string) $etudiant->matricule, (string) $demande?->numero_demande],
+                $volet === null ? [$readmission ? 'Réadmission' : 'Admission'] : [],
+                [(string) $demande?->niveauEtudiantActuel?->name],
+                match ($volet) {
+                    'readmission' => [
+                        ($ligne['categorie'] ?? null) ? $ligne['categorie']['code'].' · '.$ligne['categorie']['libelle'] : '',
+                        $boursier($ligne),
+                        $nombre($moyenne),
+                        $nombre($credits),
                     ],
+                    'admission' => [$boursier($ligne), $note($ligne), $merite ? $nombre($merite['pourcentage']) : '', (string) ($ligne['ville_bac'] ?? '')],
+                    // Liste mêlée : moyenne et crédits (réadmission), ou note et pourcentage du maximum (admission).
+                    default => [
+                        $boursier($ligne),
+                        $readmission
+                            ? implode(' · ', array_filter([$moyenne !== null ? $nombre($moyenne).' / 20' : '', $credits !== null ? $nombre($credits).' % des crédits' : '']))
+                            : ($merite ? $note($ligne).' ('.$nombre($merite['pourcentage']).' %)' : ''),
+                        $readmission ? '' : (string) ($ligne['ville_bac'] ?? ''),
+                    ],
+                },
                 $personnel ? [$etudiant->date_naissance ? Carbon::parse($etudiant->date_naissance)->age : ''] : [],
             );
         })->all();
 
-        $titre = 'Liste provisoire des '.($readmission ? 'réadmissions' : 'admissions');
-        $fichier = 'liste-provisoire-'.($readmission ? 'readmission' : 'admission').'-'.Str::slug((string) $campagne->annee_campagne);
+        return [$entetes, $donnees];
+    }
+
+    /**
+     * Liste téléchargée : classeur Excel (`$feuille`), ou PDF à imprimer (vue `pdf.liste-provisoire`, A4 paysage par
+     * défaut, `$orientation`) ouvert dans un nouvel onglet.
+     *
+     * @param  array{titre: string, campagne: ?string, entetes: list<string>, lignes: list<list<mixed>>, resume?: string, vide?: string, pied?: string}  $vue
+     * @param  'portrait'|'landscape'  $orientation
+     */
+    private function telecharger(string $format, array $vue, string $fichier, string $feuille, string $orientation = 'landscape')
+    {
         if ($format === 'excel') {
-            return \App\Support\SimpleXlsx::download($fichier.'.xlsx', $readmission ? 'Réadmissions' : 'Admissions', $entetes, $lignes);
+            return \App\Support\SimpleXlsx::download($fichier.'.xlsx', $feuille, $vue['entetes'], $vue['lignes']);
         }
 
-        return \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.liste-provisoire', [
-            'titre' => $titre,
-            'campagne' => $campagne->annee_campagne,
-            'entetes' => $entetes,
-            'lignes' => $lignes,
-        ])->setPaper('a4', 'landscape')->stream($fichier.'.pdf');
+        return \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.liste-provisoire', $vue)->setPaper('a4', $orientation)->stream($fichier.'.pdf');
     }
 
     /**
      * Approbation en commission de la « Décision de la commission » : toutes les demandes validées de la liste (`toutes` :
      * les deux volets ouverts ; sinon le type de demande filtré ; classement recalculé côté serveur, sans la recherche ni
-     * le filtre par décision de l'écran) sont approuvées (`demande.date_approbation_commission`) et passent dans la
-     * « Liste définitive » ; les demandes en attente restent. L'état du dossier ne change pas (« Recevable »,
+     * le filtre par décision de l'écran) sont approuvées (`demande.date_approbation_commission`) et passent dans l'onglet
+     * « Demandes validées » des « Listes définitives » ; les demandes en attente restent. L'état du dossier ne change pas (« Recevable »,
      * `DossierWorkflow`).
      */
     public function approuverListeValidee(Request $request, string $volet)
@@ -752,7 +999,7 @@ class CampagnesAdmissionController extends Controller
         }
         $approuvees = \Illuminate\Support\Facades\DB::table('demande')->whereIn('id_demande', $demandes->all())
             ->where('etat_dossier', \App\Http\Services\Eligibilite\RecevabiliteDemandes::ETAT_VALIDE)
-            ->update(['date_approbation_commission' => now(), 'approbation_commission_par' => (string) $admin?->getKey(), 'updated_at' => now()]);
+            ->update(['date_approbation_commission' => now(), 'approbation_commission_par' => (string) $admin?->getKey(), 'updated_at' => now()] + $this->listeApprobation('validees'));
 
         return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives'] + (count($approuves) === 1 ? ['type' => $approuves[0]] : []))
             ->with('success', $approuvees > 1
@@ -764,7 +1011,7 @@ class CampagnesAdmissionController extends Controller
      * Approbation en commission de la « File d'attente » : toutes ses demandes (`toutes` : les deux volets ouverts ;
      * sinon le type de demande filtré ; classement recalculé côté serveur, sans la recherche de l'écran) sont validées
      * (transition `eligible` par `DossierWorkflow`, comme « Valider » : l'étudiant reçoit ses accès) puis approuvées
-     * (`demande.date_approbation_commission`) : elles passent dans la « Liste définitive ». Une demande que le workflow
+     * (`demande.date_approbation_commission`) : elles passent dans l'onglet « File d'attente » des « Listes définitives ». Une demande que le workflow
      * refuse de valider (sanction bloquante, campagne close…) reste dans la file d'attente ; le message en donne le motif.
      */
     public function approuverFileAttente(Request $request, string $volet)
@@ -797,7 +1044,7 @@ class CampagnesAdmissionController extends Controller
             }
             // Approbation postérieure à la validation : la demande figure dans la liste définitive.
             \Illuminate\Support\Facades\DB::table('demande')->where('id_demande', $id)
-                ->update(['date_approbation_commission' => now(), 'approbation_commission_par' => (string) $admin?->getKey(), 'updated_at' => now()]);
+                ->update(['date_approbation_commission' => now(), 'approbation_commission_par' => (string) $admin?->getKey(), 'updated_at' => now()] + $this->listeApprobation('attente'));
             $approuvees++;
         }
         if ($approuvees === 0) {
@@ -810,8 +1057,18 @@ class CampagnesAdmissionController extends Controller
             $message .= ' '.count($echecs).' demande(s) restée(s) en attente : '.collect($echecs)->first();
         }
 
-        return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives'] + (count($approuves) === 1 ? ['type' => $approuves[0]] : []))
+        // Onglet « File d'attente » des listes définitives.
+        return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives', 'liste' => 'attente'] + (count($approuves) === 1 ? ['type' => $approuves[0]] : []))
             ->with('success', $message);
+    }
+
+    /**
+     * Liste d'origine d'une approbation en commission (`validees` | `attente`), enregistrée sur la demande quand la
+     * colonne existe (migration `2026_11_20_000003`) : onglet de la demande dans les listes définitives.
+     */
+    private function listeApprobation(string $liste): array
+    {
+        return Schema::hasColumn('demande', 'liste_approbation_commission') ? ['liste_approbation_commission' => $liste] : [];
     }
 
     /**
@@ -843,6 +1100,9 @@ class CampagnesAdmissionController extends Controller
             app(DossierWorkflow::class)->admin($dossier->getKey(), 'soumis', 'Mise en attente par la commission.');
         } elseif ($classe !== $recevabilite::RECEVABLE) {
             throw ValidationException::withMessages(['attente' => 'Seule une demande recevable d’une liste provisoire ou une demande validée non approuvée peut être mise en attente.']);
+        } elseif (app(\App\Http\Services\Eligibilite\VerrouListeProvisoire::class)->bloque($dossier)) {
+            // Liste provisoire clôturée (liste des demandes validées approuvée en commission) : plus de mise en attente.
+            throw ValidationException::withMessages(['attente' => 'La liste des demandes validées a déjà été approuvée en commission : cette demande ne peut plus être mise en attente.']);
         } elseif (! in_array($dossier->etat_dossier, $recevabilite::ETATS_ATTENTE, true)) {
             throw ValidationException::withMessages(['attente' => 'Ce dossier ne peut plus être mis en attente (état : '
                 .(DossierWorkflow::LABELS[$dossier->etat_dossier] ?? $dossier->etat_dossier).'). Actualisez la liste.']);
@@ -892,6 +1152,10 @@ class CampagnesAdmissionController extends Controller
         $refusAutomatique = $dossier->etat_dossier === 'refuse' && app(DecisionAutomatiqueDossier::class)->estRefusAutomatique($dossier->getKey());
         $actions = array_values(array_intersect(DossierWorkflow::NEXT[$dossier->etat_dossier] ?? [], ['soumis', 'incomplet', 'eligible', 'refuse', 'annule']));
         if ($dossier->etat_dossier === 'refuse') $actions = array_values(array_diff($actions, ['eligible']));
+        // Demande d'une liste provisoire clôturée (liste des demandes validées approuvée en commission) : plus de validation.
+        if (in_array('eligible', $actions, true) && app(\App\Http\Services\Eligibilite\VerrouListeProvisoire::class)->bloque($dossier)) {
+            $actions = array_values(array_diff($actions, ['eligible']));
+        }
         $peutChanger = app(AdminAccess::class)->allows($admin, 'admin.dossiers.transition');
         $proposition = in_array($dossier->etat_dossier, ['pre_attribue', 'accepte', 'attribue_definitif'], true) ? $dossier->proposition : null;
 

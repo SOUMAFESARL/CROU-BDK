@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { CircleCheck, CirclePause, CircleX, EllipsisVertical, Eye, FileCheck2, FileClock, FileX2, ListOrdered } from 'lucide-react';
+import { CircleCheck, CirclePause, CircleX, EllipsisVertical, Eye, FileCheck2, FileClock, FileX2, Loader, ListOrdered } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
@@ -10,14 +10,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Field } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
-import { initiales, nombre } from '@/lib/text';
+import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
 
 /**
  * Onglets des demandes recevables : la liste des demandes, puis les listes provisoires par volet ; onglets de la
- * décision de la commission : les demandes validées, puis la file d'attente ; `toutes` : liste unique de la liste
- * définitive (admissions et réadmissions, sans onglets).
+ * décision de la commission et des listes définitives : les demandes validées, puis la file d'attente ; `toutes` : liste
+ * unique (sans onglets).
  */
 export type ListeRecevables = 'demandes' | 'admission' | 'readmission' | 'validees' | 'attente' | 'toutes';
 
@@ -30,6 +30,11 @@ export type LigneClassement = {
     rang: number;
     name: string;
     numero_demande: string | null;
+    matricule: string | null;
+    civilite: string | null;
+    /** `aaaa-mm-jj` ; envoyée seulement avec le droit de voir les données personnelles. */
+    date_naissance: string | null;
+    filiere: string | null;
     niveau: string | null;
     etat_dossier: string | null;
     /** Envoyé seulement avec le droit de voir les données personnelles. */
@@ -54,7 +59,7 @@ export type LigneClassement = {
      * « Recevable »), mise en attente (`attente` : URL, l'état du dossier ne change pas) — la demande passe dans la
      * « Décision de la commission » — et rejet (« Refusé », motif obligatoire, la demande passe dans « Demandes
      * refusées »). Sur la décision de la commission, une demande en attente peut être validée ou rejetée, une demande
-     * validée mise en attente (son dossier revient en « Soumis ») ou rejetée ; aucune action sur la liste définitive.
+     * validée mise en attente (son dossier revient en « Soumis ») ou rejetée ; aucune action sur les listes définitives.
      * Null sans le droit de changer l'état du dossier ou si aucune n'est permise.
      */
     decision: { url: string; valider: boolean; rejeter: boolean; attente: string | null } | null;
@@ -73,8 +78,9 @@ export type PiecesDossier = {
 
 /**
  * `provisoire` : listes provisoires des demandes recevables ; `validee` : « Décision de la commission » (onglets
- * « Demandes validées » et « File d'attente ») ; `definitive` : « Liste définitive » (demandes approuvées en commission,
- * liste unique `toutes`). Hors listes provisoires, admissions et réadmissions sont mêlées, filtrables par type de demande.
+ * « Demandes validées » et « File d'attente ») ; `definitive` : « Listes définitives » (demandes approuvées en commission,
+ * mêmes onglets selon la liste d'origine de l'approbation). Hors listes provisoires, admissions et réadmissions sont
+ * mêlées, filtrables par type de demande.
  */
 export type TypeClassement = 'provisoire' | 'validee' | 'definitive';
 
@@ -83,24 +89,37 @@ export type Classement = {
     type: TypeClassement;
     /**
      * Onglets affichés : la liste des demandes, puis une liste provisoire par volet ouvert par la campagne ; sur la
-     * décision de la commission, les demandes validées puis la file d'attente ; aucun sur la liste définitive.
+     * décision de la commission et les listes définitives, les demandes validées puis la file d'attente.
      */
     onglets: ListeRecevables[];
-    /** Décision de la commission / liste définitive : type de demande filtré (null : admissions et réadmissions). */
+    /** Décision de la commission / listes définitives : type de demande filtré (null : admissions et réadmissions). */
     volet: Volet | null;
-    /** Décision de la commission : décision de l'onglet ouvert ; null ailleurs. */
+    /** Décision de la commission / listes définitives : onglet ouvert ; null ailleurs. */
     decision: DecisionCommission | null;
     campagne: string | null;
-    /** `validees` / `attente` : onglets de la décision de la commission (type de demande filtré). */
+    /** `validees` / `attente` : onglets de la décision de la commission et des listes définitives (type de demande filtré). */
     compteurs: Record<ListeRecevables, number>;
+    /**
+     * Décision de la commission : demandes déjà approuvées pour la campagne depuis chaque onglet (type de demande
+     * filtré) ; un onglet vide dont la liste est approuvée l'indique. Null ailleurs.
+     */
+    approuvees: { validees: number; attente: number } | null;
     lignes: Paginated<LigneClassement> | null;
     colonnes: { age: boolean };
     urls: Partial<Record<ListeRecevables, string | null>>;
-    /** Téléchargement de la liste provisoire ouverte (complète) ; null sur la liste des demandes ou sans droit. */
+    /**
+     * Téléchargement de la liste provisoire ou définitive ouverte (complète) ; null sur la liste des demandes, la décision
+     * de la commission, une liste définitive pas encore publiée ou sans droit.
+     */
     exports: { excel: string; pdf: string } | null;
     /**
-     * « Approuver » l'onglet ouvert de la décision de la commission (`liste`) : ses `nombre` demandes passent dans la
-     * liste définitive — celles de la file d'attente sont d'abord validées (dossier « Recevable ») ; null ailleurs ou
+     * Listes définitives : publication de l'onglet ouvert (type de demande filtré). `url` : bouton « Publier » (null une
+     * fois publiée ou sans droit) ; `date` : date de publication (Y-m-d H:i) ; `nombre` : demandes de l'onglet. Null ailleurs.
+     */
+    publication: { publiee: boolean; date: string | null; url: string | null; nombre: number } | null;
+    /**
+     * « Approuver » l'onglet ouvert de la décision de la commission (`liste`) : ses `nombre` demandes passent dans le
+     * même onglet des listes définitives — celles de la file d'attente sont d'abord validées (dossier « Recevable ») ; null ailleurs ou
      * sans droit.
      */
     approbation: { url: string; liste: 'validees' | 'attente'; nombre: number } | null;
@@ -117,7 +136,7 @@ const ONGLETS: { cle: Exclude<ListeRecevables, 'toutes'>; label: string }[] = [
 const NOMS_LISTE: Record<TypeClassement, string> = {
     provisoire: 'Demandes recevables',
     validee: 'Décision de la commission',
-    definitive: 'Liste définitive',
+    definitive: 'Listes définitives',
 };
 
 /**
@@ -154,7 +173,16 @@ export function OngletsRecevables({ classement, actif, onSelect }: { classement:
                     'focus-visible:ring-2 focus-visible:ring-secondary focus-visible:outline-none focus-visible:ring-inset',
                     courant ? 'font-medium text-primary' : 'text-muted hover:text-primary',
                 );
-                const contenu = (
+                // Liste en attente d'approbation (réadmissions, décision de la commission) : icône « en cours », sans
+                // compteur ; la liste des demandes, la liste provisoire des admissions et les listes définitives
+                // (approuvées) gardent leur compteur.
+                const enAttente = classement.type !== 'definitive' && cle !== 'demandes' && cle !== 'admission';
+                const contenu = enAttente ? (
+                    <>
+                        <Loader {...ICON} aria-hidden />
+                        {label}
+                    </>
+                ) : (
                     <>
                         {label}
                         <span className={cn('rounded px-1.5 text-xs tabular-nums transition-colors duration-300', courant ? 'bg-soft text-primary' : 'bg-gray-100 text-muted')}>
@@ -189,10 +217,10 @@ export function OngletsRecevables({ classement, actif, onSelect }: { classement:
 type Decision = { ligne: LigneClassement; action: 'valider' | 'attente' | 'rejeter' };
 
 /**
- * Tableau d'une liste provisoire (admission ou réadmission), de la décision de la commission ou de la liste définitive,
+ * Tableau d'une liste provisoire (admission ou réadmission), de la décision de la commission ou d'une liste définitive,
  * dans l'ordre du classement. Chaque ligne se termine par le suivi du dossier, l’état des pièces, puis le menu « Plus
  * d’actions » : valider, mettre en attente, rejeter sur les listes provisoires ; mettre en attente, rejeter sur les
- * demandes validées ; valider, rejeter dans la file d'attente ; aucune action sur la liste définitive.
+ * demandes validées ; valider, rejeter dans la file d'attente ; aucune action sur les listes définitives.
  */
 export function TableauClassement({ classement, toolbar, filtre }: { classement: Classement; toolbar: ReactNode; filtre: boolean }) {
     const [aDecider, setADecider] = useState<Decision | null>(null);
@@ -275,91 +303,114 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
             ),
     };
     const villeBac: DataTableColumn<LigneClassement> = { key: 'ville_bac', header: 'Ville du bac', cell: (l) => vide(l.ville_bac) };
+    const rang: DataTableColumn<LigneClassement> = { key: 'rang', header: 'Rang', headClassName: 'w-16', className: 'font-medium text-gray-900 tabular-nums', cell: (l) => l.rang };
+    const niveau: DataTableColumn<LigneClassement> = { key: 'niveau', header: 'Niveau', cell: (l) => vide(l.niveau) };
+    const actions: DataTableColumn<LigneClassement> = {
+        key: 'actions',
+        header: <span className="sr-only">Actions</span>,
+        className: 'text-right',
+        cell: (l) => (
+            <div className="flex items-center justify-end gap-1">
+                {l.url && (
+                    <Link href={l.url} aria-label={`Suivre le dossier de ${l.name}`} title="Suivre le dossier" className={buttonVariants({ variant: 'ghost', size: 'icon' })}>
+                        <Eye {...ICON} aria-hidden />
+                    </Link>
+                )}
+                {l.documents && <IconePieces pieces={l.documents} />}
+                {l.decision ? (
+                    // Non modal : la fenêtre de confirmation s'ouvre dès la fermeture du menu.
+                    <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" aria-label={`Plus d’actions pour ${l.name}`} title="Plus d’actions">
+                                <EllipsisVertical {...ICON} aria-hidden />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                            {l.decision.valider && (
+                                <DropdownMenuItem className="cursor-pointer" onSelect={() => ouvrir({ ligne: l, action: 'valider' })}>
+                                    <CircleCheck aria-hidden className="text-primary" />
+                                    Valider
+                                </DropdownMenuItem>
+                            )}
+                            {l.decision.attente && (
+                                <DropdownMenuItem className="cursor-pointer" onSelect={() => ouvrir({ ligne: l, action: 'attente' })}>
+                                    <CirclePause aria-hidden className="text-amber-600" />
+                                    Mettre en attente
+                                </DropdownMenuItem>
+                            )}
+                            {l.decision.rejeter && (
+                                <DropdownMenuItem variant="destructive" className="cursor-pointer" onSelect={() => ouvrir({ ligne: l, action: 'rejeter' })}>
+                                    <CircleX aria-hidden />
+                                    Rejeter
+                                </DropdownMenuItem>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                ) : (
+                    avecMenu && <span className="size-9 shrink-0" aria-hidden />
+                )}
+            </div>
+        ),
+    };
 
-    const colonnes: DataTableColumn<LigneClassement>[] = [
-        { key: 'rang', header: 'Rang', headClassName: 'w-16', className: 'font-medium text-gray-900 tabular-nums', cell: (l) => l.rang },
-        {
-            key: 'etudiant',
-            header: 'Étudiant',
-            cell: (l) => (
-                <div className="flex min-w-48 items-center gap-3">
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-soft text-xs font-medium text-primary" aria-hidden>
-                        {initiales(l.name)}
-                    </span>
-                    <div className="min-w-0">
-                        <p className="font-medium text-gray-900">{l.name}</p>
-                        {l.numero_demande && <p className="text-xs text-muted">#{l.numero_demande}</p>}
-                    </div>
-                </div>
-            ),
-        },
-        // Admissions et réadmissions mêlées : type de la demande (le rang est propre à chaque volet).
-        ...(volet === null
-            ? ([
-                  {
-                      key: 'type',
-                      header: 'Type de demande',
-                      cell: (l) => <Badge variant={l.volet === 'readmission' ? 'info' : 'success'}>{l.volet === 'readmission' ? 'Réadmission' : 'Admission'}</Badge>,
-                  },
-              ] satisfies DataTableColumn<LigneClassement>[])
-            : []),
-        { key: 'niveau', header: 'Niveau', cell: (l) => vide(l.niveau) },
-        // Pas de colonne « Catégorie » sur la décision de la commission.
-        ...(readmission
-            ? ([...(classement.type === 'validee' ? [] : [categorie]), boursier, { ...merite, header: 'Moyenne' }] satisfies DataTableColumn<LigneClassement>[])
-            : // Admission, ou liste mêlée : chaque ligne affiche le mérite de son volet (« — » pour la ville du bac d'une réadmission).
-              ([boursier, merite, villeBac] satisfies DataTableColumn<LigneClassement>[])),
-        ...(classement.colonnes.age
-            ? ([{ key: 'age', header: 'Âge', className: 'whitespace-nowrap tabular-nums', cell: (l) => (l.age === null ? vide(null) : `${l.age} ans`) }] satisfies DataTableColumn<LigneClassement>[])
-            : []),
-        {
-            key: 'actions',
-            header: <span className="sr-only">Actions</span>,
-            className: 'text-right',
-            cell: (l) => (
-                <div className="flex items-center justify-end gap-1">
-                    {l.url && (
-                        <Link href={l.url} aria-label={`Suivre le dossier de ${l.name}`} title="Suivre le dossier" className={buttonVariants({ variant: 'ghost', size: 'icon' })}>
-                            <Eye {...ICON} aria-hidden />
-                        </Link>
-                    )}
-                    {l.documents && <IconePieces pieces={l.documents} />}
-                    {l.decision ? (
-                        // Non modal : la fenêtre de confirmation s'ouvre dès la fermeture du menu.
-                        <DropdownMenu modal={false}>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" aria-label={`Plus d’actions pour ${l.name}`} title="Plus d’actions">
-                                    <EllipsisVertical {...ICON} aria-hidden />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
-                                {l.decision.valider && (
-                                    <DropdownMenuItem className="cursor-pointer" onSelect={() => ouvrir({ ligne: l, action: 'valider' })}>
-                                        <CircleCheck aria-hidden className="text-primary" />
-                                        Valider
-                                    </DropdownMenuItem>
-                                )}
-                                {l.decision.attente && (
-                                    <DropdownMenuItem className="cursor-pointer" onSelect={() => ouvrir({ ligne: l, action: 'attente' })}>
-                                        <CirclePause aria-hidden className="text-amber-600" />
-                                        Mettre en attente
-                                    </DropdownMenuItem>
-                                )}
-                                {l.decision.rejeter && (
-                                    <DropdownMenuItem variant="destructive" className="cursor-pointer" onSelect={() => ouvrir({ ligne: l, action: 'rejeter' })}>
-                                        <CircleX aria-hidden />
-                                        Rejeter
-                                    </DropdownMenuItem>
-                                )}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    ) : (
-                        avecMenu && <span className="size-9 shrink-0" aria-hidden />
-                    )}
-                </div>
-            ),
-        },
-    ];
+    // Onglet « Demandes validées » de la décision de la commission et des listes définitives : rang, matricule, civilité,
+    // nom et prénoms, date de naissance (avec le droit de voir les données personnelles), filière, niveau (puis le suivi
+    // du dossier, l'état des pièces et le menu d'actions).
+    const demandesValidees = classement.type !== 'provisoire' && classement.liste === 'validees';
+
+    const colonnes: DataTableColumn<LigneClassement>[] = demandesValidees
+        ? [
+              rang,
+              { key: 'matricule', header: 'Matricule', className: 'whitespace-nowrap tabular-nums', cell: (l) => vide(l.matricule) },
+              { key: 'civilite', header: 'Civilité', cell: (l) => vide(l.civilite) },
+              { key: 'nom', header: 'Nom & prénoms', cell: (l) => <span className="font-medium text-gray-900">{l.name}</span> },
+              ...(classement.colonnes.age
+                  ? ([
+                        { key: 'date_naissance', header: 'Date de naissance', className: 'whitespace-nowrap tabular-nums', cell: (l) => (l.date_naissance ? dateFr(l.date_naissance) : vide(null)) },
+                    ] satisfies DataTableColumn<LigneClassement>[])
+                  : []),
+              { key: 'filiere', header: 'Filière', cell: (l) => vide(l.filiere) },
+              niveau,
+              actions,
+          ]
+        : [
+              rang,
+              {
+                  key: 'etudiant',
+                  header: 'Étudiant',
+                  cell: (l) => (
+                      <div className="flex min-w-48 items-center gap-3">
+                          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-soft text-xs font-medium text-primary" aria-hidden>
+                              {initiales(l.name)}
+                          </span>
+                          <div className="min-w-0">
+                              <p className="font-medium text-gray-900">{l.name}</p>
+                              {l.numero_demande && <p className="text-xs text-muted">#{l.numero_demande}</p>}
+                          </div>
+                      </div>
+                  ),
+              },
+              // Admissions et réadmissions mêlées : type de la demande (le rang est propre à chaque volet).
+              ...(volet === null
+                  ? ([
+                        {
+                            key: 'type',
+                            header: 'Type de demande',
+                            cell: (l) => <Badge variant={l.volet === 'readmission' ? 'info' : 'success'}>{l.volet === 'readmission' ? 'Réadmission' : 'Admission'}</Badge>,
+                        },
+                    ] satisfies DataTableColumn<LigneClassement>[])
+                  : []),
+              niveau,
+              // Pas de colonne « Catégorie » sur la décision de la commission.
+              ...(readmission
+                  ? ([...(classement.type === 'validee' ? [] : [categorie]), boursier, { ...merite, header: 'Moyenne' }] satisfies DataTableColumn<LigneClassement>[])
+                  : // Admission, ou liste mêlée : chaque ligne affiche le mérite de son volet (« — » pour la ville du bac d'une réadmission).
+                    ([boursier, merite, villeBac] satisfies DataTableColumn<LigneClassement>[])),
+              ...(classement.colonnes.age
+                  ? ([{ key: 'age', header: 'Âge', className: 'whitespace-nowrap tabular-nums', cell: (l) => (l.age === null ? vide(null) : `${l.age} ans`) }] satisfies DataTableColumn<LigneClassement>[])
+                  : []),
+              actions,
+          ];
 
     const rejet = aDecider?.action === 'rejeter';
     const attente = aDecider?.action === 'attente';
@@ -376,8 +427,8 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
                 titre: 'Mettre ce dossier en attente ?',
                 texte:
                     aDecider?.ligne.commission?.decision === 'validee'
-                        ? `La validation du dossier de ${nom} est retirée : il revient en « Soumis » et la demande passe dans la file d’attente, avec son rang. Elle pourra y être validée ou rejetée.`
-                        : `La demande de ${nom} passe dans la file d’attente de la décision de la commission, avec son rang ; l’état du dossier ne change pas. Elle pourra y être validée ou rejetée.`,
+                        ? `La validation du dossier de ${nom} est retirée : il revient en « Soumis » et la demande passe dans la file d’attente, où elle est classée avec les autres demandes en attente. Elle pourra y être validée ou rejetée.`
+                        : `La demande de ${nom} passe dans la file d’attente de la décision de la commission, où elle est classée avec les autres demandes en attente ; l’état du dossier ne change pas. Elle pourra y être validée ou rejetée.`,
                 bouton: 'Mettre en attente',
                 icone: <CirclePause className="size-4" aria-hidden />,
             }
@@ -402,7 +453,14 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
                     {filtre
                         ? 'Aucune demande ne correspond à cette recherche.'
                         : classement.type === 'definitive'
-                          ? `Aucune demande ${volet === null ? '' : readmission ? 'de réadmission ' : 'd’admission '}approuvée en commission${classement.campagne ? ` pour la campagne ${classement.campagne}` : ''}.`
+                          ? `Aucune demande ${volet === null ? '' : readmission ? 'de réadmission ' : 'd’admission '}${
+                                classement.liste === 'attente' ? 'de la file d’attente' : 'validée'
+                            } approuvée en commission${classement.campagne ? ` pour la campagne ${classement.campagne}` : ''}.`
+                          : classement.type === 'validee' && (classement.approuvees?.[classement.liste === 'attente' ? 'attente' : 'validees'] ?? 0) > 0
+                            ? // Onglet vide après approbation : la liste est déjà approuvée pour la campagne.
+                              `${classement.liste === 'attente' ? 'La file d’attente' : 'La liste des demandes validées'}${
+                                  volet === null ? '' : readmission ? ' de réadmission' : ' d’admission'
+                              }${classement.campagne ? ` de la campagne ${classement.campagne}` : ''} est déjà approuvée : ses demandes figurent dans les listes définitives.`
                           : classement.type === 'validee'
                           ? `Aucune demande ${volet === null ? '' : readmission ? 'de réadmission ' : 'd’admission '}${
                                 classement.liste === 'attente' ? 'en attente' : 'validée'

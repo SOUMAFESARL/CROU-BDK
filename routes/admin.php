@@ -241,6 +241,14 @@ Route::middleware(['admin'])->group(function () {
             Route::get('/liste-provisoire/{volet}/{format}', 'exportListeProvisoire')
                 ->whereIn('volet', ['admission', 'readmission'])->whereIn('format', ['excel', 'pdf'])
                 ->name('liste_provisoire_export');
+            // Téléchargement d'une liste définitive (demandes validées ou file d'attente approuvées ; les deux volets, ou un type de demande).
+            Route::get('/liste-definitive/{liste}/{volet}/{format}', 'exportListeDefinitive')
+                ->whereIn('liste', ['validees', 'attente'])->whereIn('volet', ['toutes', 'admission', 'readmission'])->whereIn('format', ['excel', 'pdf'])
+                ->name('liste_definitive_export');
+            // Publication d'une liste définitive (demandes validées ou file d'attente ; les deux volets, ou un type de demande) : elle peut alors être téléchargée.
+            Route::post('/liste-definitive/{liste}/{volet}/publier', 'publierListeDefinitive')
+                ->whereIn('liste', ['validees', 'attente'])->whereIn('volet', ['toutes', 'admission', 'readmission'])
+                ->name('liste_definitive_publier');
             // Mise en attente par la commission d'une demande d'une liste provisoire (elle passe dans la décision de la commission).
             Route::post('/demandes/{demande}/attente', 'mettreEnAttente')->name('mettre_en_attente');
             // Approbation en commission des demandes validées de la décision de la commission (les deux volets, ou un type de demande) : elles passent dans la liste définitive.
@@ -720,8 +728,9 @@ Route::middleware(['admin'])->group(function () {
 
 });
 
+// Validation refusée pour une demande d'une liste provisoire clôturée (liste des demandes validées approuvée en commission).
 Route::post('/dossiers/{demande}/transition', [\App\Http\Controllers\DossierWorkflowController::class,'admin'])
-    ->middleware(['admin', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])
+    ->middleware(['admin', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class, \App\Http\Middleware\RefuserValidationListeCloturee::class])
     ->name('dossiers.transition');
 
 Route::middleware(['admin', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])->group(function () {

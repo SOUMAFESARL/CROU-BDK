@@ -94,7 +94,7 @@ export type CampagnesProps = {
         admissions: string | null;
         /** Onglet « Décision de la commission » (demandes validées ou mises en attente depuis les listes provisoires). */
         validees: string | null;
-        /** Onglet « Liste définitive » (demandes de la liste validée approuvées en commission). */
+        /** Onglet « Listes définitives » (demandes approuvées en commission, depuis les demandes validées ou la file d’attente). */
         definitives: string | null;
         create: string | null;
         filtres: Record<FiltreCampagne, string>;

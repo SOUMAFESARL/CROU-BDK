@@ -46,7 +46,7 @@
         <h1>{{ $titre }}</h1>
         <p>
             Campagne {{ $campagne }}
-            · {{ count($lignes) }} demande(s) recevable(s) · Édité le {{ now()->format('d/m/Y à H:i') }}
+            · {{ count($lignes) }} {{ $resume ?? 'demande(s) recevable(s)' }} · Édité le {{ now()->format('d/m/Y à H:i') }}
         </p>
     </div>
 
@@ -66,11 +66,11 @@
                     @endforeach
                 </tr>
             @empty
-                <tr><td class="vide" colspan="{{ count($entetes) }}">Aucune demande recevable dans cette liste.</td></tr>
+                <tr><td class="vide" colspan="{{ count($entetes) }}">{{ $vide ?? 'Aucune demande recevable dans cette liste.' }}</td></tr>
             @endforelse
         </tbody>
     </table>
 
-    <p class="pied">Liste provisoire indicative : le classement ne vaut pas attribution d’une chambre.</p>
+    <p class="pied">{{ $pied ?? 'Liste provisoire indicative : le classement ne vaut pas attribution d’une chambre.' }}</p>
 </body>
 </html>
