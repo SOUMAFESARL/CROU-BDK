@@ -5,6 +5,8 @@ namespace App\Http\Services\Eligibilite;
 use App\Models\AdmissionDerogation;
 use App\Models\DossierTransition;
 use App\Models\Etudiant;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -23,8 +25,14 @@ use Illuminate\Support\Facades\Schema;
  *   « Annulé », dernière transition faite par un agent). Elle sort des listes recevables / irrecevables ;
  *   une annulation par l'étudiant ou un refus automatique (barème) n'en fait pas partie.
  * - « validée » : demande recevable dont le dossier est passé « Recevable » (`eligible`), validée par un agent depuis
- *   une liste provisoire (ou par une dérogation approuvée) ; elle sort des demandes recevables pour la « Liste validée »
- *   et y reste jusqu'à la confirmation de l'étudiant.
+ *   une liste provisoire (ou par une dérogation approuvée) ; elle sort des demandes recevables pour la « Décision de la
+ *   commission » et y reste jusqu'à son approbation (ou la confirmation de l'étudiant).
+ * - « en attente » : demande recevable mise en attente par la commission depuis une liste provisoire
+ *   (`demande.date_attente_commission`, dossier encore « Soumis » / « En étude » et aucune transition depuis) ; elle sort
+ *   des demandes recevables pour la « Décision de la commission », où elle sera validée ou rejetée.
+ * - « définitive » : demande validée approuvée en commission (`demande.date_approbation_commission`, postérieure à la
+ *   dernière validation du dossier : un dossier rejeté puis revalidé doit être approuvé à nouveau) ; elle passe de la
+ *   « Décision de la commission » à la « Liste définitive ».
  *
  * Le classement est le même pour tous les agents : la situation disciplinaire (note de conduite, sanction bloquante)
  * est toujours prise en compte, même si l'agent ne peut pas la consulter.
@@ -42,6 +50,13 @@ class RecevabiliteDemandes
 
     public const VALIDEE = 'validee';
 
+    public const DEFINITIVE = 'definitive';
+
+    public const EN_ATTENTE = 'en_attente';
+
+    /** États du dossier d'une demande que la commission peut mettre en attente (avant validation ou rejet). */
+    public const ETATS_ATTENTE = ['soumis', 'en_etude'];
+
     /** État du dossier d'une demande validée (`DossierWorkflow`, « Recevable »). */
     public const ETAT_VALIDE = 'eligible';
 
@@ -52,7 +67,7 @@ class RecevabiliteDemandes
 
     /**
      * @param  iterable<Etudiant>  $etudiants  avec `derniereDemande` (et sa campagne) chargée
-     * @return array{recevables: string[], rejetees: string[], refusees: string[], validees: string[]} identifiants des étudiants
+     * @return array{recevables: string[], rejetees: string[], refusees: string[], validees: string[], en_attente: string[], definitives: string[]} identifiants des étudiants
      */
     public function classer(iterable $etudiants): array
     {
@@ -60,14 +75,18 @@ class RecevabiliteDemandes
         $demandes = $etudiants->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)->filter()->all();
         $refusParAgent = $this->refusParAgent($demandes);
         $derogations = $this->derogationsApprouvees($demandes);
-        $resultat = ['recevables' => [], 'rejetees' => [], 'refusees' => [], 'validees' => []];
+        $approuvees = $this->approbationsCommission($demandes);
+        $attentes = $this->misesEnAttente($demandes);
+        $resultat = ['recevables' => [], 'rejetees' => [], 'refusees' => [], 'validees' => [], 'en_attente' => [], 'definitives' => []];
         foreach ($etudiants as $etudiant) {
-            $classe = $this->classe($etudiant, $refusParAgent, $derogations);
+            $classe = $this->classe($etudiant, $refusParAgent, $derogations, $approuvees, $attentes);
             $liste = match ($classe) {
                 self::RECEVABLE => 'recevables',
                 self::REJETEE => 'rejetees',
                 self::REFUSEE => 'refusees',
                 self::VALIDEE => 'validees',
+                self::EN_ATTENTE => 'en_attente',
+                self::DEFINITIVE => 'definitives',
                 default => null,
             };
             if ($liste !== null) {
@@ -83,8 +102,10 @@ class RecevabiliteDemandes
      *
      * @param  string[]|null  $refusParAgent  demandes refusées par un agent (`refusParAgent`), calculées ici si null
      * @param  string[]|null  $derogations  demandes rendues recevables par dérogation (`derogationsApprouvees`), calculées ici si null
+     * @param  string[]|null  $approuvees  demandes approuvées en commission (`approbationsCommission`), calculées ici si null
+     * @param  string[]|null  $attentes  demandes mises en attente par la commission (`misesEnAttente`), calculées ici si null
      */
-    public function classe(Etudiant $etudiant, ?array $refusParAgent = null, ?array $derogations = null): ?string
+    public function classe(Etudiant $etudiant, ?array $refusParAgent = null, ?array $derogations = null, ?array $approuvees = null, ?array $attentes = null): ?string
     {
         $demande = $etudiant->derniereDemande;
         if ($demande === null) {
@@ -107,8 +128,74 @@ class RecevabiliteDemandes
             };
         }
 
-        // Demande recevable validée par l'administration : « Liste validée ».
-        return $classe === self::RECEVABLE && $demande->etat_dossier === self::ETAT_VALIDE ? self::VALIDEE : $classe;
+        if ($classe !== self::RECEVABLE) {
+            return $classe;
+        }
+        if ($demande->etat_dossier !== self::ETAT_VALIDE) {
+            // Demande recevable mise en attente par la commission : « Décision de la commission ».
+            $attentes ??= $this->misesEnAttente([$demande]);
+
+            return in_array((string) $demande->getKey(), $attentes, true) ? self::EN_ATTENTE : $classe;
+        }
+        // Demande recevable validée par l'administration : « Décision de la commission », puis, une fois approuvée
+        // en commission, « Liste définitive ».
+        $approuvees ??= $this->approbationsCommission([$demande]);
+
+        return in_array((string) $demande->getKey(), $approuvees, true) ? self::DEFINITIVE : self::VALIDEE;
+    }
+
+    /**
+     * Demandes (identifiants) validées et approuvées en commission : dossier « Recevable » dont l'approbation
+     * (`date_approbation_commission`) n'est pas antérieure à la dernière validation (transition vers `eligible`).
+     *
+     * @param  iterable<\App\Models\DemandeEtudiant>  $demandes
+     * @return string[]
+     */
+    public function approbationsCommission(iterable $demandes): array
+    {
+        $dates = collect($demandes)
+            ->filter(fn ($demande) => $demande->etat_dossier === self::ETAT_VALIDE && ! empty($demande->date_approbation_commission))
+            ->mapWithKeys(fn ($demande) => [(string) $demande->getKey() => Carbon::parse($demande->date_approbation_commission)]);
+        if ($dates->isEmpty()) {
+            return [];
+        }
+        $validations = Schema::hasTable('dossier_transitions')
+            ? $dates->keys()->chunk(500)
+                ->flatMap(fn ($ids) => DB::table('dossier_transitions')->whereIn('demande_id', $ids->all())
+                    ->where('nouvel_etat', self::ETAT_VALIDE)->groupBy('demande_id')
+                    ->select('demande_id', DB::raw('MAX(created_at) as derniere'))->get())
+                ->mapWithKeys(fn ($ligne) => [(string) $ligne->demande_id => $ligne->derniere])
+            : collect();
+
+        return $dates->filter(fn (Carbon $date, string $id) => empty($validations[$id]) || $date->gte(Carbon::parse($validations[$id])))
+            ->keys()->map(fn ($id) => (string) $id)->values()->all();
+    }
+
+    /**
+     * Demandes (identifiants) mises en attente par la commission : dossier encore « Soumis » / « En étude » dont la mise
+     * en attente (`date_attente_commission`) n'est pas antérieure à la dernière transition du dossier (un dossier rejeté
+     * puis réexaminé revient dans la liste provisoire).
+     *
+     * @param  iterable<\App\Models\DemandeEtudiant>  $demandes
+     * @return string[]
+     */
+    public function misesEnAttente(iterable $demandes): array
+    {
+        $dates = collect($demandes)
+            ->filter(fn ($demande) => in_array($demande->etat_dossier, self::ETATS_ATTENTE, true) && ! empty($demande->date_attente_commission))
+            ->mapWithKeys(fn ($demande) => [(string) $demande->getKey() => Carbon::parse($demande->date_attente_commission)]);
+        if ($dates->isEmpty()) {
+            return [];
+        }
+        $transitions = Schema::hasTable('dossier_transitions')
+            ? $dates->keys()->chunk(500)
+                ->flatMap(fn ($ids) => DB::table('dossier_transitions')->whereIn('demande_id', $ids->all())->groupBy('demande_id')
+                    ->select('demande_id', DB::raw('MAX(created_at) as derniere'))->get())
+                ->mapWithKeys(fn ($ligne) => [(string) $ligne->demande_id => $ligne->derniere])
+            : collect();
+
+        return $dates->filter(fn (Carbon $date, string $id) => empty($transitions[$id]) || $date->gte(Carbon::parse($transitions[$id])))
+            ->keys()->map(fn ($id) => (string) $id)->values()->all();
     }
 
     /**

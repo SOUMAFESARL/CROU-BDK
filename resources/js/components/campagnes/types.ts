@@ -92,8 +92,10 @@ export type CampagnesProps = {
     urls: {
         hebergement: string;
         admissions: string | null;
-        /** Onglet « Liste validée » (demandes validées depuis les listes provisoires). */
+        /** Onglet « Décision de la commission » (demandes validées ou mises en attente depuis les listes provisoires). */
         validees: string | null;
+        /** Onglet « Liste définitive » (demandes de la liste validée approuvées en commission). */
+        definitives: string | null;
         create: string | null;
         filtres: Record<FiltreCampagne, string>;
     };

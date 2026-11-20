@@ -1,20 +1,22 @@
 import { Link } from '@inertiajs/react';
-import { CalendarDays, ClipboardCheck, ClipboardList } from 'lucide-react';
+import { CalendarDays, ClipboardCheck, ClipboardList, ListChecks } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ICON } from '@/components/layout/app-sidebar';
 import { cn } from '@/lib/utils';
 
-type Onglet = 'campagnes' | 'admissions' | 'validees';
+type Onglet = 'campagnes' | 'admissions' | 'validees' | 'definitives';
 
 const ONGLETS: { cle: Onglet; label: string; icone: typeof CalendarDays }[] = [
     { cle: 'campagnes', label: 'Campagnes', icone: CalendarDays },
     { cle: 'admissions', label: 'Liste des demandes', icone: ClipboardList },
-    { cle: 'validees', label: 'Liste validée', icone: ClipboardCheck },
+    { cle: 'validees', label: 'Décision de la commission', icone: ClipboardCheck },
+    { cle: 'definitives', label: 'Liste définitive', icone: ListChecks },
 ];
 
 /**
- * Onglets du menu « Campagnes & admission » : la liste des campagnes, la liste des demandes, puis la liste validée
- * (demandes validées depuis les listes provisoires).
+ * Onglets du menu « Campagnes & admission » : la liste des campagnes, la liste des demandes, la décision de la
+ * commission (demandes validées ou mises en attente depuis les listes provisoires), puis la liste définitive (demandes
+ * validées approuvées en commission).
  * Chaque onglet est une page à part (navigation Inertia) ; un onglet sans lien (droit manquant) est masqué.
  * `aside` : contenu aligné à droite sur la ligne des onglets (ex. campagne active).
  */

@@ -241,6 +241,16 @@ Route::middleware(['admin'])->group(function () {
             Route::get('/liste-provisoire/{volet}/{format}', 'exportListeProvisoire')
                 ->whereIn('volet', ['admission', 'readmission'])->whereIn('format', ['excel', 'pdf'])
                 ->name('liste_provisoire_export');
+            // Mise en attente par la commission d'une demande d'une liste provisoire (elle passe dans la décision de la commission).
+            Route::post('/demandes/{demande}/attente', 'mettreEnAttente')->name('mettre_en_attente');
+            // Approbation en commission des demandes validées de la décision de la commission (les deux volets, ou un type de demande) : elles passent dans la liste définitive.
+            Route::post('/liste-validee/{volet}/approuver', 'approuverListeValidee')
+                ->whereIn('volet', ['toutes', 'admission', 'readmission'])
+                ->name('liste_validee_approuver');
+            // Approbation en commission de la file d'attente : ses demandes sont validées puis passent dans la liste définitive.
+            Route::post('/file-attente/{volet}/approuver', 'approuverFileAttente')
+                ->whereIn('volet', ['toutes', 'admission', 'readmission'])
+                ->name('file_attente_approuver');
             Route::get('/campagnes/nouvelle', 'createCampagne')->name('create_campagne');
             Route::get('/campagnes/{etat?}', 'campagnes')->name('campagnes');
             Route::post('/campagnes', 'storeCampagne')->name('post_campagnes');
