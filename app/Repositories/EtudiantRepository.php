@@ -211,17 +211,14 @@ class EtudiantRepository implements EtudiantRepositoryInterface
      * `$etatDossier` : état (`Demande.etat_dossier`) de la dernière demande de l'étudiant.
      * `$etudiants` : limite la liste à ces étudiants (identifiants), par exemple les demandes recevables.
      */
-    public function getAdmissionsPage(?string $etat = null, int $parPage = 25, ?string $recherche = null, ?string $etatDossier = null, ?array $etudiants = null): \Illuminate\Pagination\LengthAwarePaginator
+    public function getAdmissionsPage(?string $etat = null, int $parPage = 25, ?string $recherche = null, ?string $etatDossier = null, ?array $etudiants = null, ?string $campagneId = null): \Illuminate\Pagination\LengthAwarePaginator
     {
         $recherche = trim((string) $recherche);
         $etatDossier = trim((string) $etatDossier);
-        $statuts = match($etat) {
-            'demandes' => self::STATUTS_DEMANDES,
-            'nouvelles_demandes'=>['demande'], 'en_attente'=>['en_attente'],
-            'en_verification'=>['en_verification'], 'annuler'=>['annuler'], default=>['residents'],
-        };
+        $statuts = $this->statutsAdmissions($etat);
         return Etudiant::with(['region','ville','derniereDemande'])->withCount('demandes')
             ->whereIn(DB::raw('LOWER(statut_inscription)'), $statuts)
+            ->when($campagneId !== null && $campagneId !== '', fn ($query) => $this->filtrerCampagne($query, $etat, $campagneId))
             // Page « Admissions » : uniquement les étudiants ayant déposé une demande (comme `getPopulationDemandes`).
             ->when($etat === 'demandes', fn ($query) => $query->whereHas('derniereDemande'))
             ->when($etudiants !== null, fn ($query) => $query->whereIn('id_etudiant', $etudiants))
@@ -237,6 +234,38 @@ class EtudiantRepository implements EtudiantRepositoryInterface
             ->when($etatDossier !== '', fn ($query) => $query->whereHas('derniereDemande', fn ($d) => $d->where('etat_dossier', $etatDossier)))
             ->orderByDesc('date_inscription')->orderByDesc('id_etudiant')
             ->paginate($parPage)->withQueryString();
+    }
+
+    /** Statuts d'inscription correspondant à un filtre de liste (`getAdmissionsPage`). */
+    private function statutsAdmissions(?string $etat): array
+    {
+        return match($etat) {
+            'demandes' => self::STATUTS_DEMANDES,
+            'nouvelles_demandes'=>['demande'], 'en_attente'=>['en_attente'],
+            'en_verification'=>['en_verification'], 'annuler'=>['annuler'], default=>['residents'],
+        };
+    }
+
+    /**
+     * Limite une liste à une campagne : dernière demande de l'étudiant dans cette campagne ; pour les résidents,
+     * également une affectation confirmée dans cette campagne (étudiants enregistrés sans demande).
+     */
+    private function filtrerCampagne($query, ?string $etat, string $campagneId)
+    {
+        return $query->where(function ($q) use ($etat, $campagneId) {
+            $q->whereHas('derniereDemande', fn ($d) => $d->where('campagne_id', $campagneId));
+            if (! in_array($etat, ['demandes', 'nouvelles_demandes', 'en_attente', 'en_verification', 'annuler'], true)) {
+                $q->orWhereHas('assignationsChambre', fn ($a) => $a->where('statut', 'confirmee')->where('campagne_id', $campagneId));
+            }
+        });
+    }
+
+    /** Nombre d'étudiants d'un filtre de liste, éventuellement limité à une campagne (indicateurs « Résidents & contrats »). */
+    public function compterAdmissions(string $etat, ?string $campagneId = null): int
+    {
+        return Etudiant::whereIn(DB::raw('LOWER(statut_inscription)'), $this->statutsAdmissions($etat))
+            ->when($campagneId !== null && $campagneId !== '', fn ($query) => $this->filtrerCampagne($query, $etat, $campagneId))
+            ->count();
     }
 
     public function verifierEligibilite(mixed $demande, mixed $campagne, bool $ignorerDocuments = false): array

@@ -1,5 +1,5 @@
 import { Link, router } from '@inertiajs/react';
-import { BedDouble, ClipboardCheck, Eye, FileText, ListChecks, Pencil, Search, UserPlus, Users, X } from 'lucide-react';
+import { BedDouble, CirclePlay, ClipboardCheck, Eye, FileText, ListChecks, Pencil, Search, UserPlus, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
@@ -9,6 +9,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EtudiantEditDialog, type OptionsEtudiant, type ValeursEtudiant } from '@/components/residents/etudiant-edit-dialog';
 import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -33,21 +34,33 @@ type Props = {
     residents: Paginated<Resident>;
     stats: { residents: number; en_verification: number };
     etat: Filtre;
-    filters: { q: string };
+    /** `campagne` : campagne choisie dans le bandeau (`toutes` : aucun filtre). */
+    filters: { q: string; campagne: string };
     colonnes: { personnel: boolean; historique: boolean };
-    campagneActive: { annee: string } | null;
+    /** Campagnes proposées dans le bandeau, la plus récente d'abord. */
+    campagnes: CampagneOption[];
+    /** Campagne choisie (par défaut la campagne active ; `null` : toutes les campagnes). */
+    campagneActive: { id: string; annee: string } | null;
     /** Référentiels du formulaire de modification (`null` sans le droit de modifier). */
     options: OptionsEtudiant | null;
     urls: { admissionDirecte: string | null; attributions: string | null; filtres: Record<Filtre, string> | null };
 };
 
+type CampagneOption = { id: string; libelle: string | null; annee: string | null; active: boolean };
+
+/** Valeur du bandeau pour « Toutes les campagnes ». */
+const TOUTES = 'toutes';
+
+/** Libellé et année d'une campagne (liste du bandeau). */
+const nomCampagne = (campagne: CampagneOption) => [campagne.libelle || 'Campagne', campagne.annee].filter(Boolean).join(' ');
+
 const TITRES: Record<Filtre, string> = {
-    en_verification: 'Dossiers en vérification',
+    en_verification: 'Admis à loger (liste définitive publiée)',
     residents: 'Résidents logés',
 };
 
 /** Résidents et contrats (remplace `resident_contrat/index.blade.php`). */
-export default function ResidentsIndex({ residents, stats, etat, filters, colonnes, campagneActive, options, urls }: Props) {
+export default function ResidentsIndex({ residents, stats, etat, filters, colonnes, campagnes, campagneActive, options, urls }: Props) {
     const [recherche, setRecherche] = useState(filters.q);
     const [enEdition, setEnEdition] = useState<Resident | null>(null);
     // Objet stable : la fenêtre réinitialise son formulaire quand l'étudiant change.
@@ -57,20 +70,21 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
     );
     const premierRendu = useRef(true);
 
-    // Recherche côté serveur, 350 ms après la dernière frappe (retour en page 1, filtre conservé).
+    // Rechargement de la liste (retour en page 1, filtre conservé) avec la recherche et la campagne choisie.
+    const appliquer = (valeurs: { q: string; campagne: string }) => {
+        const parametres = Object.fromEntries(Object.entries({ q: valeurs.q.trim(), campagne: valeurs.campagne }).filter(([, valeur]) => valeur !== ''));
+        router.get(window.location.pathname, parametres, { preserveState: true, preserveScroll: true, replace: true });
+    };
+
+    // Recherche côté serveur, 350 ms après la dernière frappe.
     useEffect(() => {
         if (premierRendu.current) {
             premierRendu.current = false;
             return;
         }
-        const minuteur = window.setTimeout(() => {
-            router.get(window.location.pathname, recherche.trim() ? { q: recherche.trim() } : {}, {
-                preserveState: true,
-                preserveScroll: true,
-                replace: true,
-            });
-        }, 350);
+        const minuteur = window.setTimeout(() => appliquer({ q: recherche, campagne: filters.campagne }), 350);
         return () => window.clearTimeout(minuteur);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [recherche]);
 
     const vide = (valeur: string | null | undefined) => valeur || <span className="text-muted">—</span>;
@@ -165,6 +179,28 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
             <PageHeader
                 title="Résidents & contrats"
                 description="Suivez les étudiants logés, leur chambre et leur contrat."
+                aside={
+                    // Les indicateurs et la liste suivent la campagne choisie (par défaut la campagne active).
+                    campagnes.length > 0 && (
+                        <Select value={filters.campagne || TOUTES} onValueChange={(campagne) => appliquer({ q: recherche, campagne })}>
+                            <SelectTrigger aria-label="Campagne affichée" className="h-9 w-full border-[#C6E3A6] bg-soft text-[#004D00] sm:w-72">
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                    <CirclePlay className="size-4 shrink-0" aria-hidden />
+                                    <SelectValue />
+                                </span>
+                            </SelectTrigger>
+                            <SelectContent align="end">
+                                <SelectItem value={TOUTES}>Toutes les campagnes</SelectItem>
+                                {campagnes.map((option) => (
+                                    <SelectItem key={option.id} value={option.id}>
+                                        {nomCampagne(option)}
+                                        {option.active && <span className="text-muted"> · active</span>}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    )
+                }
                 actions={
                     (urls.attributions || urls.admissionDirecte) && (
                         <>
@@ -195,11 +231,11 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                     { key: 'residents', label: 'Résidents', value: nombre(stats.residents), tone: 'green', href: urls.filtres?.residents, extra: 'Déjà logés' },
                     {
                         key: 'en_verification',
-                        label: 'En vérification',
+                        label: 'Admis à loger',
                         value: nombre(stats.en_verification),
                         tone: 'blue',
                         href: urls.filtres?.en_verification,
-                        extra: campagneActive ? `Campagne ${campagneActive.annee}` : undefined,
+                        extra: campagneActive ? `Campagne ${campagneActive.annee}` : 'Toutes campagnes',
                     },
                 ]}
             />

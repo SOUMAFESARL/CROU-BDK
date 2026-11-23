@@ -538,7 +538,8 @@ function getAnneeUniversitaire($date = null) {
 }
 
 if (!function_exists('formatPaiementMois')) {
-    function formatPaiementMois($mois, $groupBy = 2)
+    /** `$abrege` : mois abrégés (janv, févr, …, déc), par exemple pour les tableaux. */
+    function formatPaiementMois($mois, $groupBy = 2, bool $abrege = false)
     {
         if (empty($mois)) {
             return '-';
@@ -631,18 +632,25 @@ if (!function_exists('formatPaiementMois')) {
             $listeMois = [(string) $mois];
         }
 
+        // Abréviations usuelles des mois (forme courte affichée dans les tableaux).
+        $abreviations = [
+            'janvier' => 'janv', 'février' => 'févr', 'mars' => 'mars', 'avril' => 'avr', 'mai' => 'mai', 'juin' => 'juin',
+            'juillet' => 'juil', 'août' => 'août', 'septembre' => 'sept', 'octobre' => 'oct', 'novembre' => 'nov', 'décembre' => 'déc',
+        ];
+
         // Formater chaque mois
         $moisFormates = [];
         foreach ($listeMois as $item) {
             if (is_array($item)) {
                 // Si c'est un tableau imbriqué, on le traite récursivement
-                $moisFormates = array_merge($moisFormates, explode(', ', formatPaiementMois($item)));
+                $moisFormates = array_merge($moisFormates, explode(', ', formatPaiementMois($item, 0, $abrege)));
                 continue;
             }
 
             $result = $extraireMoisAnnee($item);
             if ($result) {
-                $moisFormates[] = $result['mois'] . '-' . $result['annee'];
+                $nom = $abrege ? strtr($result['mois'], $abreviations) : $result['mois'];
+                $moisFormates[] = $nom . '-' . $result['annee'];
             } else {
                 $moisFormates[] = (string) $item;
             }

@@ -163,7 +163,7 @@ class Paiement extends Model
     public function createdBy(): BelongsTo
       
     {
-        return $this->belongsTo(User::class, 'created_bd', 'id_user');
+        return $this->belongsTo(User::class, 'created_by', 'id_user');
     }
 
     // ============================================
@@ -207,7 +207,17 @@ class Paiement extends Model
             ->whereIn('contrat_id', $assignations())
             ->orWhere(fn ($sansContrat) => $sansContrat
                 ->whereNull('contrat_id')
-                ->whereIn('loyer_id', Loyer::query()->select('id_loyer')->whereIn('assignation_id', $assignations()))));
+                ->whereIn('loyer_id', Loyer::query()->select('id_loyer')->whereIn('assignation_id', $assignations())))
+            // Paiements avant l'attribution (caution, avance…) : ni attribution ni loyer ; rattachés à la campagne
+            // de la demande de l'étudiant déposée avant le paiement (même règle que `PaiementsAvantAttribution`).
+            ->orWhere(fn ($avantAttribution) => $avantAttribution
+                ->whereNull('contrat_id')
+                ->whereNull('loyer_id')
+                ->whereExists(fn ($demande) => $demande->selectRaw('1')
+                    ->from('demande')
+                    ->whereColumn('demande.etudiant_id', 'paiements.resident_id')
+                    ->where('demande.campagne_id', $campagneId)
+                    ->whereColumn('demande.created_at', '<=', 'paiements.created_at'))));
     }
 
     // ============================================

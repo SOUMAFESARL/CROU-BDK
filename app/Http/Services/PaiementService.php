@@ -308,7 +308,8 @@ public const TYPES_LOYER = [self::TYPE_LOYER, self::TYPE_AVANCE];
 public function creerPaiement(array $data): Paiement
 {
     // Caution, pénalité, frais… : enregistrés tels quels, sans toucher aux loyers ni au solde du résident.
-    if (!in_array($data['type_paiement'] ?? self::TYPE_LOYER, self::TYPES_LOYER, true)) {
+    // De même pour une avance versée avant l'attribution de la chambre (`avant_attribution`) : pas encore de loyer à solder.
+    if (!in_array($data['type_paiement'] ?? self::TYPE_LOYER, self::TYPES_LOYER, true) || !empty($data['avant_attribution'])) {
         return $this->creerPaiementHorsLoyer($data);
     }
 
@@ -465,7 +466,7 @@ if ($paiementsSansMois->isNotEmpty()) {
  * Les données communes (résident, logement, méthode, notes) sont reprises sur chaque paiement ; le loyer passe
  * par la répartition habituelle, les autres types sont enregistrés hors loyer.
  *
- * @param array<int, array{type_paiement: string, montant: float|int|string}> $lignes
+ * @param array<int, array{type_paiement: string, montant: float|int|string, mois?: string[]}> $lignes
  * @return Paiement[]
  */
 public function creerPaiements(array $commun, array $lignes): array
@@ -474,7 +475,7 @@ public function creerPaiements(array $commun, array $lignes): array
         fn (array $ligne) => $this->creerPaiement(array_merge($commun, [
             'type_paiement' => $ligne['type_paiement'],
             'montant' => $ligne['montant'],
-        ])),
+        ], isset($ligne['mois']) ? ['mois' => $ligne['mois']] : [])),
         $lignes,
     ));
 }
@@ -493,7 +494,7 @@ protected function creerPaiementHorsLoyer(array $data): Paiement
         'batiment_id' => $data['batiment_id'] ?? null,
         'loyer_id' => null,
         'type_paiement' => $data['type_paiement'],
-        'mois' => [],
+        'mois' => $data['mois'] ?? [], // avance avant l'attribution : mois payés d'avance
         'montant' => $data['montant'],
         'montant_du' => $data['montant'],
         'devise' => $data['devise'] ?? 'FCFA',

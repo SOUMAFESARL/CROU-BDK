@@ -6,7 +6,6 @@ import { z } from 'zod';
 import { fcfa } from '@/components/paiements/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
@@ -25,6 +24,7 @@ type ResidentTrouve = {
     id_etudiant: string;
     name: string;
     matricule: string | null;
+    num_table_bac: string | null;
     telephone: string | null;
     residence: string | null;
     residence_id: string | null;
@@ -42,7 +42,18 @@ type ResidentTrouve = {
     readmission: boolean;
     /** Mois suivant le dernier mois payé (loyer ou avance), `mm-aaaa` : premier mois du champ « Mois ». */
     prochain_mois: string;
+    /** Étudiant de la liste définitive publiée sans chambre : paiements hors loyer, montant sur le type de chambre choisi. */
+    sans_chambre?: boolean;
+    /** Année de la campagne de sa demande (étudiant sans chambre). */
+    campagne?: string | null;
+    /** Types de chambre proposés comme base du montant (étudiant sans chambre). */
+    types_chambre?: TypeChambreBase[];
+    /** Mois de caution et d'avance exigés par la campagne pour son volet (étudiant sans chambre). */
+    conditions?: { caution_mois: number; avance_mois: number };
 };
+
+/** Type de chambre actif avec un loyer mensuel : base du montant avant l'attribution de la chambre. */
+type TypeChambreBase = { id: string; name: string; montant: number };
 
 /** Type de paiement actif, paramétré dans Paramétrage hébergement › Types de paiement (`value` = code enregistré). */
 export type OptionTypePaiement = { value: string; label: string };
@@ -64,29 +75,33 @@ const moisSuivants = (depart: string, n: number): string[] => {
     });
 };
 
-/** « Décembre 2026 » pour `12-2026`. */
-const libelleMois = (code: string) => {
+/** « Décembre 2026 » pour `12-2026` ; `court` : « Déc 2026 » (cases du champ « Mois »). */
+const libelleMois = (code: string, court = false) => {
     const [mois, annee] = code.split('-').map(Number);
-    const texte = new Date(annee, mois - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+    const texte = new Date(annee, mois - 1, 1).toLocaleDateString('fr-FR', { month: court ? 'short' : 'long', year: 'numeric' }).replace('.', '');
     return texte.charAt(0).toUpperCase() + texte.slice(1);
 };
 
 /** Nombre de mois saisi s'il est valide, sinon 0. */
 const nombreMois = (valeur: unknown) => (Number.isInteger(Number(valeur)) && Number(valeur) > 0 ? Number(valeur) : 0);
 
-/** Type non proposé aux étudiants en réadmission (contrôlé aussi par le serveur). */
+/** Caution (code `caution`) : à verser avant l'attribution par les nouvelles demandes. */
 const TYPE_CAUTION = 'caution';
-
-/** Types proposés au résident choisi : sans caution en réadmission. */
-const typesPourResident = (types: OptionTypePaiement[], resident: ResidentTrouve | null) =>
-    resident?.readmission ? types.filter((type) => type.value !== TYPE_CAUTION) : types;
 
 /** Nombre de mois maximum par type coché (même limite côté serveur). */
 const MOIS_MAX = 12;
 
-/** Mois proposés pour un loyer : de quoi couvrir les arriérés et le mois en cours ; 1 mois pour les autres types. */
-const moisPropose = (code: string, resident: ResidentTrouve | null) =>
-    code === TYPE_LOYER && resident && resident.loyer_mensuel > 0 ? Math.min(MOIS_MAX, Math.ceil(Number(resident.arriere || 0) / resident.loyer_mensuel) + 1) : 1;
+/**
+ * Mois proposés : pour un loyer, de quoi couvrir les arriérés et le mois en cours ; avant l'attribution, les mois de caution
+ * et d'avance exigés par la campagne pour le volet de l'étudiant ; 1 mois sinon.
+ */
+const moisPropose = (code: string, resident: ResidentTrouve | null) => {
+    if (resident?.sans_chambre) {
+        const exiges = code === TYPE_CAUTION ? resident.conditions?.caution_mois : code === TYPE_AVANCE ? resident.conditions?.avance_mois : undefined;
+        return Math.min(MOIS_MAX, Math.max(1, Number(exiges || 0)));
+    }
+    return code === TYPE_LOYER && resident && resident.loyer_mensuel > 0 ? Math.min(MOIS_MAX, Math.ceil(Number(resident.arriere || 0) / resident.loyer_mensuel) + 1) : 1;
+};
 
 const METHODES = [
     { value: 'orange_money', label: 'Orange Money' },
@@ -102,10 +117,13 @@ const methodesAcceptees = () =>
 
 const schema = z.object({
     resident_id: z.string().min(1, 'Sélectionnez un résident dans la liste.'),
-    chambre_id: z.string().min(1, 'Ce résident n’a pas de chambre attribuée.'),
-    batiment_id: z.string().min(1, 'Le bâtiment de ce résident est introuvable.'),
+    // Chambre et bâtiment : vides pour un étudiant de la liste définitive sans chambre (contrôlé à part, avec le type de chambre).
+    chambre_id: z.string(),
+    batiment_id: z.string(),
     cite_id: z.string(),
     contrat_id: z.string(),
+    /** Base du montant d'un étudiant sans chambre. */
+    type_chambre_id: z.string(),
     // Un paiement par type coché, chacun avec un nombre de mois ; le montant (mois × loyer du type de chambre) est calculé par le serveur.
     lignes: z
         .array(
@@ -127,9 +145,9 @@ type Saisie = z.input<typeof schema>;
 type Valeurs = z.output<typeof schema>;
 
 const ETAPES = ['Résident', 'Paiement', 'Vérification'];
-const CHAMPS_ETAPE: (keyof Saisie)[][] = [['resident_id', 'chambre_id', 'batiment_id'], ['lignes', 'methode_paiement', 'notes'], []];
+const CHAMPS_ETAPE: (keyof Saisie)[][] = [['resident_id', 'chambre_id', 'batiment_id'], ['type_chambre_id', 'lignes', 'methode_paiement', 'notes'], []];
 const LIBELLES: Record<string, string> = { resident_id: 'Résident', lignes: 'Type de paiement', methode_paiement: 'Méthode de paiement' };
-const VIDE: Saisie = { resident_id: '', chambre_id: '', batiment_id: '', cite_id: '', contrat_id: '', lignes: [], methode_paiement: 'especes', notes: '' };
+const VIDE: Saisie = { resident_id: '', chambre_id: '', batiment_id: '', cite_id: '', contrat_id: '', type_chambre_id: '', lignes: [], methode_paiement: 'especes', notes: '' };
 
 type Props = { open: boolean; onClose: () => void; urlStore: string; urlRecherche: string; types: OptionTypePaiement[] };
 
@@ -169,20 +187,19 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
 
     const choisir = (choix: ResidentTrouve | null) => {
         setResident(choix);
-        // Réadmission : une caution déjà cochée est retirée.
-        if (choix?.readmission) {
-            const indexCaution = getValues('lignes').findIndex((ligne) => ligne.type_paiement === TYPE_CAUTION);
-            if (indexCaution >= 0) remove(indexCaution);
-        }
         const options = { shouldValidate: choix !== null };
         setValue('resident_id', choix?.id_etudiant ?? '', options);
         setValue('chambre_id', choix?.chambre_id ?? '', options);
         setValue('batiment_id', choix?.batiment_id ?? '', options);
         setValue('cite_id', choix?.residence_id ?? '');
         setValue('contrat_id', choix?.contrat_id ?? '');
-        // Mois proposés pour le loyer (s'il est coché), modifiables à l'étape suivante.
-        const indexLoyer = getValues('lignes').findIndex((ligne) => ligne.type_paiement === TYPE_LOYER);
-        if (indexLoyer >= 0) setValue(`lignes.${indexLoyer}.mois`, moisPropose(TYPE_LOYER, choix));
+        // Sans chambre : un seul type de chambre possible → choisi d'office.
+        const basesChambre = choix?.sans_chambre ? (choix.types_chambre ?? []) : [];
+        setValue('type_chambre_id', basesChambre.length === 1 ? basesChambre[0].id : '');
+        // Mois proposés pour les types déjà cochés (loyer, ou caution et avance avant l'attribution), modifiables à l'étape suivante.
+        getValues('lignes').forEach((ligne, index) => {
+            if (ligne.type_paiement === TYPE_LOYER || choix?.sans_chambre) setValue(`lignes.${index}.mois`, moisPropose(ligne.type_paiement, choix));
+        });
     };
 
     // Cocher ajoute une ligne (dans l'ordre du paramétrage), décocher la retire.
@@ -236,8 +253,9 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
     const valeurs = useWatch({ control }) as Saisie;
     const lignes = valeurs.lignes ?? [];
     const libelleType = (code: string) => types.find((type) => type.value === code)?.label ?? code;
-    const avecLoyer = lignes.some((ligne) => TYPES_MENSUELS.includes(ligne.type_paiement));
-    const horsLoyer = lignes.filter((ligne) => !TYPES_MENSUELS.includes(ligne.type_paiement)).map((ligne) => libelleType(ligne.type_paiement));
+    // Avant l'attribution de la chambre, l'avance (loyer payé d'avance) porte les mois cochés, sans arriérés à solder.
+    const avantAttribution = resident?.sans_chambre === true;
+    const avecLoyer = !avantAttribution && lignes.some((ligne) => TYPES_MENSUELS.includes(ligne.type_paiement));
     // Champ « Mois » : mois consécutifs à partir du mois qui suit le dernier mois payé ; le loyer prend les premiers, l'avance les suivants.
     const indexLoyer = lignes.findIndex((ligne) => ligne.type_paiement === TYPE_LOYER);
     const indexAvance = lignes.findIndex((ligne) => ligne.type_paiement === TYPE_AVANCE);
@@ -261,25 +279,31 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
         }
         setErreurMoisConcernes(null);
     };
-    // Montants affichés à titre indicatif : le serveur les recalcule à partir du type de chambre.
-    const loyerMensuel = Number(resident?.loyer_mensuel || 0);
+    // Montants affichés à titre indicatif : le serveur les recalcule à partir du type de chambre
+    // (celui de sa chambre, ou celui choisi pour un étudiant de la liste définitive sans chambre).
+    const sansChambre = resident?.sans_chambre === true;
+    const basesChambre = sansChambre ? (resident?.types_chambre ?? []) : [];
+    const baseChoisie = basesChambre.find((type) => type.id === valeurs.type_chambre_id) ?? null;
+    const loyerMensuel = sansChambre ? Number(baseChoisie?.montant || 0) : Number(resident?.loyer_mensuel || 0);
     const montantLigne = (mois: unknown) => nombreMois(mois) * loyerMensuel;
     const total = lignes.reduce((somme, ligne) => somme + montantLigne(ligne.mois), 0);
-    const sansLoyer = resident !== null && loyerMensuel <= 0;
-    const typesProposes = typesPourResident(types, resident);
-    const avisHorsLoyer =
-        horsLoyer.length > 0
-            ? `${horsLoyer.join(', ')} : ${horsLoyer.length > 1 ? 'ces paiements ne sont pas affectés' : 'ce paiement n’est pas affecté'} au loyer, les arriérés et le solde du résident ne changent pas.`
-            : null;
+    // Type de chambre pas encore choisi : signalé dans les champs manquants, pas comme un loyer absent.
+    const sansLoyer = resident !== null && loyerMensuel <= 0 && !(sansChambre && !baseChoisie);
+    // Tous les types enregistrés (actifs) sont proposés, quel que soit l'étudiant.
+    const typesProposes = types;
     // Nombre de mois manquant d'une ligne : libellé « Nombre de mois – <type> ».
     const libelles = { ...LIBELLES, ...Object.fromEntries(lignes.map((ligne, i) => [`lignes.${i}.mois`, `Nombre de mois – ${libelleType(ligne.type_paiement)}`])) };
-    // Sans résident, seul « Résident » est signalé (chambre et bâtiment en découlent).
-    const manquants = champsManquants(schema, valeurs, CHAMPS_ETAPE, libelles).filter((item) => !(valeurs.resident_id === '' && ['chambre_id', 'batiment_id'].includes(item.cle)));
+    // Sans chambre, le type de chambre (base du montant) est obligatoire.
+    const manquants = [
+        ...champsManquants(schema, valeurs, CHAMPS_ETAPE, libelles),
+        ...(sansChambre && !baseChoisie ? [{ cle: 'type_chambre_id', libelle: 'Type de chambre (base du montant)', etape: 1 }] : []),
+    ];
     const erreurLignes = errors.lignes?.message ?? errors.lignes?.root?.message;
     const erreurResident = errors.resident_id?.message ?? errors.chambre_id?.message ?? errors.batiment_id?.message;
 
     return (
         <Dialog open={open} onOpenChange={(ouvert) => !ouvert && !isSubmitting && onClose()}>
+            {/* Hauteur ajustée au contenu : la liste des résultats (étape 1), dans le flux, agrandit la fenêtre. */}
             <DialogContent className="max-w-2xl">
                 <form
                     onSubmit={handleSubmit(onSubmit, (fautes) => setEtape(Math.max(0, CHAMPS_ETAPE.findIndex((champs) => champs.some((champ) => fautes[champ])))))}
@@ -303,7 +327,6 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
 
                         {etape === 0 && (
                             <>
-                                <p className="text-sm text-muted">Seuls les résidents ayant une attribution confirmée apparaissent dans la recherche.</p>
                                 <RechercheResident url={urlRecherche} resident={resident} onChange={choisir} erreur={erreurResident} />
                                 {resident && <FicheResident resident={resident} />}
                             </>
@@ -316,7 +339,7 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
                                     <div className="flex flex-col gap-1 rounded-brand border bg-surface px-4 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between">
                                         <span className="min-w-0 truncate">
                                             <span className="font-medium text-gray-900">{resident.name}</span>
-                                            <span className="text-muted">{resident.chambre ? ` · Chambre ${resident.chambre}` : ''}</span>
+                                            <span className="text-muted">{resident.chambre ? ` · Chambre ${resident.chambre}` : sansChambre ? ' · Sans chambre' : ''}</span>
                                             {resident.readmission && (
                                                 <Badge variant="neutral" className="ml-2" title="Réadmission : la caution ne s’applique pas.">
                                                     Réadmission
@@ -324,7 +347,10 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
                                             )}
                                         </span>
                                         <span className="shrink-0 text-muted">
-                                            Loyer mensuel : <span className="font-medium text-gray-900 tabular-nums">{loyerMensuel > 0 ? fcfa(loyerMensuel) : 'non défini'}</span>
+                                            Loyer mensuel :{' '}
+                                            <span className="font-medium text-gray-900 tabular-nums">
+                                                {loyerMensuel > 0 ? fcfa(loyerMensuel) : sansChambre ? 'type de chambre à choisir' : 'non défini'}
+                                            </span>
                                         </span>
                                     </div>
                                 ) : (
@@ -335,7 +361,36 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
                                         </Button>
                                     </p>
                                 )}
-                                <fieldset className="space-y-1.5" aria-describedby={erreurLignes ? 'np-types-error' : avisHorsLoyer ? 'np-types-hint' : undefined}>
+                                {/* Étudiant sans chambre : le montant se calcule sur le loyer mensuel du type de chambre choisi. */}
+                                {sansChambre && (
+                                    <Field
+                                        id="np-type-chambre"
+                                        label="Type de chambre (base du montant)"
+                                        required
+                                        error={errors.type_chambre_id?.message}
+                                        hint={basesChambre.length === 0 ? 'Aucun type de chambre avec un loyer mensuel (Paramétrage hébergement › Types de chambre).' : undefined}
+                                    >
+                                        <Controller
+                                            control={control}
+                                            name="type_chambre_id"
+                                            render={({ field }) => (
+                                                <Select value={field.value || undefined} onValueChange={field.onChange} disabled={basesChambre.length === 0}>
+                                                    <SelectTrigger id="np-type-chambre" invalid={!!errors.type_chambre_id}>
+                                                        <SelectValue placeholder="Sélectionner un type de chambre" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {basesChambre.map((type) => (
+                                                            <SelectItem key={type.id} value={type.id}>
+                                                                {type.name} · {fcfa(type.montant)} / mois
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            )}
+                                        />
+                                    </Field>
+                                )}
+                                <fieldset className="space-y-1.5" aria-describedby={erreurLignes ? 'np-types-error' : undefined}>
                                     <legend className="mb-1.5 block text-sm font-medium text-gray-800">
                                         Types de paiement<span className="ml-0.5 text-red-600">*</span>
                                     </legend>
@@ -405,18 +460,14 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
                                                 </div>
                                             );
                                         })}
-                                        {typesProposes.length === 0 && <p className="px-3 py-4 text-sm text-muted">Aucun type de paiement actif (Paramétrage hébergement › Types de paiement).</p>}
+                                        {typesProposes.length === 0 && (
+                                            <p className="px-3 py-4 text-sm text-muted">Aucun type de paiement actif (Paramétrage hébergement › Types de paiement).</p>
+                                        )}
                                     </div>
-                                    {erreurLignes ? (
+                                    {erreurLignes && (
                                         <p id="np-types-error" role="alert" className="text-xs font-medium text-red-600">
                                             {erreurLignes}
                                         </p>
-                                    ) : (
-                                        avisHorsLoyer && (
-                                            <p id="np-types-hint" className="text-xs text-muted">
-                                                {avisHorsLoyer}
-                                            </p>
-                                        )
                                     )}
                                 </fieldset>
                                 {lignes.length > 0 && (
@@ -428,7 +479,7 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
                                     </p>
                                 )}
                                 {resident && totalMois > 0 && (
-                                    <fieldset className="space-y-1.5" aria-describedby={erreurMoisConcernes ? 'np-mois-error' : 'np-mois-hint'}>
+                                    <fieldset className="space-y-1.5" aria-describedby={erreurMoisConcernes ? 'np-mois-error' : undefined}>
                                         <legend className="mb-1.5 block text-sm font-medium text-gray-800">
                                             Mois<span className="ml-0.5 text-red-600">*</span>
                                         </legend>
@@ -446,22 +497,16 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
                                                     >
                                                         <Checkbox className="mt-0.5" checked={coche} onCheckedChange={() => basculerMois(position)} />
                                                         <span className="min-w-0">
-                                                            <span className="block text-gray-900">{libelleMois(code)}</span>
+                                                            <span className="block text-gray-900">{libelleMois(code, true)}</span>
                                                             {pour && <span className="block text-xs text-muted">{pour}</span>}
                                                         </span>
                                                     </label>
                                                 );
                                             })}
                                         </div>
-                                        {erreurMoisConcernes ? (
+                                        {erreurMoisConcernes && (
                                             <p id="np-mois-error" role="alert" className="text-xs font-medium text-red-600">
                                                 {erreurMoisConcernes}
-                                            </p>
-                                        ) : (
-                                            <p id="np-mois-hint" className="text-xs text-muted">
-                                                Mois consécutifs à partir de {libelleMois(resident.prochain_mois)} (mois qui suit le dernier paiement) : {totalMois} mois cochés
-                                                {moisLoyer > 0 && moisAvance > 0 ? ` (${moisLoyer} de loyer, puis ${moisAvance} d’avance)` : ''}. Cocher un mois coche aussi les
-                                                précédents.
                                             </p>
                                         )}
                                     </fieldset>
@@ -496,12 +541,18 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
                             <>
                                 <p className="text-sm text-muted">
                                     Vérifiez les informations avant d’enregistrer.{' '}
-                                    {avecLoyer && 'Le loyer et l’avance sont d’abord affectés aux arriérés, puis aux mois cochés, dans l’ordre.'} {avisHorsLoyer}
+                                    {avecLoyer && 'Le loyer et l’avance sont d’abord affectés aux arriérés, puis aux mois cochés, dans l’ordre.'}
                                 </p>
-                                <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} action="enregistrer le paiement" />
                                 <dl className="divide-y rounded-brand border text-sm">
                                     <Recap terme="Résident" valeur={resident ? `${resident.name}${resident.matricule ? ` (${resident.matricule})` : ''}` : null} />
-                                    <Recap terme="Logement" valeur={[resident?.residence, resident?.batiment, resident?.chambre && `Chambre ${resident.chambre}`].filter(Boolean).join(' · ')} />
+                                    <Recap
+                                        terme="Logement"
+                                        valeur={
+                                            sansChambre
+                                                ? `Pas encore de chambre${baseChoisie ? ` · base : ${baseChoisie.name}` : ''}`
+                                                : [resident?.residence, resident?.batiment, resident?.chambre && `Chambre ${resident.chambre}`].filter(Boolean).join(' · ')
+                                        }
+                                    />
                                     <Recap terme="Méthode" valeur={METHODES.find((methode) => methode.value === valeurs.methode_paiement)?.label} />
                                     {lignes.length === 0 && <Recap terme="Type de paiement" valeur={null} />}
                                     {lignes.map((ligne) => (
@@ -512,8 +563,8 @@ export function NouveauPaiementDialog({ open, onClose, urlStore, urlRecherche, t
                                             fort={lignes.length === 1}
                                         />
                                     ))}
-                                    {moisLoyer > 0 && <Recap terme="Mois – Loyer" valeur={moisConcernes.slice(0, moisLoyer).map(libelleMois).join(', ')} />}
-                                    {moisAvance > 0 && <Recap terme="Mois – Avance" valeur={moisConcernes.slice(moisLoyer).map(libelleMois).join(', ')} />}
+                                    {moisLoyer > 0 && <Recap terme="Mois – Loyer" valeur={moisConcernes.slice(0, moisLoyer).map((code) => libelleMois(code)).join(', ')} />}
+                                    {moisAvance > 0 && <Recap terme="Mois – Avance" valeur={moisConcernes.slice(moisLoyer).map((code) => libelleMois(code)).join(', ')} />}
                                     {lignes.length > 1 && <Recap terme="Total" valeur={fcfa(total)} fort />}
                                     {avecLoyer && resident && resident.arriere > 0 && <Recap terme="Arriérés du résident" valeur={fcfa(resident.arriere)} />}
                                     {valeurs.notes && <Recap terme="Notes" valeur={String(valeurs.notes)} />}
@@ -615,7 +666,13 @@ function RechercheResident({ url, resident, onChange, erreur }: { url: string; r
 
     return (
         <div ref={conteneur} className="relative">
-            <Field id="np-resident" label="Résident" required error={erreur} hint="Nom, matricule, téléphone ou e-mail (2 caractères minimum).">
+            <Field
+                id="np-resident"
+                label="Résident"
+                required
+                error={erreur}
+                hint="Nom, matricule, n° de table au bac, téléphone ou e-mail. Résidents logés et étudiants de la liste définitive publiée."
+            >
                 <Input
                     id="np-resident"
                     type="search"
@@ -623,18 +680,19 @@ function RechercheResident({ url, resident, onChange, erreur }: { url: string; r
                     autoComplete="off"
                     value={terme}
                     onChange={(event) => setTerme(event.target.value)}
-                    placeholder="Rechercher un résident…"
+                    placeholder="Rechercher un résident ou un admis…"
                     icon={<Search />}
                     trailing={chargement ? <Loader2 className="mr-2 size-4 animate-spin text-muted" aria-hidden /> : undefined}
                     invalid={!!erreur}
                 />
             </Field>
             {(resultats !== null || echec) && (
-                <ul role="listbox" aria-label="Résidents trouvés" className="absolute inset-x-0 top-[4.75rem] z-20 max-h-72 overflow-y-auto rounded-brand border bg-white p-1 shadow-md">
+                // Dans le flux (et non superposée) : la liste agrandit la fenêtre au lieu d'être rognée par le défilement du corps.
+                <ul role="listbox" aria-label="Résidents trouvés" className="mt-2 max-h-96 overflow-y-auto rounded-brand border bg-white p-1 shadow-sm">
                     {echec ? (
                         <li className="px-3 py-6 text-center text-sm text-red-700">La recherche a échoué. Réessayez.</li>
                     ) : resultats && resultats.length === 0 ? (
-                        <li className="px-3 py-6 text-center text-sm text-muted">Aucun résident trouvé.</li>
+                        <li className="px-3 py-6 text-center text-sm text-muted">Aucun résident ni étudiant de la liste définitive publiée trouvé.</li>
                     ) : (
                         resultats?.map((item) => (
                             <li key={item.id_etudiant} role="option" aria-selected={false}>
@@ -649,10 +707,20 @@ function RechercheResident({ url, resident, onChange, erreur }: { url: string; r
                                     <span className="min-w-0">
                                         <span className="flex flex-wrap items-center gap-2">
                                             <span className="font-medium text-gray-900">{item.name}</span>
-                                            {item.arriere > 0 ? <Badge variant="danger">Arriéré</Badge> : <Badge variant="success">En règle</Badge>}
+                                            {!item.sans_chambre &&
+                                                (item.arriere > 0 ? <Badge variant="danger">Arriéré</Badge> : <Badge variant="success">En règle</Badge>)}
                                         </span>
                                         <span className="block truncate text-xs text-muted">
-                                            {[item.matricule, item.telephone, item.residence, item.batiment, item.chambre && `Chambre ${item.chambre}`].filter(Boolean).join(' · ')}
+                                            {[
+                                                item.matricule,
+                                                item.num_table_bac && `Table bac ${item.num_table_bac}`,
+                                                item.telephone,
+                                                item.residence,
+                                                item.batiment,
+                                                item.chambre ? `Chambre ${item.chambre}` : item.sans_chambre && 'Sans chambre',
+                                            ]
+                                                .filter(Boolean)
+                                                .join(' · ')}
                                         </span>
                                     </span>
                                     <span className="shrink-0 text-xs font-medium text-primary tabular-nums">{item.loyer_mensuel ? fcfa(item.loyer_mensuel) : '—'}</span>
@@ -668,6 +736,18 @@ function RechercheResident({ url, resident, onChange, erreur }: { url: string; r
 
 function FicheResident({ resident }: { resident: ResidentTrouve }) {
     const enRetard = resident.arriere > 0;
+    if (resident.sans_chambre) {
+        const bases = resident.types_chambre ?? [];
+        return (
+            <section className="space-y-3">
+                <dl className="grid grid-cols-1 gap-x-6 gap-y-2.5 rounded-brand border bg-surface p-4 text-sm sm:grid-cols-2">
+                    <Info terme="Campagne" valeur={resident.campagne} />
+                    <Info terme="Chambre" valeur="Pas encore attribuée" />
+                    <Info terme="Loyer mensuel (base)" valeur={bases.length === 1 ? `${fcfa(bases[0].montant)} (${bases[0].name})` : bases.length > 1 ? 'Selon le type de chambre choisi' : null} />
+                </dl>
+            </section>
+        );
+    }
     return (
         <section className="space-y-3">
             <dl className="grid grid-cols-1 gap-x-6 gap-y-2.5 rounded-brand border bg-surface p-4 text-sm sm:grid-cols-2">

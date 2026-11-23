@@ -136,6 +136,18 @@ class PaiementHorsLoyerTest extends TestCase
         $this->assertSame(0, Paiement::count());
     }
 
+    public function test_une_avance_avant_l_attribution_est_enregistree_hors_loyer(): void
+    {
+        // Pas encore de chambre ni de loyer : l'avance est enregistrée telle quelle, sans mois.
+        $loyers = Mockery::mock(LoyerRepositoryInterface::class);
+        $loyers->shouldNotReceive('calculerArriere');
+
+        $paiement = $this->service($loyers)->creerPaiement(['chambre_id' => null, 'batiment_id' => null, 'avant_attribution' => true] + $this->donnees('avance'));
+
+        $this->assertSame(['avance', null, [], null], [$paiement->type_paiement, $paiement->loyer_id, $paiement->mois, $paiement->chambre_id]);
+        $this->assertEquals(5000, $paiement->montant);
+    }
+
     public function test_le_dernier_mois_paye_ignore_les_paiements_hors_loyer(): void
     {
         DB::table('paiements')->insert([

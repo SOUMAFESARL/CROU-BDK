@@ -298,21 +298,12 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
 
     return (
         <AdminLayout title="Admissions">
-            <PageHeader title="Admissions" description="Suivez les demandes de logement et traitez chaque dossier de candidature." />
-
-            {/* Campagne active : à droite, sur la ligne des onglets Campagnes / Admissions. */}
-            <OngletsCampagnesAdmissions
-                actif={ongletMenu}
-                urls={{
-                    campagnes: urls.campagnes,
-                    admissions: urls.filtres?.toutes ?? null,
-                    validees: urls.filtres?.validees ?? null,
-                    definitives: urls.filtres?.definitives ?? null,
-                }}
+            <PageHeader
+                title="Admissions"
                 aside={
-                    campagneActive ? (
-                        <>
-                            {ongletMenu === 'admissions' && campagnes.length > 0 ? (
+                    // Campagne affichée : en haut, à l’opposé du titre.
+                    campagneActive &&
+                    (ongletMenu === 'admissions' && campagnes.length > 0 ? (
                                 // Liste des demandes : les indicateurs et les listes suivent la campagne choisie (libellé + année).
                                 <Select value={campagneActive.id} onValueChange={(id) => appliquer({ q: recherche, etat_dossier: filters.etat_dossier, type: filters.type, campagne: id })}>
                                     <SelectTrigger aria-label="Campagne affichée" className="h-9 w-full border-[#C6E3A6] bg-soft text-[#004D00] sm:w-72">
@@ -335,7 +326,22 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                                     <CirclePlay className="size-4" aria-hidden />
                                     <strong className="font-medium">Campagne active {campagneActive.annee}</strong>
                                 </span>
-                            )}
+                            ))
+                }
+            />
+
+            {/* Critères de la campagne : à droite, sur la ligne des onglets Campagnes / Admissions. */}
+            <OngletsCampagnesAdmissions
+                actif={ongletMenu}
+                urls={{
+                    campagnes: urls.campagnes,
+                    admissions: urls.filtres?.toutes ?? null,
+                    validees: urls.filtres?.validees ?? null,
+                    definitives: urls.filtres?.definitives ?? null,
+                }}
+                aside={
+                    campagneActive ? (
+                        <>
                             {campagneActive.echeance && <Element icone={<CalendarClock className="size-4" aria-hidden />}>Échéance : {dateFr(campagneActive.echeance)}</Element>}
                             {campagneActive.moyenne_min && <Element icone={<GraduationCap className="size-4" aria-hidden />}>Moyenne min. {campagneActive.moyenne_min}/20</Element>}
                             {campagneActive.distance_min && <Element icone={<MapPin className="size-4" aria-hidden />}>Distance min. {campagneActive.distance_min} km</Element>}

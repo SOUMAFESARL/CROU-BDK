@@ -1,5 +1,5 @@
 import { Link, router } from '@inertiajs/react';
-import { BarChart3, CalendarRange, Check, Download, Eye, Plus, Send, Wallet, X } from 'lucide-react';
+import { BarChart3, Check, CirclePlay, Download, Eye, Plus, Send, Wallet, X } from 'lucide-react';
 import { useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
@@ -8,7 +8,7 @@ import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { NouveauPaiementDialog, type OptionTypePaiement } from '@/components/paiements/nouveau-paiement-dialog';
 import { RelanceDialog } from '@/components/paiements/relance-dialog';
-import { fcfa, MOIS, StatutPaiementBadge } from '@/components/paiements/shared';
+import { fcfa, MOIS, TypePaiementBadge } from '@/components/paiements/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
@@ -29,6 +29,7 @@ type Paiement = {
     montant: number;
     methode: string;
     type: string;
+    type_code: string;
     statut: string;
     statut_label: string;
     date_paiement: string | null;
@@ -121,17 +122,20 @@ export default function PaiementsIndex({ paiements, kpis, residences, typesPaiem
         {
             key: 'logement',
             header: 'Logement',
-            cell: (p) => (
-                <div className="min-w-28">
-                    <p>{p.residence ?? 'N/A'}</p>
-                    <p className="text-xs text-muted">Chambre {p.chambre ?? 'N/A'}</p>
-                </div>
-            ),
+            cell: (p) =>
+                p.residence || p.chambre ? (
+                    <div className="min-w-28">
+                        <p>{p.residence ?? '—'}</p>
+                        {p.chambre && <p className="text-xs text-muted">Chambre {p.chambre}</p>}
+                    </div>
+                ) : (
+                    <span className="text-muted">—</span>
+                ),
         },
+        { key: 'type', header: 'Type', cell: (p) => <TypePaiementBadge code={p.type_code} label={p.type} /> },
         { key: 'mois', header: 'Mois', cell: (p) => (p.mois ? <span className="line-clamp-2 max-w-48 capitalize">{p.mois}</span> : <span className="text-muted">—</span>) },
         { key: 'montant', header: 'Montant', className: 'whitespace-nowrap font-medium tabular-nums', cell: (p) => fcfa(p.montant) },
         { key: 'methode', header: 'Méthode', cell: (p) => <Badge variant="info">{p.methode}</Badge> },
-        { key: 'statut', header: 'Statut', cell: (p) => <StatutPaiementBadge statut={p.statut} label={p.statut_label} /> },
         {
             key: 'date',
             header: 'Date de paiement',
@@ -164,7 +168,27 @@ export default function PaiementsIndex({ paiements, kpis, residences, typesPaiem
         <AdminLayout title="Paiements des loyers">
             <PageHeader
                 title="Paiements des loyers"
-                description="Encaissements des résidents et suivi des impayés. Les montants dus sont toujours calculés à partir des loyers enregistrés."
+                aside={
+                    // Les indicateurs et la liste des paiements portent sur la campagne choisie.
+                    campagnes.length > 0 && (
+                        <Select value={filters.campagne || TOUTES_CAMPAGNES} onValueChange={(valeur) => filtrer('campagne', valeur)}>
+                            <SelectTrigger aria-label="Campagne affichée" className="h-9 w-full border-[#C6E3A6] bg-soft text-[#004D00] sm:w-80">
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                    <CirclePlay className="size-4 shrink-0" aria-hidden />
+                                    <SelectValue />
+                                </span>
+                            </SelectTrigger>
+                            <SelectContent align="end">
+                                {campagnes.map((item) => (
+                                    <SelectItem key={item.id} value={item.id}>
+                                        {libelleCampagne(item)}
+                                    </SelectItem>
+                                ))}
+                                <SelectItem value={TOUTES_CAMPAGNES}>Toutes les campagnes</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    )
+                }
                 actions={
                     (urls.rapport || urls.relances || urls.store) && (
                         <>
@@ -187,31 +211,6 @@ export default function PaiementsIndex({ paiements, kpis, residences, typesPaiem
                     )
                 }
             />
-
-            {campagnes.length > 0 && (
-                <div className="mb-4 flex flex-col gap-2 rounded-brand border bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-2 text-sm text-gray-700">
-                        <CalendarRange {...ICON} className="shrink-0 text-primary" aria-hidden />
-                        <label htmlFor="paiements-campagne">Campagne</label>
-                    </div>
-                    <Select value={filters.campagne || TOUTES_CAMPAGNES} onValueChange={(valeur) => filtrer('campagne', valeur)}>
-                        <SelectTrigger id="paiements-campagne" className="h-10 sm:w-80" aria-describedby="paiements-campagne-aide">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {campagnes.map((item) => (
-                                <SelectItem key={item.id} value={item.id}>
-                                    {libelleCampagne(item)}
-                                </SelectItem>
-                            ))}
-                            <SelectItem value={TOUTES_CAMPAGNES}>Toutes les campagnes</SelectItem>
-                        </SelectContent>
-                    </Select>
-                    <p id="paiements-campagne-aide" className="sr-only">
-                        Les indicateurs et la liste des paiements portent sur la campagne choisie.
-                    </p>
-                </div>
-            )}
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <StatCard tone="green" label="Total encaissé" value={fcfa(kpis.total_encaisse)} extra={`${nombre(kpis.nombre_paiements)} paiement(s) ce mois`} />

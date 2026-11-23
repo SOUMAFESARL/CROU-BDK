@@ -148,13 +148,16 @@ class RecevabiliteDemandes
      * Demandes (identifiants) validées et approuvées en commission : dossier « Recevable » dont l'approbation
      * (`date_approbation_commission`) n'est pas antérieure à la dernière validation (transition vers `eligible`).
      *
+     * `$etats` : états du dossier retenus (par défaut « Recevable » ; `ListeDefinitivePubliee` y ajoute « Confirmé »).
+     *
      * @param  iterable<\App\Models\DemandeEtudiant>  $demandes
+     * @param  list<string>  $etats
      * @return string[]
      */
-    public function approbationsCommission(iterable $demandes): array
+    public function approbationsCommission(iterable $demandes, array $etats = [self::ETAT_VALIDE]): array
     {
         $dates = collect($demandes)
-            ->filter(fn ($demande) => $demande->etat_dossier === self::ETAT_VALIDE && ! empty($demande->date_approbation_commission))
+            ->filter(fn ($demande) => in_array($demande->etat_dossier, $etats, true) && ! empty($demande->date_approbation_commission))
             ->mapWithKeys(fn ($demande) => [(string) $demande->getKey() => Carbon::parse($demande->date_approbation_commission)]);
         if ($dates->isEmpty()) {
             return [];

@@ -375,6 +375,8 @@ Route::middleware(['admin'])->group(function () {
             Route::get('/export',  'export')->name('export');
             Route::get('/recherche-residents', 'rechercheResidents')->name('recherche');
             Route::get('/detail/{id}',  'show')->name('show');
+            // Reçu PDF d'un paiement (document dédié, une page A4).
+            Route::get('/recu/{id}', 'recu')->name('recu');
 
 
 

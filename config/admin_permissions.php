@@ -106,6 +106,7 @@ return [
         'admin.hebergement.paiements.export' => 'hebergement.paiements.export',
         'admin.hebergement.paiements.index' => 'hebergement.paiements.view',
         'admin.hebergement.paiements.rapport_financier' => 'hebergement.paiements.view',
+        'admin.hebergement.paiements.recu' => 'hebergement.paiements.view',
         'admin.hebergement.paiements.recherche' => 'hebergement.paiements.view',
         'admin.hebergement.paiements.relances.envoyer' => 'hebergement.paiements.update',
         'admin.hebergement.paiements.show' => 'hebergement.paiements.view',

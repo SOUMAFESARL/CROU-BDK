@@ -65,6 +65,8 @@ class AllocationChambreService
     /** L'étudiant a déjà confirmé son intérêt : l'attribution est définitive, sans nouvelle acceptation. */
     private function creerReservation(Etudiant $etudiant, Chambre $chambre, Campagne $campagne, string $type, ?int $numeroLit = null): AssignationChambre
     {
+        // Caution (nouvelles demandes) et avance payées avant l'attribution, selon les conditions de la campagne.
+        app(PaiementsAvantAttribution::class)->verifier($etudiant, $chambre, $campagne);
         $assignation = $this->assignationRepository->create([
             'etudiant_id' => $etudiant->getKey(),
             'chambre_id' => $chambre->getKey(),

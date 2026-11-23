@@ -396,6 +396,11 @@ function Formulaire({
                         <Grille>
                             <ChampListe control={control} name="niveau_precedent" id="dh-niveau-prec" label="Niveau d’étude précédent" options={niveaux} placeholder="Choisir un niveau" erreur={errors.niveau_precedent?.message} requis />
                             <ChampListe control={control} name="niveau" id="dh-niveau" label="Niveau d’étude actuel" options={niveauxActuels} placeholder="Choisir un niveau" erreur={errors.niveau?.message} requis />
+                            {parcours === 'bachelier' && (
+                                <Field id="dh-num-table-bac" label="Numéro de table au bac" required error={errors.num_table_bac?.message} hint="Inscrit sur votre convocation ou votre relevé de notes du bac.">
+                                    <Input id="dh-num-table-bac" autoComplete="off" placeholder="Ex. : 2501234567" className="uppercase" invalid={!!errors.num_table_bac} {...register('num_table_bac')} />
+                                </Field>
+                            )}
                             {parcours === 'etudiant' && (
                                 <Field id="dh-matricule" label="Matricule universitaire" error={errors.matricule?.message} hint="Facultatif · à renseigner si vous en avez déjà un.">
                                     <Input id="dh-matricule" placeholder="Matricule universitaire" invalid={!!errors.matricule} {...register('matricule')} />
@@ -464,11 +469,6 @@ function Formulaire({
                                             />
                                         )}
                                     />
-                                </Field>
-                            )}
-                            {parcours === 'bachelier' && (
-                                <Field id="dh-num-table-bac" label="Numéro de table au bac" required error={errors.num_table_bac?.message} hint="Inscrit sur votre convocation ou votre relevé de notes du bac.">
-                                    <Input id="dh-num-table-bac" autoComplete="off" placeholder="Ex. : 2501234567" className="uppercase" invalid={!!errors.num_table_bac} {...register('num_table_bac')} />
                                 </Field>
                             )}
                         </Grille>

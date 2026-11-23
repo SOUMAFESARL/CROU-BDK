@@ -61,7 +61,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
     {
         $this->agent(['hebergement.residents.view', 'hebergement.attributions.assign', 'hebergement.attributions.view']);
 
-        $page = $this->page('residents');
+        $page = $this->page('residents', ['campagne' => 'toutes']);
 
         $this->assertSame('Admin/Hebergement/Residents/Index', $page['component']);
         $props = $page['props'];
@@ -193,7 +193,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->agent(['hebergement.residents.view']);
         DB::table('etudiants')->where('id_etudiant', 'other')->update(['statut_inscription' => 'en_verification']);
 
-        $props = $this->page('en_verification')['props'];
+        $props = $this->page('en_verification', ['campagne' => 'toutes'])['props'];
 
         $this->assertSame(1, $props['residents']['total']);
         $this->assertNotNull($props['residents']['data'][0]['urls']['traiter']);
@@ -217,12 +217,39 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNull($this->page('en_verification')['props']['residents']['data'][0]['urls']['attribuer']);
     }
 
+    public function test_choix_de_la_campagne(): void
+    {
+        $this->agent(['hebergement.residents.view']);
+        DB::table('campagne')->insert(['id_campagne' => 'ancienne', 'annee_campagne' => '2024-2025', 'statut' => 'cloturee', 'created_at' => now()->subYear()]);
+
+        // Par défaut : campagne active ; « student » y a une affectation confirmée, « other » non.
+        $props = $this->page('residents')['props'];
+        $this->assertSame('campaign', $props['filters']['campagne']);
+        $this->assertSame('campaign', $props['campagneActive']['id']);
+        $this->assertSame(['ancienne'], collect($props['campagnes'])->pluck('id')->diff(['campaign'])->values()->all());
+        $this->assertSame(['student'], collect($props['residents']['data'])->pluck('id')->all());
+        $this->assertSame(1, $props['stats']['residents']);
+        $this->assertStringNotContainsString('campagne=', $props['urls']['filtres']['residents']);
+
+        // Autre campagne : liste et indicateurs vides, choix conservé par les liens des indicateurs.
+        $props = $this->page('residents', ['campagne' => 'ancienne'])['props'];
+        $this->assertSame(0, $props['residents']['total']);
+        $this->assertSame(['residents' => 0, 'en_verification' => 0], $props['stats']);
+        $this->assertStringContainsString('campagne=ancienne', $props['urls']['filtres']['en_verification']);
+
+        // Toutes les campagnes : aucun filtre.
+        $props = $this->page('residents', ['campagne' => 'toutes'])['props'];
+        $this->assertNull($props['campagneActive']);
+        $this->assertSame(2, $props['residents']['total']);
+        $this->assertStringContainsString('campagne=toutes', $props['urls']['filtres']['residents']);
+    }
+
     public function test_recherche_par_nom_ou_numero_de_chambre(): void
     {
         $this->agent(['hebergement.residents.view']);
 
         $props = $this->page('residents', ['q' => 'konan'])['props'];
-        $this->assertSame(['q' => 'konan'], $props['filters']);
+        $this->assertSame(['q' => 'konan', 'campagne' => 'campaign'], $props['filters']);
         $this->assertSame(['student'], collect($props['residents']['data'])->pluck('id')->all());
 
         // Chambre « room » : seule l'affectation confirmée compte (celle de « other » est annulée).

@@ -7,6 +7,7 @@ use App\Http\Services\CampagneValidationService;
 use App\Http\Services\EtudiantEditionService;
 use App\Http\Services\EtudiantService;
 use App\Models\AssignationChambre;
+use App\Models\Campagne;
 use App\Models\Etudiant;
 use App\Repositories\EtudiantRepository;
 use App\Services\AdminAccess;
@@ -17,7 +18,7 @@ use Inertia\Inertia;
 
 class ResidentContratControler extends Controller
 {
-    /** Filtres de la page : dossiers en vérification et étudiants déjà logés. */
+    /** Filtres de la page : admis à loger (liste définitive publiée) et étudiants déjà logés. */
     private const FILTRES = ['en_verification', 'residents'];
 
     public function __construct(protected EtudiantService $etudiantService) {}
@@ -60,16 +61,23 @@ class ResidentContratControler extends Controller
         $etat = in_array($filtre, self::FILTRES, true) ? $filtre : 'residents';
         $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
         $repository = app(EtudiantRepository::class);
-        $campagne = app(CampagneValidationService::class)->getCampagneActive();
+        // Campagne choisie dans le bandeau (`?campagne=`) : par défaut la campagne active, `toutes` = aucun filtre.
+        $campagnes = Campagne::query()->orderByDesc('created_at')->get();
+        $choix = (string) $request->query('campagne', '');
+        $toutes = $choix === 'toutes';
+        $campagne = $toutes ? null : (($choix !== '' ? $campagnes->first(fn (Campagne $c) => (string) $c->getKey() === $choix) : null)
+            ?? app(CampagneValidationService::class)->getCampagneActive()
+            ?? $campagnes->first());
+        $campagneId = $campagne ? (string) $campagne->getKey() : null;
+        // Choix conservé par les liens des indicateurs quand il a été fait dans le bandeau.
+        $choixCampagne = $request->filled('campagne') ? ['campagne' => $toutes ? 'toutes' : $campagneId] : [];
 
         $recherche = trim((string) $request->query('q', ''));
-        $page = $repository->getAdmissionsPage($etat, 10, $recherche);
+        $page = $repository->getAdmissionsPage($etat, 10, $recherche, null, null, $campagneId);
         $page->getCollection()->load(['assignationsChambre' => fn ($q) => $q->where('statut', 'confirmee')
             ->with(['chambre.batiment', 'chambre.cite'])]);
 
         $modifiable = $access->allows($admin, 'admin.hebergement.residents_contrat.update_etudiant');
-
-        $stats = $repository->getStats();
 
         return Inertia::render('Admin/Hebergement/Residents/Index', [
             'residents' => $page->through(function (Etudiant $etudiant) use ($personnel, $historique, $url, $etat, $modifiable) {
@@ -116,20 +124,30 @@ class ResidentContratControler extends Controller
                 ];
             }),
             'stats' => [
-                'residents' => $stats['residents'],
-                'en_verification' => $stats['en_verification'],
+                'residents' => $repository->compterAdmissions('residents', $campagneId),
+                'en_verification' => $repository->compterAdmissions('en_verification', $campagneId),
             ],
             'etat' => $etat,
-            'filters' => ['q' => $recherche],
+            'filters' => ['q' => $recherche, 'campagne' => $toutes ? 'toutes' : (string) $campagneId],
             'colonnes' => ['personnel' => $personnel, 'historique' => $historique],
-            'campagneActive' => $campagne ? ['annee' => $campagne->annee_campagne] : null,
+            // Campagnes proposées dans le bandeau (libellé et année), la plus récente d'abord.
+            'campagnes' => $campagnes->map(fn (Campagne $option) => [
+                'id' => (string) $option->getKey(),
+                'libelle' => $option->libelle,
+                'annee' => $option->annee_campagne,
+                'active' => $option->statut === 'active',
+            ])->values()->all(),
+            // Campagne choisie (`null` : toutes les campagnes).
+            'campagneActive' => $campagne ? ['id' => $campagneId, 'annee' => $campagne->annee_campagne] : null,
             // Référentiels du formulaire de modification : envoyés seulement avec le droit de modifier.
             'options' => $modifiable ? app(EtudiantEditionService::class)->options() : null,
             'urls' => [
                 'admissionDirecte' => $url('admin.etudiant.admission_directe'),
-                'attributions' => $campagne ? $url('admin.allocation.show', ['campagneId' => $campagne->id_campagne]) : null,
+                // Suivi des attributions de la campagne choisie (toutes les campagnes : campagne active).
+                'attributions' => ($suivi = $campagne ?? app(CampagneValidationService::class)->getCampagneActive())
+                    ? $url('admin.allocation.show', ['campagneId' => $suivi->id_campagne]) : null,
                 'filtres' => $access->allows($admin, 'admin.hebergement.residents_contrat.admission')
-                    ? collect(self::FILTRES)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.residents_contrat.admission', ['etat' => $f])])
+                    ? collect(self::FILTRES)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.residents_contrat.admission', ['etat' => $f] + $choixCampagne)])
                     : null,
             ],
         ]);

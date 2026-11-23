@@ -1,8 +1,6 @@
 import { Link, router } from '@inertiajs/react';
-import { ArrowLeft, CalendarRange, Check, Printer, ReceiptText, TriangleAlert, UserRound } from 'lucide-react';
+import { ArrowLeft, CalendarRange, Check, Printer, ReceiptText, Tag, UserRound } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import type { DataTableColumn } from '@/components/data-table/data-table';
-import { SimpleTable } from '@/components/data-table/simple-table';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
@@ -13,8 +11,6 @@ import { PageHeader } from '@/components/ui/page-header';
 import { dateFr } from '@/lib/text';
 import { cn } from '@/lib/utils';
 
-type Repartition = { id: string; type: string; periode: string | null; montant: string; description: string | null };
-
 type Props = {
     paiement: {
         id: string;
@@ -22,6 +18,7 @@ type Props = {
         montant: string;
         methode: string;
         type: string;
+        type_code: string;
         statut: string;
         statut_label: string;
         date_paiement: string | null;
@@ -31,18 +28,22 @@ type Props = {
         notes: string | null;
         mois: string[];
         resident: { name: string | null; matricule: string | null; telephone: string | null; email: string | null; residence: string | null; chambre: string | null };
-        repartitions: Repartition[];
-        total_reparti: string;
-        ecart: string | null;
     };
-    urls: { index: string | null; valider: string | null };
+    /** `recu` : reçu PDF du paiement (document dédié, une page A4). */
+    urls: { index: string | null; valider: string | null; recu: string | null };
 };
 
-const TYPES_REPARTITION: Record<string, { label: string; variant: 'danger' | 'success' | 'info' }> = {
-    arriere: { label: 'Arriéré', variant: 'danger' },
-    mois_cours: { label: 'Mois en cours', variant: 'success' },
-    avance: { label: 'Avance', variant: 'info' },
-};
+const NOMS_MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+
+/** « 2026-12 » ou « 12-2026 » → « décembre 2026 » (valeur inchangée si le format n'est pas reconnu). */
+function moisEnLettres(valeur: string): string {
+    const texte = valeur.trim();
+    const anneeDabord = texte.match(/^(\d{4})[-/](\d{1,2})$/);
+    const moisDabord = texte.match(/^(\d{1,2})[-/](\d{4})$/);
+    const [annee, mois] = anneeDabord ? [anneeDabord[1], anneeDabord[2]] : moisDabord ? [moisDabord[2], moisDabord[1]] : [null, null];
+    const nom = mois ? NOMS_MOIS[Number(mois) - 1] : undefined;
+    return nom ? `${nom} ${annee}` : valeur;
+}
 
 /** Détail d'un paiement (remplace `vie_residentielle/paiement/show.blade.php`). */
 export default function PaiementShow({ paiement, urls }: Props) {
@@ -62,30 +63,12 @@ export default function PaiementShow({ paiement, urls }: Props) {
         });
     };
 
-    const colonnes: DataTableColumn<Repartition>[] = [
-        {
-            key: 'type',
-            header: 'Type',
-            cell: (r) => {
-                const type = TYPES_REPARTITION[r.type];
-                return <Badge variant={type?.variant ?? 'neutral'}>{type?.label ?? r.type}</Badge>;
-            },
-        },
-        { key: 'periode', header: 'Mois / année', className: 'tabular-nums', cell: (r) => r.periode ?? <span className="text-muted">—</span> },
-        { key: 'montant', header: 'Montant', className: 'whitespace-nowrap font-medium tabular-nums', cell: (r) => r.montant },
-        { key: 'description', header: 'Description', cell: (r) => r.description ?? <span className="text-muted">—</span> },
-    ];
-
     return (
         <AdminLayout title="Détail du paiement">
             <PageHeader
                 title={`Paiement ${paiement.numero ?? ''}`.trim()}
-                description={
-                    <span className="flex flex-wrap items-center gap-2">
-                        <StatutPaiementBadge statut={paiement.statut} label={paiement.statut_label} />
-                        {paiement.resident.name ?? 'Résident inconnu'} · {paiement.montant}
-                    </span>
-                }
+                // Statut affiché seulement s'il demande attention (en attente, annulé…) : pas de badge « Validé ».
+                description={paiement.statut !== 'valide' ? <StatutPaiementBadge statut={paiement.statut} label={paiement.statut_label} /> : undefined}
                 actions={
                     <div className="flex flex-wrap items-center justify-end gap-2 print:hidden">
                         {urls.index && (
@@ -93,9 +76,11 @@ export default function PaiementShow({ paiement, urls }: Props) {
                                 <ArrowLeft {...ICON} aria-hidden /> Retour à la liste
                             </Link>
                         )}
-                        <Button variant="secondary" size="sm" className="h-10 px-4" onClick={() => window.print()}>
-                            <Printer {...ICON} aria-hidden /> Imprimer
-                        </Button>
+                        {urls.recu && (
+                            <a href={urls.recu} target="_blank" rel="noopener" className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'h-10 px-4')}>
+                                <Printer {...ICON} aria-hidden /> Imprimer le reçu
+                            </a>
+                        )}
                         {urls.valider && (
                             <Button size="sm" className="h-10 px-4" onClick={() => setConfirmation(true)}>
                                 <Check {...ICON} aria-hidden /> Valider le paiement
@@ -107,13 +92,22 @@ export default function PaiementShow({ paiement, urls }: Props) {
 
             <div className="grid gap-6 lg:grid-cols-3">
                 <Carte titre="Informations générales" icone={<ReceiptText {...ICON} aria-hidden />} className="lg:col-span-2">
+                    {/* Type de paiement mis en évidence : c'est l'information qui qualifie le paiement (loyer, caution, avance…). */}
+                    <div className="mb-5 flex items-center gap-3 rounded-brand border border-[#86BB46]/40 bg-[#EBF8DE] px-4 py-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-brand bg-white text-primary">
+                            <Tag {...ICON} aria-hidden />
+                        </span>
+                        <div className="min-w-0">
+                            <p className="text-xs text-muted">Type de paiement</p>
+                            <p className="truncate text-lg font-medium text-primary">{paiement.type || '—'}</p>
+                        </div>
+                    </div>
                     <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
                         <Info terme="Numéro de paiement" valeur={paiement.numero} mono />
                         <Info terme="Montant" valeur={<span className="text-lg text-primary">{paiement.montant}</span>} />
                         <Info terme="Méthode de paiement" valeur={paiement.methode} />
                         <Info terme="Date de paiement" valeur={date} />
                         <Info terme="Date d’échéance" valeur={paiement.date_echeance ? dateFr(paiement.date_echeance) : null} />
-                        <Info terme="Type de paiement" valeur={paiement.type} />
                         <Info terme="Référence de transaction" valeur={paiement.reference} mono />
                         <Info terme="Créé par" valeur={paiement.cree_par ?? 'Système'} />
                     </dl>
@@ -136,34 +130,12 @@ export default function PaiementShow({ paiement, urls }: Props) {
                 </Carte>
             </div>
 
-            <section className="mt-6 overflow-hidden rounded-brand border bg-white">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
-                    <h2 className="text-base font-medium text-gray-900">Répartition du paiement</h2>
-                    <span className="text-sm text-muted">
-                        Total : <strong className="font-medium text-gray-900">{paiement.montant}</strong>
-                    </span>
-                </div>
-                <SimpleTable columns={colonnes} rows={paiement.repartitions} rowKey={(r) => r.id} emptyMessage="Aucune répartition disponible pour ce paiement." />
-                {paiement.repartitions.length > 0 && (
-                    <div className="flex flex-col gap-2 border-t bg-surface px-5 py-3 text-sm sm:flex-row sm:items-center sm:justify-end sm:gap-6">
-                        <span>
-                            Total réparti : <strong className="font-medium tabular-nums">{paiement.total_reparti}</strong>
-                        </span>
-                        {paiement.ecart && (
-                            <span className="inline-flex items-center gap-1.5 text-amber-800">
-                                <TriangleAlert className="size-4" aria-hidden /> Non réparti : <strong className="font-medium tabular-nums">{paiement.ecart}</strong>
-                            </span>
-                        )}
-                    </div>
-                )}
-            </section>
-
             <Carte titre="Mois couverts par ce paiement" icone={<CalendarRange {...ICON} aria-hidden />} className="mt-6">
                 {paiement.mois.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                         {paiement.mois.map((mois) => (
                             <Badge key={mois} variant="success" className="capitalize">
-                                {mois}
+                                {moisEnLettres(mois)}
                             </Badge>
                         ))}
                     </div>
