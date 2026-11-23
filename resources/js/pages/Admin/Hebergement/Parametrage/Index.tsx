@@ -1,4 +1,4 @@
-import { ArrowUpRight, BedDouble, Building, CalendarClock, ChartPie, FileText, Gavel, Hotel, ListChecks, type LucideIcon, Sofa, Star } from 'lucide-react';
+import { ArrowUpRight, BedDouble, Building, CalendarClock, ChartPie, FileText, Gavel, Hotel, ListChecks, type LucideIcon, Sofa, Star, Wallet } from 'lucide-react';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { PageHeader } from '@/components/ui/page-header';
@@ -17,6 +17,7 @@ const ICONES: Record<string, LucideIcon> = {
     star: Star,
     file: FileText,
     calendar: CalendarClock,
+    wallet: Wallet,
 };
 
 /** Accueil du paramétrage hébergement (remplace `parametrage-herb/index.blade.php`) : modules accessibles par rubrique. */

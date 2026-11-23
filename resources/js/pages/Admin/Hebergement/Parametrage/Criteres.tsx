@@ -248,7 +248,8 @@ export default function Criteres({
 function Niveau({ page }: { page: PageNiveau }) {
     const actions =
         page.volet !== "general" &&
-        !!(page.urls.appliquer || page.urls.abandonner);
+        !!((page.etat.brouillon && page.urls.appliquer) ||
+            page.urls.abandonner);
     return (
         <section aria-label={JEUX[page.volet].titre} className="space-y-3">
             <EnTete volet={page.volet} />

@@ -8,6 +8,7 @@ import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -16,6 +17,7 @@ import { FileDrop } from '@/components/ui/file-drop';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
 import { Stepper } from '@/components/ui/stepper';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { avecFormatTelephone, PROPS_TELEPHONE, telephoneObligatoire } from '@/lib/telephone';
 import { cn } from '@/lib/utils';
@@ -107,12 +109,10 @@ export default function AdmissionDirecte(props: Props) {
 
 function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, chambres, aujourdhui, urls, url, bloque }: Props & { url: string; bloque: boolean }) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const {
         register,
         control,
         handleSubmit,
-        trigger,
         setValue,
         setError,
         formState: { errors, isSubmitting },
@@ -134,11 +134,19 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
     });
     const [citeId, batimentId] = useWatch({ control, name: ['cite_id', 'batiment_id'] });
 
-    const allerA = async (cible: number) => {
-        if (cible > etape && !(await trigger(CHAMPS[etape]))) return;
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
+    const manquants = champsManquants(schema(aujourdhui), useWatch({ control }), CHAMPS, {
+        name: 'Nom et prénoms',
+        genre_id: 'Civilité',
+        matricule: 'Matricule',
+        telephone1: 'Téléphone',
+        cite_id: 'Cité',
+        batiment_id: 'Bâtiment',
+        chambre_id: 'Chambre',
+        campagne_id: 'Année académique',
+        date_entree: 'Date réelle d’entrée',
+    });
 
     const onSubmit = (valeurs: Valeurs) =>
         // Étudiant enregistré : le serveur redirige vers la liste des résidents.
@@ -193,7 +201,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
                     <span className="text-red-600">*</span> Champs obligatoires
                 </span>
             </div>
-            <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} className="px-5" />
+            <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} className="px-5" />
 
             <div className="flex flex-col gap-6 p-5">
                 {etape === 0 && (
@@ -274,6 +282,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
                                 </Field>
                             </div>
                         </Section>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} action="enregistrer l’étudiant" />
                     </>
                 )}
             </div>
@@ -297,7 +306,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
                             <Button variant="outline" size="sm" className="h-10" onClick={() => setEtape(0)}>
                                 <ArrowLeft className="size-4" aria-hidden /> Précédent
                             </Button>
-                            <Button type="submit" size="sm" className="h-10" disabled={bloque || isSubmitting}>
+                            <Button type="submit" size="sm" className="h-10" disabled={bloque || isSubmitting || manquants.length > 0}>
                                 {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <UserCheck className="size-4" aria-hidden />}
                                 Enregistrer et affecter
                             </Button>

@@ -1,19 +1,17 @@
 import { Link, router } from '@inertiajs/react';
-import { BarChart3, Check, Download, Eye, Plus, Send, Wallet, X } from 'lucide-react';
+import { BarChart3, CalendarRange, Check, Download, Eye, Plus, Send, Wallet, X } from 'lucide-react';
 import { useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
-import { SimpleTable } from '@/components/data-table/simple-table';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
-import { NouveauPaiementDialog } from '@/components/paiements/nouveau-paiement-dialog';
+import { NouveauPaiementDialog, type OptionTypePaiement } from '@/components/paiements/nouveau-paiement-dialog';
 import { RelanceDialog } from '@/components/paiements/relance-dialog';
-import { fcfa, MOIS, StatutPaiementBadge, toneTaux } from '@/components/paiements/shared';
+import { fcfa, MOIS, StatutPaiementBadge } from '@/components/paiements/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
-import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatCard } from '@/components/ui/stat-card';
 import { dateFr, nombre } from '@/lib/text';
@@ -37,29 +35,28 @@ type Paiement = {
     urls: { show: string | null; valider: string | null; annuler: string | null };
 };
 
-type StatResidence = {
-    residence: string;
-    total_attendu: string;
-    total_encaisse: string;
-    taux_recouvrement: number;
-    impayes: string;
-    nb_residents: number;
-    loyer_moyen: string;
-    alerte: boolean;
-};
+type Filtres = { campagne: string; residence: string; statut: string; mois: string };
 
-type Filtres = { residence: string; statut: string; mois: string };
+type CampagneOption = { id: string; libelle: string; annee: string | null; active: boolean };
 
 type Props = {
     paiements: Paginated<Paiement>;
     kpis: { total_encaisse: number; taux_recouvrement: number; impayes: number; penalites: number; nombre_paiements: number; nombre_retard: number };
-    statsParResidence: StatResidence[];
     residences: { id: string; name: string }[];
+    /** Types de paiement actifs (Paramétrage hébergement › Types de paiement). */
+    typesPaiement: OptionTypePaiement[];
+    /** Campagnes, de la plus récente à la plus ancienne ; la page affiche celle de `filters.campagne` (ou `toutes`). */
+    campagnes: CampagneOption[];
     filters: Filtres;
     urls: { index: string; export: string | null; store: string | null; recherche: string | null; relances: string | null; rapport: string | null };
 };
 
 const TOUS = 'tous';
+/** Valeur du paramètre `campagne` pour afficher toutes les campagnes (comprise par l'action `index`). */
+const TOUTES_CAMPAGNES = 'toutes';
+
+const libelleCampagne = (campagne: CampagneOption) =>
+    `${campagne.libelle}${campagne.annee && campagne.annee !== campagne.libelle ? ` (${campagne.annee})` : ''}${campagne.active ? ' · en cours' : ''}`;
 
 const STATUTS = [
     { value: 'valide', label: 'Payé' },
@@ -80,7 +77,7 @@ const moisRecents = () => {
 type Action = { type: 'valider' | 'annuler'; paiement: Paiement } | null;
 
 /** Paiements des loyers (remplace `vie_residentielle/paiement/index.blade.php`). */
-export default function PaiementsIndex({ paiements, kpis, statsParResidence, residences, filters, urls }: Props) {
+export default function PaiementsIndex({ paiements, kpis, residences, typesPaiement, campagnes, filters, urls }: Props) {
     const [nouveau, setNouveau] = useState(false);
     const [relance, setRelance] = useState(false);
     const [action, setAction] = useState<Action>(null);
@@ -92,7 +89,10 @@ export default function PaiementsIndex({ paiements, kpis, statsParResidence, res
         const suivants = { ...filters, [cle]: valeur === TOUS ? '' : valeur };
         router.get(urls.index, Object.fromEntries(Object.entries(suivants).filter(([, v]) => v)), { preserveState: true, preserveScroll: true, replace: true });
     };
+    // « Réinitialiser » vide les filtres de la liste, pas la campagne choisie.
     const filtreActif = Boolean(filters.residence || filters.statut || filters.mois);
+    const campagne = campagnes.find((item) => item.id === filters.campagne) ?? null;
+    const periode = campagne ? `Campagne ${campagne.libelle}` : 'Toutes les campagnes';
 
     const confirmer = () => {
         const url = action && action.paiement.urls[action.type];
@@ -160,34 +160,6 @@ export default function PaiementsIndex({ paiements, kpis, statsParResidence, res
         },
     ];
 
-    const colonnesResidence: DataTableColumn<StatResidence>[] = [
-        {
-            key: 'residence',
-            header: 'Résidence',
-            cell: (s) => (
-                <span className="flex items-center gap-2 font-medium text-gray-900">
-                    {s.residence}
-                    {s.alerte && <Badge variant="warning">Sous l’objectif</Badge>}
-                </span>
-            ),
-        },
-        { key: 'attendu', header: 'Total attendu', className: 'whitespace-nowrap tabular-nums', cell: (s) => s.total_attendu },
-        { key: 'encaisse', header: 'Total encaissé', className: 'whitespace-nowrap tabular-nums', cell: (s) => s.total_encaisse },
-        {
-            key: 'taux',
-            header: 'Recouvrement',
-            cell: (s) => (
-                <div className="flex min-w-32 items-center gap-2.5">
-                    <Progress value={s.taux_recouvrement} tone={toneTaux(s.taux_recouvrement)} label={`${s.taux_recouvrement} % recouvré`} />
-                    <span className="w-12 text-right text-xs font-medium tabular-nums">{nombre(s.taux_recouvrement, 1)} %</span>
-                </div>
-            ),
-        },
-        { key: 'impayes', header: 'Impayés', className: 'whitespace-nowrap tabular-nums', cell: (s) => s.impayes },
-        { key: 'residents', header: 'Résidents', className: 'text-center tabular-nums', headClassName: 'text-center', cell: (s) => nombre(s.nb_residents) },
-        { key: 'moyen', header: 'Loyer moyen', className: 'whitespace-nowrap tabular-nums', cell: (s) => s.loyer_moyen },
-    ];
-
     return (
         <AdminLayout title="Paiements des loyers">
             <PageHeader
@@ -216,6 +188,31 @@ export default function PaiementsIndex({ paiements, kpis, statsParResidence, res
                 }
             />
 
+            {campagnes.length > 0 && (
+                <div className="mb-4 flex flex-col gap-2 rounded-brand border bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2 text-sm text-gray-700">
+                        <CalendarRange {...ICON} className="shrink-0 text-primary" aria-hidden />
+                        <label htmlFor="paiements-campagne">Campagne</label>
+                    </div>
+                    <Select value={filters.campagne || TOUTES_CAMPAGNES} onValueChange={(valeur) => filtrer('campagne', valeur)}>
+                        <SelectTrigger id="paiements-campagne" className="h-10 sm:w-80" aria-describedby="paiements-campagne-aide">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {campagnes.map((item) => (
+                                <SelectItem key={item.id} value={item.id}>
+                                    {libelleCampagne(item)}
+                                </SelectItem>
+                            ))}
+                            <SelectItem value={TOUTES_CAMPAGNES}>Toutes les campagnes</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <p id="paiements-campagne-aide" className="sr-only">
+                        Les indicateurs et la liste des paiements portent sur la campagne choisie.
+                    </p>
+                </div>
+            )}
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <StatCard tone="green" label="Total encaissé" value={fcfa(kpis.total_encaisse)} extra={`${nombre(kpis.nombre_paiements)} paiement(s) ce mois`} />
                 <StatCard tone="blue" label="Taux de recouvrement" value={`${nombre(kpis.taux_recouvrement, 2)} %`} extra="Objectif > 95 %" highlight={kpis.taux_recouvrement < 95} />
@@ -225,7 +222,10 @@ export default function PaiementsIndex({ paiements, kpis, statsParResidence, res
 
             <section className="mt-6">
                 <div className="mb-3 flex items-baseline justify-between gap-3">
-                    <h2 className="text-base font-medium text-gray-900">Liste des paiements</h2>
+                    <div>
+                        <h2 className="text-base font-medium text-gray-900">Liste des paiements</h2>
+                        <p className="text-xs text-muted">{periode}</p>
+                    </div>
                     <span className="text-sm text-muted">{nombre(paiements.total)} paiement(s)</span>
                 </div>
                 <DataTable
@@ -277,7 +277,7 @@ export default function PaiementsIndex({ paiements, kpis, statsParResidence, res
                             </div>
                             <div className="flex gap-2">
                                 {filtreActif && (
-                                    <Button variant="ghost" size="sm" className="h-10" onClick={() => router.get(urls.index, {}, { preserveScroll: true })}>
+                                    <Button variant="ghost" size="sm" className="h-10" onClick={() => router.get(urls.index, { campagne: filters.campagne }, { preserveScroll: true })}>
                                         <X className="size-4" aria-hidden /> Réinitialiser
                                     </Button>
                                 )}
@@ -292,23 +292,13 @@ export default function PaiementsIndex({ paiements, kpis, statsParResidence, res
                     emptyMessage={
                         <span className="flex flex-col items-center gap-2">
                             <Wallet {...ICON} aria-hidden />
-                            {filtreActif ? 'Aucun paiement ne correspond à ces filtres.' : 'Aucun paiement enregistré.'}
+                            {filtreActif ? 'Aucun paiement ne correspond à ces filtres.' : campagne ? 'Aucun paiement enregistré pour cette campagne.' : 'Aucun paiement enregistré.'}
                         </span>
                     }
                 />
             </section>
 
-            <section className="mt-8">
-                <div className="mb-3 flex items-baseline justify-between gap-3">
-                    <h2 className="text-base font-medium text-gray-900">Récapitulatif par résidence</h2>
-                    <span className="text-sm text-muted">Objectif de recouvrement : plus de 95 %</span>
-                </div>
-                <div className="overflow-hidden rounded-brand border bg-white">
-                    <SimpleTable columns={colonnesResidence} rows={statsParResidence} rowKey={(s) => s.residence} emptyMessage="Aucune donnée de loyer par résidence." />
-                </div>
-            </section>
-
-            {urls.store && urls.recherche && <NouveauPaiementDialog open={nouveau} onClose={() => setNouveau(false)} urlStore={urls.store} urlRecherche={urls.recherche} />}
+            {urls.store && urls.recherche && <NouveauPaiementDialog open={nouveau} onClose={() => setNouveau(false)} urlStore={urls.store} urlRecherche={urls.recherche} types={typesPaiement} />}
             {urls.relances && <RelanceDialog open={relance} onClose={() => setRelance(false)} url={urls.relances} nombreRetard={kpis.nombre_retard} />}
 
             <ConfirmDialog

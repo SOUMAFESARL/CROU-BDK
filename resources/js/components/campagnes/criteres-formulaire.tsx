@@ -1189,23 +1189,25 @@ export function EtatCriteresVolet({
     const [abandon, setAbandon] = useState(false);
     const [traitement, setTraitement] = useState(false);
 
-    if (!urls.appliquer && !urls.abandonner) {
+    // Seul un brouillon s'applique depuis cet encart (plus de bouton « Appliquer le modèle CROU »).
+    const urlAppliquer = etat.brouillon ? urls.appliquer : null;
+
+    if (!urlAppliquer && !urls.abandonner) {
         return null;
     }
 
     return (
         <aside className="h-fit space-y-3 rounded-brand border bg-white p-4">
-            {(urls.appliquer || urls.abandonner) && (
+            {(urlAppliquer || urls.abandonner) && (
                 <div className="flex flex-col gap-2">
-                    {urls.appliquer && (
+                    {urlAppliquer && (
                         <button
                             type="button"
                             onClick={() => setAppliquer(true)}
                             className={cn(buttonVariants({ size: "sm" }), "h-10")}
                         >
                             <CheckCheck className="size-4" aria-hidden />{" "}
-                            Appliquer{" "}
-                            {etat.brouillon ? "le brouillon" : "le modèle CROU"}
+                            Appliquer le brouillon
                         </button>
                     )}
                     {urls.abandonner && (
@@ -1228,7 +1230,7 @@ export function EtatCriteresVolet({
             )}
 
             <AppliquerCriteresDialog
-                url={appliquer ? urls.appliquer : null}
+                url={appliquer ? urlAppliquer : null}
                 volet={volet}
                 nomCampagne={nomCampagne(campagne)}
                 etat={etat}

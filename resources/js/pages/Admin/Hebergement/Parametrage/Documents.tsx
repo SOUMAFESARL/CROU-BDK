@@ -8,6 +8,7 @@ import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { ChampRecherche, ErreurGenerale, PiedAssistant, Recap, useAssistant, useRecherche } from '@/components/parametrage-hebergement/shared';
 import { ToggleCard } from '@/components/parc-immobilier/form/inputs';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { repartirErreurs } from '@/components/vie-residentielle/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { nombre } from '@/lib/text';
 import { documentSchema, enNombre, type DocumentValeurs } from '@/schemas/parametrage-hebergement';
@@ -168,6 +170,7 @@ function Formulaire({ document, url, ordreSuivant, onClose }: { document: Docume
     });
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<DocumentValeurs>(CHAMPS, trigger, document !== null);
     const v = watch();
+    const manquants = champsManquants(documentSchema, v, CHAMPS, { name: 'Nom du document' });
 
     // L'action attend des cases à cocher HTML (« on ») et du texte pour l'ordre et le délai ; le statut n'existe qu'en modification.
     const enregistrer = (valeurs: DocumentValeurs) =>
@@ -272,23 +275,26 @@ function Formulaire({ document, url, ordreSuivant, onClose }: { document: Docume
                 )}
 
                 {etape === 2 && (
-                    <Recap
-                        lignes={[
-                            { label: 'Nom', valeur: <span className="font-medium">{v.name.trim()}</span> },
-                            { label: 'Description', valeur: v.description.trim() || <span className="text-muted">Aucune</span> },
-                            { label: 'Ordre d’affichage', valeur: v.ordre_affiche },
-                            { label: 'Validité', valeur: validite(enNombre(v.delai_validite_mois)) },
-                            { label: 'Pièce', valeur: v.requis ? <Badge variant="warning">Obligatoire</Badge> : <Badge variant="neutral">Facultative</Badge> },
-                            { label: 'Statut', valeur: !document || v.actif ? <Badge variant="success">Actif</Badge> : <Badge variant="neutral">Inactif</Badge> },
-                        ]}
-                    />
+                    <>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={aller} />
+                        <Recap
+                            lignes={[
+                                { label: 'Nom', valeur: <span className="font-medium">{v.name.trim()}</span> },
+                                { label: 'Description', valeur: v.description.trim() || <span className="text-muted">Aucune</span> },
+                                { label: 'Ordre d’affichage', valeur: v.ordre_affiche },
+                                { label: 'Validité', valeur: validite(enNombre(v.delai_validite_mois)) },
+                                { label: 'Pièce', valeur: v.requis ? <Badge variant="warning">Obligatoire</Badge> : <Badge variant="neutral">Facultative</Badge> },
+                                { label: 'Statut', valeur: !document || v.actif ? <Badge variant="success">Actif</Badge> : <Badge variant="neutral">Inactif</Badge> },
+                            ]}
+                        />
+                    </>
                 )}
             </DialogBody>
             <PiedAssistant
                 etape={etape}
                 derniere={derniere}
                 envoi={isSubmitting}
-                desactive={!url}
+                desactive={!url || manquants.length > 0}
                 onAnnuler={onClose}
                 onPrecedent={() => aller(etape - 1)}
                 libelle={document ? 'Enregistrer les modifications' : 'Ajouter le document'}

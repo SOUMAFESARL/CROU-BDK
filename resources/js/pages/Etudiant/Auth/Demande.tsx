@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { Notice } from '@/components/etudiant/panneau';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -15,6 +16,7 @@ import { FileDrop } from '@/components/ui/file-drop';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Stepper } from '@/components/ui/stepper';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { avecFormatTelephone, PROPS_TELEPHONE } from '@/lib/telephone';
 import { cn } from '@/lib/utils';
@@ -177,7 +179,6 @@ function Formulaire({
     const { flash } = usePage<SharedProps>().props;
     const haut = useRef<HTMLFormElement>(null);
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const schema = useMemo(
         () =>
             demandeHebergementSchema(
@@ -218,6 +219,7 @@ function Formulaire({
             moyenne: '',
             credit_valider: '',
             ville_bac: '',
+            num_table_bac: '',
             boursier: false,
             region: '',
             ville: '',
@@ -241,7 +243,7 @@ function Formulaire({
         return noms.map((nom) => ({ value: nom, label: nom }));
     }, [villes, villeBac]);
     // La Terminale ne peut pas être le niveau actuel. Le niveau précédent décide des autres champs de l'étape « Études » :
-    // Terminale → filière, note au bac (/400), ville du bac ; sinon → matricule, filière, moyenne (/20), crédits.
+    // Terminale → filière, note au bac (/400), ville et numéro de table du bac ; sinon → matricule, filière, moyenne (/20), crédits.
     // Niveaux fournis dans l'ordre : le niveau actuel ne peut pas être inférieur au niveau précédent (redoublement possible).
     const niveauxActuels = useMemo(() => {
         const rangPrecedent = Math.max(0, niveaux.findIndex((item) => item.id === niveauPrecedent));
@@ -265,6 +267,7 @@ function Formulaire({
             setValue('matricule', '');
         } else if (parcours === 'etudiant') {
             setValue('ville_bac', '');
+            setValue('num_table_bac', '');
         }
     }, [parcours, setValue]);
 
@@ -280,17 +283,12 @@ function Formulaire({
         haut.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
-    const allerA = async (cible: number) => {
-        // Avancer valide les étapes intermédiaires ; reculer est toujours permis.
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPE[index]))) {
-                afficher(index);
-                return;
-            }
-        }
-        afficher(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; la soumission exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => afficher(cible);
+    const manquants = champsManquants(schema, useWatch({ control }), CHAMPS_ETAPE, {
+        ...Object.fromEntries(documents.map((document) => [`documents.${document.slug}`, document.nom])),
+        certifie: 'Certification de l’exactitude des informations',
+    });
 
     const soumettre = handleSubmit(
         async (donnees) => {
@@ -338,7 +336,10 @@ function Formulaire({
                 },
             );
         },
-        () => toast.error('Certains champs sont à corriger avant l’envoi.'),
+        (fautes) => {
+            toast.error('Certains champs sont à corriger avant l’envoi.');
+            afficher(Math.max(0, CHAMPS_ETAPE.findIndex((champs) => champs.some((champ) => fautes[champ]))));
+        },
     );
 
     const derniere = etape === ETAPES.length - 1;
@@ -352,7 +353,7 @@ function Formulaire({
                     Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                 </p>
             </div>
-            <Stepper steps={[...ETAPES]} current={etape} reached={atteinte} onStepClick={allerA} className="mt-3 overflow-x-auto px-4 md:px-5 [&_li>button>span:last-child]:hidden sm:[&_li>button>span:last-child]:inline" />
+            <Stepper steps={[...ETAPES]} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} className="mt-3 overflow-x-auto px-4 md:px-5 [&_li>button>span:last-child]:hidden sm:[&_li>button>span:last-child]:inline" />
 
             <div className="flex flex-col gap-4 p-4 md:p-5">
                 {flash.error && (
@@ -465,6 +466,11 @@ function Formulaire({
                                     />
                                 </Field>
                             )}
+                            {parcours === 'bachelier' && (
+                                <Field id="dh-num-table-bac" label="Numéro de table au bac" required error={errors.num_table_bac?.message} hint="Inscrit sur votre convocation ou votre relevé de notes du bac.">
+                                    <Input id="dh-num-table-bac" autoComplete="off" placeholder="Ex. : 2501234567" className="uppercase" invalid={!!errors.num_table_bac} {...register('num_table_bac')} />
+                                </Field>
+                            )}
                         </Grille>
                     </>
                 )}
@@ -561,6 +567,7 @@ function Formulaire({
                             <Notice icone={Info}>Aucun document n’est demandé pour cette campagne.</Notice>
                         )}
 
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={afficher} action="soumettre votre demande" />
                         <div className="flex flex-col gap-2 border-t pt-4">
                             <CaseACocher control={control} name="certifie" id="dh-certifie" libelle="Je certifie l’exactitude des informations fournies" requis erreur={errors.certifie?.message} />
                         </div>
@@ -585,7 +592,7 @@ function Formulaire({
                         key="envoyer"
                         type="submit"
                         variant="accent"
-                        disabled={isSubmitting || !certifie}
+                        disabled={isSubmitting || !certifie || manquants.length > 0}
                         title={certifie ? undefined : 'Cochez « Je certifie l’exactitude des informations fournies » pour soumettre votre demande'}
                         className="font-medium"
                     >

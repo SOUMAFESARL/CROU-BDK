@@ -102,39 +102,24 @@ export function ChampRecherche({
 }
 
 /**
- * Navigation d'un assistant en plusieurs étapes : avancer (bouton ou clic sur une étape) valide chaque étape intermédiaire,
- * on s'arrête sur la première étape incomplète.
+ * Navigation d'un assistant en plusieurs étapes : toutes les étapes sont accessibles (bouton ou clic sur une étape),
+ * même si des champs obligatoires sont vides. L'enregistrement reste bloqué : `toutValider` revérifie toutes les étapes
+ * et ramène sur la première incomplète (les pages affichent en plus `ChampsManquants` au récapitulatif).
+ * `toutesAccessibles` est conservé pour compatibilité (toutes les étapes le sont désormais).
  */
 export function useAssistant<T extends FieldValues>(
     champsEtapes: readonly (readonly Path<T>[])[],
     trigger: UseFormTrigger<T>,
     toutesAccessibles = false,
 ) {
+    void toutesAccessibles;
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(
-        toutesAccessibles ? champsEtapes.length - 1 : 0,
-    );
+    const atteinte = champsEtapes.length - 1;
 
-    const aller = (index: number) => {
-        setEtape(index);
-        setAtteinte((max) => Math.max(max, index));
-    };
+    const aller = (index: number) => setEtape(index);
 
+    // Navigation libre : aucune validation pour changer d'étape.
     const allerA = async (cible: number) => {
-        if (cible <= etape) {
-            setEtape(cible);
-            return true;
-        }
-        for (let index = etape; index < cible; index++) {
-            if (
-                !(await trigger(champsEtapes[index] as Path<T>[], {
-                    shouldFocus: true,
-                }))
-            ) {
-                aller(index);
-                return false;
-            }
-        }
         aller(cible);
         return true;
     };

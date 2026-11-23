@@ -17,7 +17,7 @@ interface PaiementRepositoryInterface
     public function delete(string $id): bool;
     public function getTotalEncaissementMois(): float;
     public function getTauxRecouvrement(): float;
-    public function getNombrePaiementsMois(): int;
+    public function getNombrePaiementsMois(?string $campagne = null): int;
     public function getImpayes(): float;
     public function getTauxImpayes(): float;
     public function getLoyerMoyen(): float;

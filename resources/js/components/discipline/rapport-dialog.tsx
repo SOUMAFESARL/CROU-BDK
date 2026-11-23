@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
@@ -11,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { ChoixCarte, dateHeure, Encadre, Lignes, maintenantLocal, repartirErreurs, type Structure } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 
 export const GRAVITES = [
@@ -45,6 +47,7 @@ const CHAMPS_ETAPES: (keyof Valeurs)[][] = [
     [],
 ];
 const ETAPES = ['Résident', 'Incident', 'Vérification'];
+const LIBELLES = { cite_id: 'Cité', batiment_id: 'Bâtiment', chambre_id: 'Chambre', etudiant_id: 'Résident concerné', date_incident: 'Date et heure de l’incident', gravite: 'Gravité', nature: 'Nature de l’incident', description: 'Description des faits' };
 
 const initiales = (): Valeurs => ({
     cite_id: '',
@@ -62,7 +65,6 @@ const initiales = (): Valeurs => ({
 /** Rédiger un rapport disciplinaire : brouillon ou transmission directe au Service Sécurité (action `incidents.store`). */
 export function RapportDialog({ open, onClose, url, structure }: { open: boolean; onClose: () => void; url: string; structure: Structure }) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const [erreurServeur, setErreurServeur] = useState<string | null>(null);
     const [envoi, setEnvoi] = useState<'brouillon' | 'transmettre' | null>(null);
     const {
@@ -70,7 +72,6 @@ export function RapportDialog({ open, onClose, url, structure }: { open: boolean
         register,
         handleSubmit,
         reset,
-        trigger,
         setValue,
         setError,
         getValues,
@@ -82,7 +83,6 @@ export function RapportDialog({ open, onClose, url, structure }: { open: boolean
         if (open) {
             reset(initiales());
             setEtape(0);
-            setAtteinte(0);
             setErreurServeur(null);
         }
     }, [open, reset]);
@@ -91,20 +91,8 @@ export function RapportDialog({ open, onClose, url, structure }: { open: boolean
     const chambres = useMemo(() => structure.chambres.filter((c) => c.batiment_id === batimentId), [structure.chambres, batimentId]);
     const residents = useMemo(() => (structure.residents ?? []).filter((r) => r.chambre_id === chambreId), [structure.residents, chambreId]);
 
-    const allerA = async (cible: number) => {
-        if (cible <= etape) {
-            setEtape(cible);
-            return;
-        }
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPES[index]))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
 
     const soumettre = (action: 'brouillon' | 'transmettre') =>
         handleSubmit(
@@ -121,6 +109,7 @@ export function RapportDialog({ open, onClose, url, structure }: { open: boolean
         )();
 
     const v = getValues();
+    const manquants = champsManquants(schema, useWatch({ control }), CHAMPS_ETAPES, LIBELLES);
     const resident = residents.find((r) => r.id === v.etudiant_id);
     const enCours = envoi !== null;
 
@@ -134,7 +123,7 @@ export function RapportDialog({ open, onClose, url, structure }: { open: boolean
                             Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                         </DialogDescription>
                     </DialogHeader>
-                    <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} />
+                    <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} />
                     <DialogBody className="space-y-4">
                         {erreurServeur && <Encadre ton="danger">{erreurServeur}</Encadre>}
 
@@ -260,6 +249,7 @@ export function RapportDialog({ open, onClose, url, structure }: { open: boolean
 
                         {etape === 2 && (
                             <>
+                                <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} />
                                 <Lignes
                                     lignes={[
                                         ['Résident', resident ? `${resident.name} · ${resident.matricule ?? 'sans matricule'}` : ''],
@@ -297,11 +287,11 @@ export function RapportDialog({ open, onClose, url, structure }: { open: boolean
                                 </Button>
                             ) : (
                                 <>
-                                    <Button variant="secondary" size="sm" className="h-10" onClick={() => soumettre('brouillon')} disabled={enCours}>
+                                    <Button variant="secondary" size="sm" className="h-10" onClick={() => soumettre('brouillon')} disabled={enCours || manquants.length > 0}>
                                         {envoi === 'brouillon' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Save className="size-4" aria-hidden />}
                                         Enregistrer le brouillon
                                     </Button>
-                                    <Button size="sm" className="h-10" onClick={() => soumettre('transmettre')} disabled={enCours}>
+                                    <Button size="sm" className="h-10" onClick={() => soumettre('transmettre')} disabled={enCours || manquants.length > 0}>
                                         {envoi === 'transmettre' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Send className="size-4" aria-hidden />}
                                         Transmettre au Service Sécurité
                                     </Button>

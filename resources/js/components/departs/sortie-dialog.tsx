@@ -10,6 +10,7 @@ import { SignaturePad } from '@/components/etudiant/signature-pad';
 import { ICON } from '@/components/layout/app-sidebar';
 import { ErreurGenerale } from '@/components/parametrage-hebergement/shared';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
@@ -17,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { ChoixCarte, Encadre, Lignes } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { dateFr, sansAccents } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -78,7 +80,6 @@ type Props = {
 /** État des lieux de sortie en 3 étapes (`storeEdl`) : clôture le séjour, calcule le décompte et libère la chambre. */
 export function SortieDialog({ resident, url, grille, preavisJours, onClose }: Props) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const [preparations, setPreparations] = useState(0);
     const [erreur, setErreur] = useState<string | null>(null);
     const corps = useRef<HTMLDivElement>(null);
@@ -87,7 +88,6 @@ export function SortieDialog({ resident, url, grille, preavisJours, onClose }: P
         register,
         control,
         handleSubmit,
-        trigger,
         reset,
         setValue,
         setError,
@@ -100,7 +100,6 @@ export function SortieDialog({ resident, url, grille, preavisJours, onClose }: P
         if (!resident) return;
         reset(valeursInitiales(resident.entree));
         setEtape(0);
-        setAtteinte(0);
         setErreur(null);
     }, [resident, reset]);
 
@@ -108,21 +107,9 @@ export function SortieDialog({ resident, url, grille, preavisJours, onClose }: P
     const preparation = (enCours: boolean) => setPreparations((n) => Math.max(0, n + (enCours ? 1 : -1)));
     const haut = () => corps.current?.scrollTo({ top: 0, behavior: 'smooth' });
 
-    const allerA = async (cible: number) => {
-        if (cible <= etape) {
-            setEtape(cible);
-            haut();
-            return;
-        }
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_SORTIE[index], { shouldFocus: true }))) {
-                setEtape(index);
-                if (index === 1) toast.error('Complétez l’état de chaque élément avant de continuer.');
-                return;
-            }
-        }
+    // Navigation libre entre les étapes ; la clôture exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => {
         setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
         haut();
     };
 
@@ -187,6 +174,12 @@ export function SortieDialog({ resident, url, grille, preavisJours, onClose }: P
     );
 
     const v = watch();
+    const manquants = champsManquants(sortieSchema, v, CHAMPS_SORTIE, {
+        date_etat: 'Date de l’état des lieux',
+        nbre_cle_recus: 'Nombre de clés rendues',
+        etat_chambre_sortie: 'Statut de la chambre après la sortie',
+        signature_crou: 'Signature du CROU',
+    });
     const elements = v.pieces.flatMap((p) => p.elements);
     const compte = (etat: string) => elements.filter((e) => e.etat === etat).length;
     const retenues = v.pieces.flatMap((p) => p.elements.filter((e) => e.etat === 'mauvais').map((e) => ({ element: e.nom, piece: p.nom, regle: retenueIndicative(grille, e.nom) }))).filter((r) => r.regle);
@@ -196,7 +189,7 @@ export function SortieDialog({ resident, url, grille, preavisJours, onClose }: P
         <Dialog open={!!resident} onOpenChange={(ouvert) => !ouvert && !isSubmitting && onClose()}>
             <DialogContent className="max-w-5xl">
                 {resident && (
-                    <form noValidate onSubmit={(e) => (etape < ETAPES.length - 1 ? (e.preventDefault(), void allerA(etape + 1)) : void enregistrer(e))} className="flex min-h-0 flex-1 flex-col">
+                    <form noValidate onSubmit={(e) => (etape < ETAPES.length - 1 ? (e.preventDefault(), allerA(etape + 1)) : void enregistrer(e))} className="flex min-h-0 flex-1 flex-col">
                         <DialogHeader>
                             <DialogTitle>État des lieux de sortie · {resident.name}</DialogTitle>
                             <DialogDescription>
@@ -204,7 +197,7 @@ export function SortieDialog({ resident, url, grille, preavisJours, onClose }: P
                                 {resident.demande?.date_sortie ? ` · sortie prévue le ${dateFr(resident.demande.date_sortie)}` : ''}
                             </DialogDescription>
                         </DialogHeader>
-                        <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={(i) => void allerA(i)} className="overflow-x-auto" />
+                        <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} className="overflow-x-auto" />
                         <DialogBody ref={corps} className="space-y-4">
                             <ErreurGenerale message={erreur} />
                             <p className="text-xs text-muted">
@@ -363,6 +356,7 @@ export function SortieDialog({ resident, url, grille, preavisJours, onClose }: P
                                             render={({ field }) => <SignaturePad id="sortie-signature" value={field.value} onChange={field.onChange} invalid={!!errors.signature_crou} />}
                                         />
                                     </Field>
+                                    <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={allerA} action="clôturer le séjour" />
                                     <Encadre ton="warning" icone={<Lock {...ICON} />}>
                                         L’enregistrement <strong className="font-medium">clôture le séjour</strong> : la chambre prend le statut choisi, le dossier est clôturé et le décompte
                                         (préavis, dégradations, caution) est calculé. Cette action est définitive.
@@ -376,7 +370,7 @@ export function SortieDialog({ resident, url, grille, preavisJours, onClose }: P
                             </Button>
                             <div className="flex flex-col-reverse gap-2 sm:flex-row">
                                 {etape > 0 && (
-                                    <Button variant="outline" size="sm" className="h-10" onClick={() => void allerA(etape - 1)} disabled={isSubmitting}>
+                                    <Button variant="outline" size="sm" className="h-10" onClick={() => allerA(etape - 1)} disabled={isSubmitting}>
                                         <ArrowLeft className="size-4" aria-hidden /> Précédent
                                     </Button>
                                 )}
@@ -385,7 +379,7 @@ export function SortieDialog({ resident, url, grille, preavisJours, onClose }: P
                                         Suivant <ArrowRight className="size-4" aria-hidden />
                                     </Button>
                                 ) : (
-                                    <Button type="submit" size="sm" className="h-10" disabled={isSubmitting || preparations > 0}>
+                                    <Button type="submit" size="sm" className="h-10" disabled={isSubmitting || preparations > 0 || manquants.length > 0}>
                                         {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Lock className="size-4" aria-hidden />}
                                         Clôturer le séjour
                                     </Button>

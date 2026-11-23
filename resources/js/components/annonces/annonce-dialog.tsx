@@ -6,6 +6,7 @@ import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -13,6 +14,7 @@ import { MultiCombobox } from '@/components/ui/multi-combobox';
 import { htmlVide, RichTextEditor, RichTextView } from '@/components/ui/rich-text-editor';
 import { Stepper } from '@/components/ui/stepper';
 import { ChoixCarte, dateHeure, Encadre, Lignes, maintenantLocal, repartirErreurs, type BatimentOption, type ChambreOption, type CiteOption } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 
 export type Cibles = {
@@ -93,6 +95,7 @@ const CHAMPS_ETAPES: (keyof Valeurs)[][] = [
     [],
 ];
 const ETAPES = ['Diffusion', 'Contenu', 'Publication', 'Vérification'];
+const LIBELLES = { canaux: 'Canaux de diffusion', audience: 'Audience', titre: 'Titre', priorite: 'Priorité', contenu: 'Contenu', statut: 'Mode de publication', date_planifiee: 'Date de publication' };
 
 const initiales = (annonce: AnnonceModifiable | null): Valeurs => ({
     canaux: annonce?.canaux.length ? annonce.canaux : ['flux'],
@@ -124,14 +127,12 @@ export function AnnonceDialog({ open, onClose, annonce, urlStore, audiences, cib
     const modification = annonce !== null;
     const url = modification ? annonce.urls.update : urlStore;
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const [erreurServeur, setErreurServeur] = useState<string | null>(null);
     const {
         control,
         register,
         handleSubmit,
         reset,
-        trigger,
         setValue,
         setError,
         getValues,
@@ -143,7 +144,6 @@ export function AnnonceDialog({ open, onClose, annonce, urlStore, audiences, cib
         if (open) {
             reset(initiales(annonce));
             setEtape(0);
-            setAtteinte(modification ? ETAPES.length - 1 : 0);
             setErreurServeur(null);
         }
     }, [open, annonce, modification, reset]);
@@ -157,20 +157,8 @@ export function AnnonceDialog({ open, onClose, annonce, urlStore, audiences, cib
         etudiants: cibles.etudiants.map((e) => ({ value: e.id, label: e.name, description: e.matricule ?? undefined })),
     };
 
-    const allerA = async (cible: number) => {
-        if (cible <= etape) {
-            setEtape(cible);
-            return;
-        }
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPES[index]))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
 
     const onSubmit = (valeurs: Valeurs) => {
         if (!url) return;
@@ -198,6 +186,7 @@ export function AnnonceDialog({ open, onClose, annonce, urlStore, audiences, cib
     const basculerCanal = (canal: string) => setValue('canaux', canaux.includes(canal) ? canaux.filter((c) => c !== canal) : [...canaux, canal], { shouldValidate: true });
 
     const v = getValues();
+    const manquants = champsManquants(schema, useWatch({ control }), CHAMPS_ETAPES, LIBELLES);
     const cle = CLE_CIBLE[v.audience];
     const destinataires = cle
         ? v[cle].map((id) => options[cle].find((o) => o.value === id)?.label).filter(Boolean).join(', ')
@@ -217,7 +206,7 @@ export function AnnonceDialog({ open, onClose, annonce, urlStore, audiences, cib
                             Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                         </DialogDescription>
                     </DialogHeader>
-                    <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} />
+                    <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} />
                     <DialogBody className="space-y-5">
                         {erreurServeur && <Encadre ton="danger">{erreurServeur}</Encadre>}
 
@@ -386,6 +375,7 @@ export function AnnonceDialog({ open, onClose, annonce, urlStore, audiences, cib
 
                         {etape === 3 && (
                             <>
+                                <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} />
                                 <Lignes
                                     lignes={[
                                         ['Canaux', v.canaux.map((c) => CANAUX.find((canal) => canal.value === c)?.label ?? c).join(', ')],
@@ -419,7 +409,7 @@ export function AnnonceDialog({ open, onClose, annonce, urlStore, audiences, cib
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={isSubmitting || !url}>
+                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={isSubmitting || !url || manquants.length > 0}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : statut === 'publie' ? <Send className="size-4" aria-hidden /> : <Save className="size-4" aria-hidden />}
                                     {statut === 'publie' ? 'Publier l’annonce' : statut === 'planifie' ? 'Planifier l’annonce' : 'Enregistrer le brouillon'}
                                 </Button>

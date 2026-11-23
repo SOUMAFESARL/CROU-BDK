@@ -588,9 +588,10 @@ public function getTotalLoyersEnRetard(): float
 /**
  * Récupère les statistiques complètes des loyers
  */
-public function getStatistiquesLoyers(?string $annee = null, ?string $mois = null, ?string $residence = null): array
+public function getStatistiquesLoyers(?string $annee = null, ?string $mois = null, ?string $residence = null, ?string $campagne = null): array
 {
     $query = $this->model->newQuery()->where('statut', '!=', 'annule');
+    if ($campagne) $query->deCampagne($campagne);
     if ($annee) {
         $query->where(function ($dateQuery) use ($annee) {
             $dateQuery->whereYear('date_limit_paiement', $annee)

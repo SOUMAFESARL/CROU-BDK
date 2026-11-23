@@ -296,8 +296,22 @@ public function getStatistiquesParModePaiement(?string $annee = null, ?string $m
     return $result;
 }
 
+/** Seul le type « loyer » est réparti sur les loyers (arriérés, mois en cours, avances). */
+public const TYPE_LOYER = 'loyer';
+
+/** Avance (type « Avance » du paramétrage, code `avance`) : solde les loyers des mois suivants, comme un loyer. */
+public const TYPE_AVANCE = 'avance';
+
+/** Types répartis sur les loyers, mois par mois (arriérés, puis mois suivant le dernier mois payé). */
+public const TYPES_LOYER = [self::TYPE_LOYER, self::TYPE_AVANCE];
+
 public function creerPaiement(array $data): Paiement
 {
+    // Caution, pénalité, frais… : enregistrés tels quels, sans toucher aux loyers ni au solde du résident.
+    if (!in_array($data['type_paiement'] ?? self::TYPE_LOYER, self::TYPES_LOYER, true)) {
+        return $this->creerPaiementHorsLoyer($data);
+    }
+
     try {
         DB::beginTransaction();
         
@@ -413,7 +427,9 @@ public function creerPaiement(array $data): Paiement
         ]);
         
 
+   // Seuls les paiements de loyer sans mois sont des doublons : les autres types n'ont jamais de mois.
    $paiementsSansMois = $this->paiementRepository->getByEtudiant($data['resident_id'])
+    ->where('type_paiement', self::TYPE_LOYER)
     ->whereNull('mois');
 
 // Vérifier si des paiements sans mois existent
@@ -443,6 +459,59 @@ if ($paiementsSansMois->isNotEmpty()) {
     }
 }
 
+
+/**
+ * « Nouveau paiement » avec plusieurs types cochés : un paiement par ligne (type + montant), tous ou aucun.
+ * Les données communes (résident, logement, méthode, notes) sont reprises sur chaque paiement ; le loyer passe
+ * par la répartition habituelle, les autres types sont enregistrés hors loyer.
+ *
+ * @param array<int, array{type_paiement: string, montant: float|int|string}> $lignes
+ * @return Paiement[]
+ */
+public function creerPaiements(array $commun, array $lignes): array
+{
+    return DB::transaction(fn () => array_map(
+        fn (array $ligne) => $this->creerPaiement(array_merge($commun, [
+            'type_paiement' => $ligne['type_paiement'],
+            'montant' => $ligne['montant'],
+        ])),
+        $lignes,
+    ));
+}
+
+/**
+ * Paiement d'un type autre que le loyer (Paramétrage hébergement › Types de paiement) : aucun loyer créé ni soldé,
+ * aucune ligne de répartition ; le montant dû est le montant versé.
+ */
+protected function creerPaiementHorsLoyer(array $data): Paiement
+{
+    $paiement = $this->paiementRepository->create([
+        'resident_id' => $data['resident_id'],
+        'chambre_id' => $data['chambre_id'] ?? null,
+        'cite_id' => $data['cite_id'] ?? null,
+        'contrat_id' => $data['contrat_id'] ?? null,
+        'batiment_id' => $data['batiment_id'] ?? null,
+        'loyer_id' => null,
+        'type_paiement' => $data['type_paiement'],
+        'mois' => [],
+        'montant' => $data['montant'],
+        'montant_du' => $data['montant'],
+        'devise' => $data['devise'] ?? 'FCFA',
+        'methode_paiement' => $data['methode_paiement'] ?? 'especes',
+        'reference_transaction' => $data['reference_transaction'] ?? null,
+        'statut_paiement' => 'valide',
+        'date_paiement' => now(),
+        'notes' => $data['notes'] ?? null,
+    ]);
+
+    Log::info('Paiement hors loyer créé', [
+        'paiement_id' => $paiement->id_paiement,
+        'type' => $paiement->type_paiement,
+        'montant' => $paiement->montant,
+    ]);
+
+    return $paiement;
+}
 
     /**
      * Répartit le paiement entre arriérés et mois en cours
@@ -1084,6 +1153,24 @@ protected function getDernierMoisPaye(string $etudiantId): ?array
  * Récupère le prochain mois à payer
  * Retourne le mois et l'année du prochain mois à payer
  */
+/** Prochain mois à payer (`mm-aaaa`) : le mois qui suit le dernier mois payé (loyer ou avance). */
+public function prochainMoisAPayer(string $etudiantId): string
+{
+    $prochain = $this->getProchainMoisAPayer($etudiantId);
+
+    return $this->formatMoisAnnee($prochain['mois'], $prochain['annee']);
+}
+
+/**
+ * Mois consécutifs (`mm-aaaa`) couverts par un paiement de loyer ou d'avance de `$nombre` mois : à partir du prochain mois à payer.
+ *
+ * @return string[]
+ */
+public function moisConsecutifs(string $etudiantId, int $nombre): array
+{
+    return array_column($this->getMoisAPayer($etudiantId, max(0, $nombre)), 'libelle');
+}
+
 protected function getProchainMoisAPayer(string $etudiantId): array
 {
     $dernier = $this->getDernierMoisPaye($etudiantId);

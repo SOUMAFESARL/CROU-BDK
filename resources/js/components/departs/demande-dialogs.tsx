@@ -7,6 +7,7 @@ import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -15,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { Encadre, Lignes } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { dateFr } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -38,11 +40,9 @@ const VIDE: DemandeSortie = { etudiant_id: '', date_sortie_prevue: '', motif: ''
 /** Nouvelle demande de sortie (préavis) saisie par l'administration, en 3 étapes. */
 export function NouvelleDemandeDialog({ open, onClose, url, residents, motifs }: { open: boolean; onClose: () => void; url: string; residents: ResidentSortie[]; motifs: Option[] }) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const {
         control,
         register,
-        trigger,
         watch,
         reset,
         setError,
@@ -55,23 +55,15 @@ export function NouvelleDemandeDialog({ open, onClose, url, residents, motifs }:
         if (open) {
             reset(VIDE);
             setEtape(0);
-            setAtteinte(0);
         }
     }, [open, reset]);
 
     const v = watch();
     const resident = residents.find((r) => r.id === v.etudiant_id);
 
-    const allerA = async (cible: number) => {
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_DEMANDE[index], { shouldFocus: true }))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
+    const manquants = champsManquants(demandeSortieSchema, v, CHAMPS_DEMANDE, { etudiant_id: 'Résident', date_sortie_prevue: 'Date de sortie prévue', motif: 'Motif' });
 
     const enregistrer = handleSubmit(async (valeurs) => {
         const ok = await envoyer<DemandeSortie>(
@@ -89,7 +81,7 @@ export function NouvelleDemandeDialog({ open, onClose, url, residents, motifs }:
             const index = CHAMPS_DEMANDE.findIndex((champs) => champs.some((champ) => getFieldState(champ).error));
             if (index >= 0) setEtape(index);
         }
-    });
+    }, (fautes) => setEtape(Math.max(0, CHAMPS_DEMANDE.findIndex((champs) => champs.some((champ) => fautes[champ])))));
 
     return (
         <Dialog open={open} onOpenChange={(ouvert) => !ouvert && !isSubmitting && onClose()}>
@@ -98,7 +90,7 @@ export function NouvelleDemandeDialog({ open, onClose, url, residents, motifs }:
                     <DialogTitle>Nouvelle demande de sortie</DialogTitle>
                     <DialogDescription>Enregistre le préavis d’un résident. La demande devra ensuite être approuvée avant l’état des lieux de sortie.</DialogDescription>
                 </DialogHeader>
-                <Stepper steps={ETAPES_DEMANDE} current={etape} reached={atteinte} onStepClick={(i) => void allerA(i)} />
+                <Stepper steps={ETAPES_DEMANDE} current={etape} reached={ETAPES_DEMANDE.length - 1} onStepClick={allerA} />
                 <form
                     noValidate
                     className="flex min-h-0 flex-1 flex-col"
@@ -183,6 +175,7 @@ export function NouvelleDemandeDialog({ open, onClose, url, residents, motifs }:
 
                         {etape === 2 && (
                             <>
+                                <ChampsManquants manquants={manquants} etapes={ETAPES_DEMANDE} onAller={setEtape} />
                                 <Lignes
                                     lignes={[
                                         ['Résident', resident ? `${resident.name}${resident.matricule ? ` (${resident.matricule})` : ''}` : '—'],
@@ -206,7 +199,7 @@ export function NouvelleDemandeDialog({ open, onClose, url, residents, motifs }:
                                     <ArrowLeft className="size-4" aria-hidden /> Précédent
                                 </Button>
                             )}
-                            <Button type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                            <Button type="submit" size="sm" className="h-10" disabled={isSubmitting || (etape === ETAPES_DEMANDE.length - 1 && manquants.length > 0)}>
                                 {etape < ETAPES_DEMANDE.length - 1 ? (
                                     <>
                                         Suivant <ArrowRight className="size-4" aria-hidden />

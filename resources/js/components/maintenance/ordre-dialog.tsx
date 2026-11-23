@@ -5,6 +5,7 @@ import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { libelleSpecialite, PRIORITES, TYPES_INTERVENTION, type Maintenancier } from '@/components/maintenance/shared';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -13,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { ChoixCarte, dateHeure, Encadre, Lignes, repartirErreurs, type Structure } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 
 const schema = z
@@ -45,6 +47,7 @@ const CHAMPS_ETAPES: (keyof Valeurs)[][] = [
     [],
 ];
 const ETAPES = ['Emplacement', 'Problème', 'Assignation', 'Vérification'];
+const LIBELLES = { cite_id: 'Résidence concernée', titre: 'Titre', categorie: 'Type d’intervention', priorite: 'Priorité', description: 'Description du problème', date_debut_intervention: 'Début prévu de l’intervention' };
 
 const initiales = (): Valeurs => ({
     cite_id: '',
@@ -72,14 +75,12 @@ type Props = {
 /** Nouvel ordre de travail en 4 étapes (action `store_ot` ; sans technicien, l'OT reste « en attente »). */
 export function OrdreDialog({ open, onClose, url, structure, categories, maintenanciers }: Props) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const [erreurServeur, setErreurServeur] = useState<string | null>(null);
     const {
         control,
         register,
         handleSubmit,
         reset,
-        trigger,
         setValue,
         setError,
         getValues,
@@ -91,7 +92,6 @@ export function OrdreDialog({ open, onClose, url, structure, categories, mainten
         if (open) {
             reset(initiales());
             setEtape(0);
-            setAtteinte(0);
             setErreurServeur(null);
         }
     }, [open, reset]);
@@ -100,20 +100,8 @@ export function OrdreDialog({ open, onClose, url, structure, categories, mainten
     const chambres = useMemo(() => structure.chambres.filter((c) => c.batiment_id === batimentId), [structure.chambres, batimentId]);
     const technicien = maintenanciers.find((m) => m.id === assigne);
 
-    const allerA = async (cible: number) => {
-        if (cible <= etape) {
-            setEtape(cible);
-            return;
-        }
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPES[index]))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
 
     const onSubmit = (valeurs: Valeurs) => {
         setErreurServeur(null);
@@ -124,6 +112,7 @@ export function OrdreDialog({ open, onClose, url, structure, categories, mainten
     };
 
     const v = getValues();
+    const manquants = champsManquants(schema, useWatch({ control }), CHAMPS_ETAPES, LIBELLES);
 
     return (
         <Dialog open={open} onOpenChange={(ouvert) => !ouvert && !isSubmitting && onClose()}>
@@ -139,7 +128,7 @@ export function OrdreDialog({ open, onClose, url, structure, categories, mainten
                             Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                         </DialogDescription>
                     </DialogHeader>
-                    <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} />
+                    <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} />
                     <DialogBody className="space-y-4">
                         {erreurServeur && <Encadre ton="danger">{erreurServeur}</Encadre>}
 
@@ -308,6 +297,7 @@ export function OrdreDialog({ open, onClose, url, structure, categories, mainten
 
                         {etape === 3 && (
                             <>
+                                <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} />
                                 <Lignes
                                     lignes={[
                                         [
@@ -347,7 +337,7 @@ export function OrdreDialog({ open, onClose, url, structure, categories, mainten
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button key="creer" type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                                <Button key="creer" type="submit" size="sm" className="h-10" disabled={manquants.length > 0 || isSubmitting}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Wrench className="size-4" aria-hidden />}
                                     Créer l’ordre de travail
                                 </Button>

@@ -33,8 +33,12 @@ const VARIANTES: Record<string, 'success' | 'neutral' | 'warning' | 'danger' | '
     cloture: 'neutral',
 };
 
-/** Badge de l'état du dossier (remplace le partiel `campagnes_admission/partials/etat-dossier`). */
+/** États du dossier sans badge : l'état « Soumis » (simple dépôt de la demande) n'est pas affiché. */
+export const ETATS_SANS_BADGE = ['soumis'];
+
+/** Badge de l'état du dossier (remplace le partiel `campagnes_admission/partials/etat-dossier`) ; rien pour `ETATS_SANS_BADGE`. */
 export function EtatDossierBadge({ etat, labels }: { etat: string | null | undefined; labels?: Record<string, string> }) {
     if (!etat) return <Badge variant="warning">À vérifier</Badge>;
+    if (ETATS_SANS_BADGE.includes(etat)) return null;
     return <Badge variant={VARIANTES[etat] ?? 'warning'}>{labels?.[etat] ?? LIBELLES_ETAT_DOSSIER[etat] ?? 'À vérifier'}</Badge>;
 }

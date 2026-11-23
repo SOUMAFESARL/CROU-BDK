@@ -11,6 +11,7 @@ use App\Http\Controllers\admin\immobilier\equipements\EquipementController;
 use App\Http\Controllers\admin\immobilier\campagnes_admission\CampagnesAdmissionController;
 use App\Http\Controllers\admin\immobilier\campagnes_admission\CriteresCampagneController;
 use App\Http\Controllers\admin\immobilier\parametrage\type_chambre\TypeChambreController;
+use App\Http\Controllers\admin\immobilier\parametrage\type_paiement\TypePaiementController;
 use App\Http\Controllers\admin\immobilier\parametrage\quotas_campagne\QuotasCampagneController;
 use App\Http\Controllers\admin\immobilier\parametrage\batiments_campagne\BatimentsCampagneController;
 use App\Http\Controllers\admin\immobilier\parametrage\regles_campagne\ReglesCampagnesController;
@@ -474,6 +475,15 @@ Route::middleware(['admin'])->group(function () {
                     Route::put('/{id}', 'update')->name('update');
                     Route::delete('/{id}', 'destroy')->name('destroy');
                     Route::patch('/{id}/toggle-status', 'toggleStatus')->name('toggle-status');
+                });
+            // ROUTE TYPE PAIEMENT (types proposés dans « Nouveau paiement »)
+            Route::prefix('type-paiement')->name('type-paiement.')
+                ->controller(TypePaiementController::class)
+                ->group(function () {
+                    Route::get('/', 'index')->name('index');
+                    Route::post('/', 'store')->name('store');
+                    Route::put('/{id}', 'update')->name('update');
+                    Route::delete('/{id}', 'destroy')->name('destroy');
                 });
 
 

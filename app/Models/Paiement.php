@@ -195,6 +195,21 @@ class Paiement extends Model
         return $query->where('type_paiement', $type);
     }
 
+    /**
+     * Paiements d'une campagne : rattachés à une attribution (`contrat_id`) de la campagne ou, à défaut de contrat,
+     * à un loyer facturé sur une attribution de la campagne.
+     */
+    public function scopeDeCampagne($query, string $campagneId)
+    {
+        $assignations = fn () => AssignationChambre::query()->select('id_assignation')->where('campagne_id', $campagneId);
+
+        return $query->where(fn ($campagne) => $campagne
+            ->whereIn('contrat_id', $assignations())
+            ->orWhere(fn ($sansContrat) => $sansContrat
+                ->whereNull('contrat_id')
+                ->whereIn('loyer_id', Loyer::query()->select('id_loyer')->whereIn('assignation_id', $assignations()))));
+    }
+
     // ============================================
     // ACCESSORS & MUTATORS
     // ============================================
@@ -230,13 +245,8 @@ class Paiement extends Model
 
     public function getTypeLabelAttribute(): string
     {
-        $labels = [
-            'loyer' => 'Loyer',
-            'caution' => 'Caution',
-            'penalite' => 'Pénalité',
-            'autre' => 'Autre'
-        ];
-        return $labels[$this->type_paiement] ?? $this->type_paiement;
+        // Libellés du paramétrage (Types de paiement), types désactivés compris.
+        return (string) TypePaiement::libelle($this->type_paiement);
     }
 
     public function getMethodeLabelAttribute(): string

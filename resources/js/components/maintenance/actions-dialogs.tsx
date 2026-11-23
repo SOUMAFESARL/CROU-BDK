@@ -5,6 +5,7 @@ import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { libelleSpecialite, RESULTATS, type Maintenancier } from '@/components/maintenance/shared';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -13,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { ChoixCarte, dateHeure, Encadre, Lignes, maintenantLocal, repartirErreurs } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -27,6 +29,7 @@ function PiedAssistant({
     onSuivant,
     libelle,
     icone,
+    bloque = false,
 }: {
     etape: number;
     total: number;
@@ -36,6 +39,8 @@ function PiedAssistant({
     onSuivant: () => void;
     libelle: string;
     icone: ReactNode;
+    /** Champs obligatoires encore vides : l'envoi est impossible. */
+    bloque?: boolean;
 }) {
     return (
         <DialogFooter className="sm:justify-between">
@@ -53,7 +58,7 @@ function PiedAssistant({
                         Suivant <ArrowRight className="size-4" aria-hidden />
                     </Button>
                 ) : (
-                    <Button key="valider" type="submit" size="sm" className="h-10" disabled={enCours}>
+                    <Button key="valider" type="submit" size="sm" className="h-10" disabled={enCours || bloque}>
                         {enCours ? <Loader2 className="size-4 animate-spin" aria-hidden /> : icone}
                         {libelle}
                     </Button>
@@ -76,6 +81,7 @@ const schemaAssignation = z
     .refine((v) => !v.date_fin_intervention || v.date_fin_intervention >= v.date_debut_intervention, { path: ['date_fin_intervention'], message: 'La fin prévue doit être postérieure au début.' });
 
 type Assignation = z.infer<typeof schemaAssignation>;
+const ETAPES_ASSIGNATION = ['Maintenancier', 'Planning'];
 const CHAMPS_ASSIGNATION: (keyof Assignation)[][] = [['assigne_a'], ['date_debut_intervention', 'date_fin_intervention', 'instructions', 'notification_envoyee']];
 
 /** Assigner un maintenancier (action `assigner` : l'ordre passe « en cours »). */
@@ -87,7 +93,6 @@ export function AssignerDialog({ open, onClose, url, maintenanciers }: { open: b
         register,
         handleSubmit,
         reset,
-        trigger,
         setValue,
         setError,
         formState: { errors, isSubmitting },
@@ -98,6 +103,7 @@ export function AssignerDialog({ open, onClose, url, maintenanciers }: { open: b
     });
     const [assigne, notifier, debut] = useWatch({ control, name: ['assigne_a', 'notification_envoyee', 'date_debut_intervention'] });
     const technicien = maintenanciers.find((m) => m.id === assigne);
+    const manquants = champsManquants(schemaAssignation, useWatch({ control }), CHAMPS_ASSIGNATION, { assigne_a: 'Maintenancier', date_debut_intervention: 'Début prévu' });
 
     useEffect(() => {
         if (open) {
@@ -123,7 +129,7 @@ export function AssignerDialog({ open, onClose, url, maintenanciers }: { open: b
                         <DialogTitle>Assigner un maintenancier</DialogTitle>
                         <DialogDescription>Étape {etape + 1} sur 2 · L’ordre passera « en cours ».</DialogDescription>
                     </DialogHeader>
-                    <Stepper steps={['Maintenancier', 'Planning']} current={etape} reached={etape} onStepClick={(index) => index < etape && setEtape(index)} />
+                    <Stepper steps={ETAPES_ASSIGNATION} current={etape} reached={1} onStepClick={setEtape} />
                     <DialogBody className="space-y-4">
                         {erreurServeur && <Encadre ton="danger">{erreurServeur}</Encadre>}
                         {etape === 0 && (
@@ -198,6 +204,7 @@ export function AssignerDialog({ open, onClose, url, maintenanciers }: { open: b
                                     titre="Notifier le maintenancier"
                                     description="Indique que le maintenancier a été prévenu de l’intervention."
                                 />
+                                <ChampsManquants manquants={manquants} etapes={ETAPES_ASSIGNATION} onAller={setEtape} action="assigner l’ordre" />
                             </>
                         )}
                     </DialogBody>
@@ -207,7 +214,8 @@ export function AssignerDialog({ open, onClose, url, maintenanciers }: { open: b
                         enCours={isSubmitting}
                         onClose={onClose}
                         onPrecedent={() => setEtape(0)}
-                        onSuivant={async () => (await trigger(CHAMPS_ASSIGNATION[0])) && setEtape(1)}
+                        onSuivant={() => setEtape(1)}
+                        bloque={manquants.length > 0}
                         libelle="Assigner"
                         icone={<UserCheck className="size-4" aria-hidden />}
                     />
@@ -234,6 +242,7 @@ const schemaIntervention = z.object({
 });
 
 type Intervention = z.infer<typeof schemaIntervention>;
+const ETAPES_INTERVENTION = ['Intervention', 'Vérification'];
 const CHAMPS_INTERVENTION: (keyof Intervention)[][] = [['date_intervention', 'duree', 'resultat', 'description', 'remarques'], []];
 
 /** Ajouter une intervention à l'ordre (action `intervention.store`). */
@@ -245,7 +254,6 @@ export function InterventionDialog({ open, onClose, url, ordreId }: { open: bool
         register,
         handleSubmit,
         reset,
-        trigger,
         setValue,
         setError,
         getValues,
@@ -270,6 +278,12 @@ export function InterventionDialog({ open, onClose, url, ordreId }: { open: bool
     };
 
     const v = getValues();
+    const manquants = champsManquants(schemaIntervention, useWatch({ control }), CHAMPS_INTERVENTION, {
+        date_intervention: 'Date et heure',
+        duree: 'Durée',
+        resultat: 'Résultat',
+        description: 'Travaux réalisés',
+    });
 
     return (
         <Dialog open={open} onOpenChange={(ouvert) => !ouvert && !isSubmitting && onClose()}>
@@ -281,7 +295,7 @@ export function InterventionDialog({ open, onClose, url, ordreId }: { open: bool
                             Étape {etape + 1} sur 2 · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                         </DialogDescription>
                     </DialogHeader>
-                    <Stepper steps={['Intervention', 'Vérification']} current={etape} reached={etape} onStepClick={(index) => index < etape && setEtape(index)} />
+                    <Stepper steps={ETAPES_INTERVENTION} current={etape} reached={1} onStepClick={setEtape} />
                     <DialogBody className="space-y-4">
                         {erreurServeur && <Encadre ton="danger">{erreurServeur}</Encadre>}
                         {etape === 0 && (
@@ -320,6 +334,7 @@ export function InterventionDialog({ open, onClose, url, ordreId }: { open: bool
                         )}
                         {etape === 1 && (
                             <>
+                                <ChampsManquants manquants={manquants} etapes={ETAPES_INTERVENTION} onAller={setEtape} />
                                 <Lignes
                                     lignes={[
                                         ['Date', dateHeure(v.date_intervention)],
@@ -339,7 +354,8 @@ export function InterventionDialog({ open, onClose, url, ordreId }: { open: bool
                         enCours={isSubmitting}
                         onClose={onClose}
                         onPrecedent={() => setEtape(0)}
-                        onSuivant={async () => (await trigger(CHAMPS_INTERVENTION[0])) && setEtape(1)}
+                        onSuivant={() => setEtape(1)}
+                        bloque={manquants.length > 0}
                         libelle="Enregistrer l’intervention"
                         icone={<ClipboardPlus className="size-4" aria-hidden />}
                     />

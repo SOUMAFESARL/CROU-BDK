@@ -688,9 +688,9 @@ private function calculerFacturation($dateDebut)
         return $resultats;
     }
 
-    public function getStatistiquesLoyers(?string $annee = null, ?string $mois = null, ?string $residence = null): array
+    public function getStatistiquesLoyers(?string $annee = null, ?string $mois = null, ?string $residence = null, ?string $campagne = null): array
 {
-    $stats = $this->loyerRepository->getStatistiquesLoyers($annee, $mois, $residence);
+    $stats = $this->loyerRepository->getStatistiquesLoyers($annee, $mois, $residence, $campagne);
     
     // Calculer le taux de recouvrement
     if ($stats['total_montant'] > 0) {

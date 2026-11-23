@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { fcfa, PRIORITES, TYPES_INTERVENTION } from '@/components/maintenance/shared';
 import { FormAlert, useWizard, Wizard, type WizardStep } from '@/components/parc-immobilier/form/wizard';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Field } from '@/components/ui/field';
@@ -13,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
 import { Textarea } from '@/components/ui/textarea';
 import { aujourdhui, ChoixCarte, Lignes, repartirErreurs, type Structure } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { symboleDevise } from '@/lib/systeme';
 import { dateFr, nombre } from '@/lib/text';
@@ -86,7 +88,6 @@ export default function MaintenanceEdit({ ordre, categories, structure, equipeme
         control,
         register,
         handleSubmit,
-        trigger,
         setValue,
         setError,
         getValues,
@@ -115,19 +116,8 @@ export default function MaintenanceEdit({ ordre, categories, structure, equipeme
     const batiments = useMemo(() => structure.batiments.filter((b) => b.cite_id === citeId), [structure.batiments, citeId]);
     const chambres = useMemo(() => structure.chambres.filter((c) => c.batiment_id === batimentId), [structure.chambres, batimentId]);
 
-    const allerA = async (cible: number) => {
-        if (cible <= wizard.current) {
-            wizard.goTo(cible);
-            return;
-        }
-        for (let index = wizard.current; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPES[index]))) {
-                wizard.goTo(index);
-                return;
-            }
-        }
-        wizard.goTo(cible);
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => wizard.goTo(cible);
 
     const enregistrer = handleSubmit(
         (valeurs) => {
@@ -145,6 +135,7 @@ export default function MaintenanceEdit({ ordre, categories, structure, equipeme
     );
 
     const v = getValues();
+    const manquants = champsManquants(schema, useWatch({ control }), CHAMPS_ETAPES);
 
     return (
         <AdminLayout title={`Modifier l’OT ${ordre.numero}`}>
@@ -159,7 +150,7 @@ export default function MaintenanceEdit({ ordre, categories, structure, equipeme
                 cancelUrl={urls.show ?? '#'}
                 submitting={isSubmitting}
                 submitLabel="Enregistrer les modifications"
-                submitDisabled={!urls.update}
+                submitDisabled={!urls.update || manquants.length > 0}
             >
                 {erreurServeur && <FormAlert>{erreurServeur}</FormAlert>}
 
@@ -303,30 +294,33 @@ export default function MaintenanceEdit({ ordre, categories, structure, equipeme
                 )}
 
                 {wizard.current === 3 && (
-                    <Lignes
-                        lignes={[
-                            ['Titre', v.titre],
-                            ['Type', `${categories.find((c) => c.value === v.categorie)?.label ?? ''} · ${TYPES_INTERVENTION.find((t) => t.value === v.type_intervention)?.label ?? ''}`],
-                            ['Priorité', PRIORITES.find((p) => p.value === v.priorite)?.label ?? ''],
-                            ['Échéance', v.date_echeance ? dateFr(v.date_echeance) : ''],
-                            ['Description', <span className="whitespace-pre-line">{v.description}</span>],
-                            [
-                                'Emplacement',
+                    <>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES.map((etape) => etape.label)} onAller={wizard.goTo} />
+                        <Lignes
+                            lignes={[
+                                ['Titre', v.titre],
+                                ['Type', `${categories.find((c) => c.value === v.categorie)?.label ?? ''} · ${TYPES_INTERVENTION.find((t) => t.value === v.type_intervention)?.label ?? ''}`],
+                                ['Priorité', PRIORITES.find((p) => p.value === v.priorite)?.label ?? ''],
+                                ['Échéance', v.date_echeance ? dateFr(v.date_echeance) : ''],
+                                ['Description', <span className="whitespace-pre-line">{v.description}</span>],
                                 [
-                                    structure.cites.find((c) => c.id === v.cite_id)?.name,
-                                    structure.batiments.find((b) => b.id === v.batiment_id)?.name,
-                                    v.chambre_id ? `Chambre ${structure.chambres.find((c) => c.id === v.chambre_id)?.numero ?? ''}` : null,
-                                ]
-                                    .filter(Boolean)
-                                    .join(' · '),
-                            ],
-                            ['Équipement', equipements.find((e) => e.id === v.equipement_id)?.name ?? ''],
-                            ['Cause', v.cause],
-                            ['Coût estimé', v.cout_estime !== '' ? fcfa(v.cout_estime) : ''],
-                            ['Coût réel', v.cout_reel !== '' ? fcfa(v.cout_reel) : ''],
-                            ['Temps passé', v.temps_passe !== '' ? `${nombre(v.temps_passe)} h` : ''],
-                        ]}
-                    />
+                                    'Emplacement',
+                                    [
+                                        structure.cites.find((c) => c.id === v.cite_id)?.name,
+                                        structure.batiments.find((b) => b.id === v.batiment_id)?.name,
+                                        v.chambre_id ? `Chambre ${structure.chambres.find((c) => c.id === v.chambre_id)?.numero ?? ''}` : null,
+                                    ]
+                                        .filter(Boolean)
+                                        .join(' · '),
+                                ],
+                                ['Équipement', equipements.find((e) => e.id === v.equipement_id)?.name ?? ''],
+                                ['Cause', v.cause],
+                                ['Coût estimé', v.cout_estime !== '' ? fcfa(v.cout_estime) : ''],
+                                ['Coût réel', v.cout_reel !== '' ? fcfa(v.cout_reel) : ''],
+                                ['Temps passé', v.temps_passe !== '' ? `${nombre(v.temps_passe)} h` : ''],
+                            ]}
+                        />
+                    </>
                 )}
             </Wizard>
         </AdminLayout>

@@ -31,6 +31,7 @@ import { ICON } from "@/components/layout/app-sidebar";
 import { EtudiantLayout } from "@/components/layout/etudiant-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     Dialog,
@@ -60,6 +61,7 @@ import {
     maintenantLocal,
     repartirErreurs,
 } from "@/components/vie-residentielle/shared";
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from "@/lib/inertia-form";
 import { cn } from "@/lib/utils";
 import {
@@ -312,30 +314,20 @@ type ModalIncidentProps = {
 /** Modal « Déclarer un incident disciplinaire » : assistant en 3 étapes vers `etudiants.incidents.store` (l'incident, les faits, puis vérification et envoi). */
 function ModalIncident({ ouverte, fermer, residence, natures, url }: ModalIncidentProps) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const schema = useMemo(() => incidentSchema(natures.map((n) => n.code)), [natures]);
     const {
         register,
         control,
         handleSubmit,
         reset,
-        trigger,
         setError,
         formState: { errors, isSubmitting },
     } = useForm<Incident>({ resolver: zodResolver(schema), defaultValues: vide(), mode: "onTouched" });
     const valeurs = useWatch({ control });
+    const manquants = champsManquants(schema, valeurs, CHAMPS_ETAPE);
 
-    const allerA = async (cible: number) => {
-        // Avancer valide toutes les étapes intermédiaires ; reculer est toujours permis.
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPE[index]))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'envoi exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
 
     const transmettre = handleSubmit(async ({ sincerite: _sincerite, confidentiel, ...donnees }) => {
         const ok = await envoyer(
@@ -352,12 +344,11 @@ function ModalIncident({ ouverte, fermer, residence, natures, url }: ModalIncide
             reinitialiser();
             fermer();
         }
-    });
+    }, (fautes) => setEtape(Math.max(0, CHAMPS_ETAPE.findIndex((champs) => champs.some((champ) => fautes[champ])))));
 
     const reinitialiser = () => {
         reset(vide());
         setEtape(0);
-        setAtteinte(0);
     };
 
     const annuler = () => {
@@ -406,7 +397,7 @@ function ModalIncident({ ouverte, fermer, residence, natures, url }: ModalIncide
                     <Stepper
                         steps={ETAPES}
                         current={etape}
-                        reached={atteinte}
+                        reached={ETAPES.length - 1}
                         onStepClick={allerA}
                         className="px-4 sm:px-6"
                     />
@@ -538,6 +529,7 @@ function ModalIncident({ ouverte, fermer, residence, natures, url }: ModalIncide
 
                         {etape === 2 && (
                             <>
+                                <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} action="transmettre le signalement" />
                                 <dl className="divide-y rounded-brand border">
                                     {(
                                         [
@@ -630,7 +622,7 @@ function ModalIncident({ ouverte, fermer, residence, natures, url }: ModalIncide
                                 <ChevronRight {...ICON} />
                             </Button>
                         ) : (
-                            <Button key="envoyer" type="submit" disabled={isSubmitting} className="font-medium">
+                            <Button key="envoyer" type="submit" disabled={isSubmitting || manquants.length > 0} className="font-medium">
                                 {isSubmitting ? <Loader2 {...ICON} className="animate-spin" /> : <Send {...ICON} />}
                                 Transmettre le signalement
                             </Button>

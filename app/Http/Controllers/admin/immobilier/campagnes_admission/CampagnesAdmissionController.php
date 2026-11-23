@@ -60,6 +60,9 @@ class CampagnesAdmissionController extends Controller
      */
     private const FILTRES_ADMISSION = ['toutes', 'recevables', 'rejetees', 'refusees', 'validees', 'definitives'];
 
+    /** Filtres de la « Liste des demandes » : demandes de la campagne choisie dans le bandeau (`?campagne=`). */
+    private const FILTRES_PAR_CAMPAGNE = ['toutes', 'recevables', 'rejetees', 'refusees'];
+
     /** Anciens filtres (liens enregistrés) : nouvelles demandes, en attente, rejetées. */
     private const FILTRES_ADMISSION_ANCIENS = ['nouvelles_demandes' => 'toutes', 'en_attente' => 'recevables', 'annuler' => 'rejetees'];
 
@@ -106,10 +109,19 @@ class CampagnesAdmissionController extends Controller
         $typeDemande = array_key_exists($typeDemande, \App\Http\Services\Eligibilite\CriteresCampagne::VOLETS) ? $typeDemande : '';
         $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
         $repository = app(\App\Repositories\EtudiantRepository::class);
-        // Bandeau : campagne au statut « active » (comme la page Campagnes), pas celle de l'année universitaire.
-        $campagne = $this->campagneActive();
+        // Liste des demandes (toutes, recevables, irrecevables, refusées) : demandes de la campagne choisie dans le
+        // bandeau (`?campagne=`, par défaut la campagne active). Décision de la commission et listes définitives : campagne
+        // active, sur toutes les demandes.
+        $parCampagne = in_array($etat, self::FILTRES_PAR_CAMPAGNE, true);
+        $campagnes = $parCampagne ? Campagne::query()->orderByDesc('created_at')->get() : null;
+        $campagne = $parCampagne ? $this->campagneSelectionnee($request, $campagnes) : $this->campagneActive();
         // Conformité de la dernière demande de chaque étudiant aux critères de sa campagne : compteurs et listes filtrées.
         $population = $repository->getPopulationDemandes();
+        if ($parCampagne) {
+            $population = $this->populationCampagne($population, $campagne);
+        }
+        // Campagne choisie conservée par les liens de la liste des demandes (indicateurs, onglets, téléchargements).
+        $choixCampagne = $parCampagne && $campagne && $request->filled('campagne') ? ['campagne' => (string) $campagne->getKey()] : [];
         $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
         $criteres = app(\App\Http\Services\Eligibilite\CriteresCampagne::class);
         $etudiants = match ($etat) {
@@ -119,7 +131,8 @@ class CampagnesAdmissionController extends Controller
             // Décision de la commission : demandes validées et demandes mises en attente.
             'validees' => [...$classement['validees'], ...$classement['en_attente']],
             'definitives' => $classement['definitives'],
-            default => null,
+            // Toutes les demandes : celles de la campagne choisie.
+            default => $parCampagne ? $population->map(fn (Etudiant $etudiant) => (string) $etudiant->getKey())->all() : null,
         };
         if ($typeDemande !== '') {
             // Le type n'est pas stocké : il se calcule sur la population des demandes, puis restreint la liste.
@@ -141,7 +154,7 @@ class CampagnesAdmissionController extends Controller
         // depuis ces listes ; liste définitive : demandes approuvées en commission (mêmes rangs).
         $typesListe = ['recevables' => 'provisoire', 'validees' => 'validee', 'definitives' => 'definitive'];
         $listesProvisoires = isset($typesListe[$etat])
-            ? $this->classementProvisoire($request, $typesListe[$etat], $population, $classement, $campagne, $recherche, $typeDemande, $personnel, $vues->allows($admin, 'admissions.documents'), $url, $access, $admin)
+            ? $this->classementProvisoire($request, $typesListe[$etat], $population, $classement, $campagne, $recherche, $typeDemande, $personnel, $vues->allows($admin, 'admissions.documents'), $url, $access, $admin, $choixCampagne)
             : null;
 
         return Inertia::render('Admin/Hebergement/Admissions/Index', [
@@ -172,10 +185,20 @@ class CampagnesAdmissionController extends Controller
             ],
             'etat' => $etat,
             'classement' => $listesProvisoires,
-            'filters' => ['q' => $recherche, 'etat_dossier' => $etatDossier, 'type' => $typeDemande],
+            'filters' => ['q' => $recherche, 'etat_dossier' => $etatDossier, 'type' => $typeDemande, 'campagne' => $choixCampagne['campagne'] ?? ''],
             'etatsDossier' => collect(DossierWorkflow::LABELS)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values(),
             'colonnes' => ['personnel' => $personnel, 'historique' => $historique],
+            // Liste des demandes : campagnes proposées dans le bandeau (libellé et année), la plus récente d'abord.
+            'campagnes' => $campagnes?->map(fn (Campagne $option) => [
+                'id' => (string) $option->getKey(),
+                'libelle' => $option->libelle,
+                'annee' => $option->annee_campagne,
+                'active' => $option->statut === 'active',
+            ])->values()->all() ?? [],
             'campagneActive' => $campagne ? [
+                'id' => (string) $campagne->getKey(),
+                'libelle' => $campagne->libelle,
+                'active' => $campagne->statut === 'active',
                 'annee' => $campagne->annee_campagne,
                 'echeance' => $campagne->date_echeance_demande ? Carbon::parse($campagne->date_echeance_demande)->toDateString() : null,
                 'moyenne_min' => $campagne->moyenne_min,
@@ -185,7 +208,7 @@ class CampagnesAdmissionController extends Controller
                 'campagnes' => $url('admin.hebergement.campagnes_admission.campagnes'),
                 'leverRefus' => $peutLever ? route('admin.hebergement.campagnes_admission.lever_refus_automatiques') : null,
                 'filtres' => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
-                    ? collect(self::FILTRES_ADMISSION)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.campagnes_admission.admission', ['etat' => $f])])
+                    ? collect(self::FILTRES_ADMISSION)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.campagnes_admission.admission', ['etat' => $f] + (in_array($f, self::FILTRES_PAR_CAMPAGNE, true) ? $choixCampagne : []))])
                     : null,
             ],
         ]);
@@ -245,6 +268,8 @@ class CampagnesAdmissionController extends Controller
                     ] : null,
                 ]
                 : null,
+            // Rejets de la demande courante (passages en « Refusé » : agent, commission ou barème), du plus récent au plus ancien.
+            'rejets' => $derniere && $vues->allows($admin, 'admissions.eligibility') ? $this->rejets($derniere) : [],
             'bareme' => $vues->allows($admin, 'admissions.eligibility') ? $this->scoreBareme($derniere, $etudiant) : null,
             'documents' => $documents ? collect($etudiant->documents)->map(fn ($document) => [
                 'id' => (string) $document['id_document'],
@@ -271,6 +296,29 @@ class CampagnesAdmissionController extends Controller
                 'deroger' => $deroger,
             ],
         ]);
+    }
+
+    /**
+     * Motifs de rejet de la demande (bloc « Motifs de rejet » de la fiche) : transitions vers « Refusé » de
+     * l'historique du dossier (`DossierWorkflow`, motif obligatoire), du plus récent au plus ancien.
+     *
+     * @return list<array{id: string, motif: string|null, auteur: string|null, automatique: bool, date: string|null}>
+     */
+    private function rejets(DemandeEtudiant $demande): array
+    {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('dossier_transitions')) {
+            return [];
+        }
+
+        return \App\Models\DossierTransition::query()->where('demande_id', $demande->getKey())->where('nouvel_etat', 'refuse')
+            ->orderByDesc('id')->get()
+            ->map(fn (\App\Models\DossierTransition $transition) => [
+                'id' => (string) $transition->id,
+                'motif' => filled($transition->motif) ? $transition->motif : null,
+                'auteur' => $transition->details['auteur_nom'] ?? null,
+                'automatique' => $transition->acteur_type === 'systeme',
+                'date' => $transition->created_at?->format('Y-m-d H:i'),
+            ])->values()->all();
     }
 
     /**
@@ -316,6 +364,7 @@ class CampagnesAdmissionController extends Controller
                 'credits' => $credits,
                 'credits_max' => DemandeEtudiant::CREDITS_PAR_AN,
                 'ville_bac' => $demande?->ville_bac,
+                'num_table_bac' => $demande?->num_table_bac,
             ],
             'situation' => [
                 'boursier' => (bool) ($demande?->boursier ?? $etudiant->boursier),
@@ -404,7 +453,7 @@ class CampagnesAdmissionController extends Controller
      * @param  array{recevables: string[], validees: string[], en_attente: string[], definitives: string[]}  $classement  `RecevabiliteDemandes::classer()`
      * @param  ''|'admission'|'readmission'  $typeDemande  filtre de la décision de la commission et de la liste définitive (vide : les deux volets)
      */
-    private function classementProvisoire(Request $request, string $type, EloquentCollection $population, array $classement, ?Campagne $campagne, string $recherche, string $typeDemande, bool $personnel, bool $documents, \Closure $url, AdminAccess $access, $admin): array
+    private function classementProvisoire(Request $request, string $type, EloquentCollection $population, array $classement, ?Campagne $campagne, string $recherche, string $typeDemande, bool $personnel, bool $documents, \Closure $url, AdminAccess $access, $admin, array $choixCampagne = []): array
     {
         [$campagne, $volets, $partage] = $this->listesProvisoires($population, $classement, $campagne);
         $listes = $partage[['provisoire' => 'provisoires', 'validee' => 'validees', 'definitive' => 'definitives'][$type]];
@@ -429,7 +478,7 @@ class CampagnesAdmissionController extends Controller
         $etat = ['provisoire' => 'recevables', 'validee' => 'validees', 'definitive' => 'definitives'][$type];
         // Changer d'onglet de la décision de la commission ou des listes définitives conserve le type de demande filtré.
         $lien = fn (string $onglet) => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
-            ? route('admin.hebergement.campagnes_admission.admission', ['etat' => $etat] + ($onglet === 'demandes' ? [] : ['liste' => $onglet]) + ($voletFiltre ? ['type' => $voletFiltre] : []))
+            ? route('admin.hebergement.campagnes_admission.admission', ['etat' => $etat] + ($onglet === 'demandes' ? [] : ['liste' => $onglet]) + ($voletFiltre ? ['type' => $voletFiltre] : []) + $choixCampagne)
             : null;
         // Approbation en commission de l'onglet ouvert : les demandes validées (« Demandes validées »), ou la file
         // d'attente (validée puis approuvée) ; elles passent dans la liste définitive.
@@ -456,7 +505,7 @@ class CampagnesAdmissionController extends Controller
         // imprimable) ; liste définitive : type de demande filtré.
         $exports = match (true) {
             $provisoire && $liste !== 'demandes' && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_provisoire_export') => collect(['excel', 'pdf'])
-                ->mapWithKeys(fn ($format) => [$format => route('admin.hebergement.campagnes_admission.liste_provisoire_export', ['volet' => $liste, 'format' => $format])])->all(),
+                ->mapWithKeys(fn ($format) => [$format => route('admin.hebergement.campagnes_admission.liste_provisoire_export', ['volet' => $liste, 'format' => $format] + $choixCampagne)])->all(),
             $type === 'definitive' && $etatPublication['publiee'] && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_definitive_export') => collect(['excel', 'pdf'])
                 ->mapWithKeys(fn ($format) => [$format => route('admin.hebergement.campagnes_admission.liste_definitive_export', ['liste' => $liste, 'volet' => $voletFiltre ?? 'toutes', 'format' => $format])])->all(),
             default => null,
@@ -797,9 +846,11 @@ class CampagnesAdmissionController extends Controller
     {
         $admin = $request->user('admin');
         $personnel = app(AdminViewAccess::class)->allows($admin, 'admissions.personal');
-        $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes();
+        // Demandes de la campagne choisie dans la liste des demandes (`?campagne=`, par défaut la campagne active).
+        $campagne = $this->campagneSelectionnee($request);
+        $population = $this->populationCampagne(app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes(), $campagne);
         $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
-        [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $this->campagneActive());
+        [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $campagne);
         // Liste provisoire : demandes encore à décider (les demandes validées ou en attente figurent dans la « Décision de la commission »).
         $listes = $listes['provisoires'];
         if (! in_array($volet, $volets, true)) {
@@ -1119,6 +1170,34 @@ class CampagnesAdmissionController extends Controller
     private function campagneActive(): ?Campagne
     {
         return Campagne::where('statut', 'active')->orderByDesc('created_at')->first();
+    }
+
+    /**
+     * Campagne choisie dans le bandeau de la liste des demandes (`?campagne=<id>`) ; à défaut (ou identifiant inconnu),
+     * la campagne active, sinon la campagne la plus récente. `null` seulement s'il n'existe aucune campagne.
+     */
+    private function campagneSelectionnee(Request $request, ?EloquentCollection $campagnes = null): ?Campagne
+    {
+        $id = (string) $request->query('campagne', '');
+        if ($campagnes !== null) {
+            return ($id !== '' ? $campagnes->first(fn (Campagne $campagne) => (string) $campagne->getKey() === $id) : null)
+                ?? $campagnes->first(fn (Campagne $campagne) => $campagne->statut === 'active')
+                ?? $campagnes->first();
+        }
+
+        return ($id !== '' ? Campagne::find($id) : null)
+            ?? $this->campagneActive()
+            ?? Campagne::query()->orderByDesc('created_at')->first();
+    }
+
+    /** Étudiants dont la demande en cours (dernière demande) a été déposée pour la campagne ; sans campagne, tous. */
+    private function populationCampagne(EloquentCollection $population, ?Campagne $campagne): EloquentCollection
+    {
+        if (! $campagne) {
+            return $population;
+        }
+
+        return $population->filter(fn (Etudiant $etudiant) => (string) $etudiant->derniereDemande?->campagne_id === (string) $campagne->getKey())->values();
     }
 
     /**

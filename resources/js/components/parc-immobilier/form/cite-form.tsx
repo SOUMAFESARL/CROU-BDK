@@ -19,9 +19,11 @@ import { Controller, useForm, type FieldPath } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { champsManquants } from '@/lib/champs-manquants';
 import { formatTelephone } from '@/lib/telephone';
 import type { SharedProps } from '@/types/global';
 import { STATUTS } from '../labels';
@@ -192,16 +194,8 @@ export function CiteForm({ item, campusId, typesCite, users, reglements, submitU
         return ok;
     };
 
-    /** Aller à une étape plus loin impose de valider chacune des étapes intermédiaires. */
-    const allerA = async (cible: number) => {
-        for (let index = wizard.current; index < cible; index++) {
-            if (!(await validerEtape(index))) {
-                wizard.goTo(index);
-                return;
-            }
-        }
-        wizard.goTo(cible);
-    };
+    /** Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`). */
+    const allerA = (cible: number) => wizard.goTo(cible);
 
     const envoyer = (values: FormOutput) => {
         if (!submitUrl) return;
@@ -258,7 +252,7 @@ export function CiteForm({ item, campusId, typesCite, users, reglements, submitU
             void handleSubmit(envoyer)();
             return;
         }
-        if (await validerEtape(wizard.current)) wizard.next();
+        wizard.next();
     };
 
     const responsable = users.find((user) => user.id === watch('responsable_id')) ?? null;
@@ -300,6 +294,7 @@ export function CiteForm({ item, campusId, typesCite, users, reglements, submitU
 
     const nomType = (id: string) => typesCite.find((t) => t.id === id)?.name ?? '';
     const values = watch();
+    const manquants = champsManquants(schema, values, STEPS.map((step) => step.fields));
     const unknownError = serverErrors.error;
     const describedBy = (champ: Champ) => (errors[champ] ? `${champ}-error` : undefined);
 
@@ -315,13 +310,13 @@ export function CiteForm({ item, campusId, typesCite, users, reglements, submitU
                 steps={STEPS}
                 current={wizard.current}
                 reached={wizard.reached}
-                onStepClick={(index) => void allerA(index)}
+                onStepClick={allerA}
                 onPrevious={wizard.previous}
                 onNext={() => void suivant()}
                 cancelUrl={cancelUrl}
                 submitting={submitting}
                 submitLabel={isEdit ? 'Enregistrer les modifications' : 'Enregistrer la cité'}
-                submitDisabled={!submitUrl}
+                submitDisabled={!submitUrl || manquants.length > 0}
             >
                 {unknownError && <FormAlert>{unknownError}</FormAlert>}
                 {!submitUrl && <FormAlert>Vous n’avez pas le droit d’enregistrer cette cité.</FormAlert>}
@@ -618,6 +613,7 @@ export function CiteForm({ item, campusId, typesCite, users, reglements, submitU
 
                 {wizard.current === 5 && (
                     <div className="space-y-4">
+                        <ChampsManquants manquants={manquants} etapes={STEPS.map((step) => step.label)} onAller={wizard.goTo} action="enregistrer la cité" />
                         <RecapSection
                             title="Identification"
                             onEdit={() => wizard.goTo(0)}

@@ -9,6 +9,7 @@ import { ICON } from '@/components/layout/app-sidebar';
 import { ChampRecherche, ErreurGenerale, Note, PiedAssistant, Recap, useAssistant, Vide } from '@/components/parametrage-hebergement/shared';
 import { ToggleCard } from '@/components/parc-immobilier/form/inputs';
 import { ACTION_COLORS, moduleIcon } from '@/components/roles/permission-editor';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { repartirErreurs } from '@/components/vie-residentielle/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { StatCard } from '@/components/ui/stat-card';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { nombre, sansAccents } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -430,6 +432,7 @@ function Formulaire({ module, parentInitial, modules, enfants, actions, url, onC
     });
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<ModuleValeurs>(CHAMPS, trigger, module !== null);
     const v = watch();
+    const manquants = champsManquants(moduleSchema, v, CHAMPS, { name: 'Nom du module', slug: 'Identifiant (slug)', actions: 'Actions' });
     const parent = v.parent_id === RACINE ? null : (modules.find((m) => String(m.id) === v.parent_id) ?? null);
     const retirees = module ? module.actions.filter((a) => !v.actions.includes(a)) : [];
 
@@ -714,72 +717,75 @@ function Formulaire({ module, parentInitial, modules, enfants, actions, url, onC
                 )}
 
                 {etape === 3 && (
-                    <Recap
-                        lignes={[
-                            {
-                                label: 'Module parent',
-                                valeur: parent ? parent.name : 'Aucun : module principal',
-                            },
-                            {
-                                label: 'Nom',
-                                valeur: <span className="font-medium">{v.name.trim()}</span>,
-                            },
-                            {
-                                label: 'Identifiant technique',
-                                valeur: <code className="text-primary">{v.slug.trim()}</code>,
-                            },
-                            {
-                                label: 'Description',
-                                valeur: v.description.trim() || <span className="text-muted">Aucune</span>,
-                            },
-                            {
-                                label: 'Route',
-                                valeur: v.route_name.trim() ? <code>{v.route_name.trim()}</code> : vide,
-                            },
-                            {
-                                label: 'Menu · sous-menu',
-                                valeur: [v.menu_key.trim(), v.submenu_key.trim()].filter(Boolean).join(' · ') || vide,
-                            },
-                            { label: 'Position', valeur: v.position },
-                            {
-                                label: 'Statut',
-                                valeur: `${v.is_active ? 'Actif' : 'Inactif'} · ${v.show_in_menu ? 'affiché dans le menu' : 'masqué du menu'}`,
-                            },
-                            {
-                                label: `Actions (${v.actions.length})`,
-                                valeur: (
-                                    <span className="flex flex-wrap gap-1 sm:justify-end">
-                                        {v.actions.map((a) => (
-                                            <span
-                                                key={a}
-                                                className={cn(
-                                                    'rounded border px-2 py-0.5 text-xs',
-                                                    ACTION_COLORS[a] ?? 'border-gray-200 bg-gray-50 text-gray-700',
-                                                )}
-                                            >
-                                                {actions[a] ?? a}
-                                            </span>
-                                        ))}
-                                    </span>
-                                ),
-                            },
-                            ...(retirees.length > 0
-                                ? [
-                                      {
-                                          label: 'Permissions supprimées',
-                                          valeur: <span className="text-red-700">{retirees.map((a) => actions[a] ?? a).join(', ')}</span>,
-                                      },
-                                  ]
-                                : []),
-                        ]}
-                    />
+                    <>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={aller} />
+                        <Recap
+                            lignes={[
+                                {
+                                    label: 'Module parent',
+                                    valeur: parent ? parent.name : 'Aucun : module principal',
+                                },
+                                {
+                                    label: 'Nom',
+                                    valeur: <span className="font-medium">{v.name.trim()}</span>,
+                                },
+                                {
+                                    label: 'Identifiant technique',
+                                    valeur: <code className="text-primary">{v.slug.trim()}</code>,
+                                },
+                                {
+                                    label: 'Description',
+                                    valeur: v.description.trim() || <span className="text-muted">Aucune</span>,
+                                },
+                                {
+                                    label: 'Route',
+                                    valeur: v.route_name.trim() ? <code>{v.route_name.trim()}</code> : vide,
+                                },
+                                {
+                                    label: 'Menu · sous-menu',
+                                    valeur: [v.menu_key.trim(), v.submenu_key.trim()].filter(Boolean).join(' · ') || vide,
+                                },
+                                { label: 'Position', valeur: v.position },
+                                {
+                                    label: 'Statut',
+                                    valeur: `${v.is_active ? 'Actif' : 'Inactif'} · ${v.show_in_menu ? 'affiché dans le menu' : 'masqué du menu'}`,
+                                },
+                                {
+                                    label: `Actions (${v.actions.length})`,
+                                    valeur: (
+                                        <span className="flex flex-wrap gap-1 sm:justify-end">
+                                            {v.actions.map((a) => (
+                                                <span
+                                                    key={a}
+                                                    className={cn(
+                                                        'rounded border px-2 py-0.5 text-xs',
+                                                        ACTION_COLORS[a] ?? 'border-gray-200 bg-gray-50 text-gray-700',
+                                                    )}
+                                                >
+                                                    {actions[a] ?? a}
+                                                </span>
+                                            ))}
+                                        </span>
+                                    ),
+                                },
+                                ...(retirees.length > 0
+                                    ? [
+                                          {
+                                              label: 'Permissions supprimées',
+                                              valeur: <span className="text-red-700">{retirees.map((a) => actions[a] ?? a).join(', ')}</span>,
+                                          },
+                                      ]
+                                    : []),
+                            ]}
+                        />
+                    </>
                 )}
             </DialogBody>
             <PiedAssistant
                 etape={etape}
                 derniere={derniere}
                 envoi={isSubmitting}
-                desactive={!url}
+                desactive={!url || manquants.length > 0}
                 onAnnuler={onClose}
                 onPrecedent={() => aller(etape - 1)}
                 libelle={module ? 'Enregistrer les modifications' : 'Créer le module'}

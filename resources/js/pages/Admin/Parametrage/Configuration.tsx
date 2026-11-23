@@ -30,10 +30,12 @@ import {
 import { useMemo, useState, type ReactNode } from 'react';
 import type { RequestPayload } from '@inertiajs/core';
 import { Controller, useForm, type Control, type DefaultValues, type FieldValues, type Path, type Resolver } from 'react-hook-form';
+import type { ZodType } from 'zod';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { ErreurGenerale, Note, PiedAssistant, Recap, useAssistant } from '@/components/parametrage-hebergement/shared';
 import { ToggleCard } from '@/components/parc-immobilier/form/inputs';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { repartirErreurs } from '@/components/vie-residentielle/shared';
 import { Badge } from '@/components/ui/badge';
 import { Field } from '@/components/ui/field';
@@ -45,6 +47,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { StatCard } from '@/components/ui/stat-card';
 import { Stepper } from '@/components/ui/stepper';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { champsManquants, type ChampManquant } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { montant, symboleDevise } from '@/lib/systeme';
 import { avecFormatTelephone, formatTelephone, PROPS_TELEPHONE } from '@/lib/telephone';
@@ -264,6 +267,7 @@ function Assistant({
     onSubmit,
     erreur,
     incomplet,
+    manquants,
     children,
     pied,
 }: {
@@ -274,6 +278,8 @@ function Assistant({
     onSubmit: () => Promise<void>;
     erreur: string | null;
     incomplet: boolean;
+    /** Champs obligatoires encore vides : l'enregistrement reste bloqué. */
+    manquants: ChampManquant[];
     children: ReactNode;
     pied: ReactNode;
 }) {
@@ -290,8 +296,9 @@ function Assistant({
             <Stepper steps={etapes} current={etape} reached={atteinte} onStepClick={(index) => void allerA(index)} className="overflow-x-auto" />
             <div className="space-y-4 px-6 py-5">
                 <ErreurGenerale message={erreur} />
+                {derniere && <ChampsManquants manquants={manquants} etapes={etapes} onAller={(index) => void allerA(index)} />}
                 {children}
-                {derniere && incomplet && (
+                {derniere && incomplet && manquants.length === 0 && (
                     <p role="alert" className="flex items-center gap-2 text-sm font-medium text-red-600">
                         <CircleAlert className="size-4" aria-hidden /> Certaines informations sont incomplètes : revenez aux étapes précédentes.
                     </p>
@@ -339,6 +346,7 @@ function FormulaireGeneral({ valeurs, url }: { valeurs: GeneralValeurs; url: str
     } = useForm<GeneralValeurs>({ resolver: zodResolver(generalSchema), mode: 'onTouched', defaultValues: initiales });
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<GeneralValeurs>(CHAMPS_GENERAL, trigger, true);
     const v = watch();
+    const manquants = champsManquants(generalSchema, v, CHAMPS_GENERAL);
     const lecture = !url;
 
     const enregistrer = (donnees: GeneralValeurs) =>
@@ -372,6 +380,7 @@ function FormulaireGeneral({ valeurs, url }: { valeurs: GeneralValeurs; url: str
             allerA={allerA}
             erreur={erreur}
             incomplet={Object.keys(errors).length > 0}
+            manquants={manquants}
             onSubmit={async () => {
                 setErreur(null);
                 if (!derniere) await allerA(etape + 1);
@@ -388,6 +397,7 @@ function FormulaireGeneral({ valeurs, url }: { valeurs: GeneralValeurs; url: str
                     }}
                     onPrecedent={() => aller(etape - 1)}
                     libelle="Enregistrer les modifications"
+                    desactive={manquants.length > 0}
                 />
             }
         >
@@ -466,6 +476,7 @@ function FormulaireProfil({ valeurs, url }: { valeurs: Props['profil']; url: str
     } = useForm<ProfilValeurs>({ resolver: zodResolver(profilSchema), mode: 'onTouched', defaultValues: initiales });
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<ProfilValeurs>(CHAMPS_PROFIL, trigger, true);
     const v = watch();
+    const manquants = champsManquants(profilSchema, v, CHAMPS_PROFIL);
 
     const enregistrer = (donnees: ProfilValeurs) => {
         const { logo, ...reste } = donnees;
@@ -522,6 +533,7 @@ function FormulaireProfil({ valeurs, url }: { valeurs: Props['profil']; url: str
             allerA={allerA}
             erreur={erreur}
             incomplet={Object.keys(errors).length > 0}
+            manquants={manquants}
             onSubmit={async () => {
                 setErreur(null);
                 if (!derniere) await allerA(etape + 1);
@@ -538,6 +550,7 @@ function FormulaireProfil({ valeurs, url }: { valeurs: Props['profil']; url: str
                     }}
                     onPrecedent={() => aller(etape - 1)}
                     libelle="Enregistrer les modifications"
+                    desactive={manquants.length > 0}
                 />
             }
         >
@@ -654,6 +667,7 @@ function FormulaireNotifications({ valeurs, secrets, url }: { valeurs: Props['no
     const champs = CHAMPS_NOTIFICATIONS as unknown as Path<NotificationsValeurs>[][];
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<NotificationsValeurs>(champs, trigger, true);
     const v = watch();
+    const manquants = champsManquants(notificationsSchema, v, champs);
 
     const enregistrer = (donnees: NotificationsValeurs) =>
         envoyer<NotificationsValeurs>(
@@ -713,6 +727,7 @@ function FormulaireNotifications({ valeurs, secrets, url }: { valeurs: Props['no
             allerA={allerA}
             erreur={erreur}
             incomplet={Object.keys(errors).length > 0}
+            manquants={manquants}
             onSubmit={async () => {
                 setErreur(null);
                 if (!derniere) await allerA(etape + 1);
@@ -729,6 +744,7 @@ function FormulaireNotifications({ valeurs, secrets, url }: { valeurs: Props['no
                     }}
                     onPrecedent={() => aller(etape - 1)}
                     libelle="Enregistrer les modifications"
+                    desactive={manquants.length > 0}
                 />
             }
         >
@@ -859,16 +875,21 @@ const charge = (donnees: FieldValues) =>
 
 /** Câblage commun d'une section en assistant : formulaire, étapes, envoi, erreurs serveur réparties par étape. */
 function useSection<T extends FieldValues>(
-    resolver: Resolver<T>,
+    schema: ZodType,
     initiales: T,
     champs: readonly (readonly Path<T>[])[],
     url: string | null,
     preparer: (donnees: T) => FieldValues = charge,
 ) {
     const [erreur, setErreur] = useState<string | null>(null);
-    const form = useForm<T>({ resolver, mode: 'onTouched', defaultValues: initiales as DefaultValues<T> });
+    const form = useForm<T>({
+        resolver: zodResolver(schema as Parameters<typeof zodResolver>[0]) as unknown as Resolver<T>,
+        mode: 'onTouched',
+        defaultValues: initiales as DefaultValues<T>,
+    });
     const assistant = useAssistant<T>(champs, form.trigger, true);
     const v = form.watch();
+    const manquants = champsManquants(schema, v, champs);
 
     const enregistrer = (donnees: T) =>
         envoyer<T>(url!, preparer(donnees) as RequestPayload, {
@@ -884,6 +905,7 @@ function useSection<T extends FieldValues>(
             allerA={assistant.allerA}
             erreur={erreur}
             incomplet={Object.keys(form.formState.errors).length > 0}
+            manquants={manquants}
             onSubmit={async () => {
                 setErreur(null);
                 if (!assistant.derniere) await assistant.allerA(assistant.etape + 1);
@@ -900,6 +922,7 @@ function useSection<T extends FieldValues>(
                     }}
                     onPrecedent={() => assistant.aller(assistant.etape - 1)}
                     libelle="Enregistrer les modifications"
+                    desactive={manquants.length > 0}
                 />
             }
         >
@@ -969,7 +992,7 @@ const CHAMPS_PAIEMENTS = [['methods'], ['online_payment_enabled', 'auto_receipt'
 const ICONES_MODES: Record<string, ReactNode> = { cash: <Banknote />, mobile: <Smartphone />, transfer: <Landmark />, card: <CreditCard /> };
 
 function FormulairePaiements({ valeurs, url, apiPaiement }: { valeurs: PaiementsValeurs; url: string | null; apiPaiement: string | null }) {
-    const { form, v, etape, cadre } = useSection<PaiementsValeurs>(zodResolver(paiementsSchema), valeurs, CHAMPS_PAIEMENTS, url);
+    const { form, v, etape, cadre } = useSection<PaiementsValeurs>(paiementsSchema, valeurs, CHAMPS_PAIEMENTS, url);
     const {
         register,
         control,
@@ -1047,7 +1070,7 @@ const ETAPES_TAXES = ['TVA', 'Taxes additionnelles', 'Vérification'];
 const CHAMPS_TAXES = [['tva_enabled', 'tva_rate', 'tva_number', 'price_display', 'tva_on_services'], ['digital_tax_rate', 'service_fee'], []] as const;
 
 function FormulaireTaxes({ valeurs, url }: { valeurs: TaxesValeurs; url: string | null }) {
-    const { form, v, etape, cadre } = useSection<TaxesValeurs>(zodResolver(taxesSchema), valeurs, CHAMPS_TAXES, url, (d) => ({
+    const { form, v, etape, cadre } = useSection<TaxesValeurs>(taxesSchema, valeurs, CHAMPS_TAXES, url, (d) => ({
         ...charge(d),
         tva_rate: d.tva_rate.trim().replace(',', '.'),
         digital_tax_rate: d.digital_tax_rate.trim().replace(',', '.'),
@@ -1147,7 +1170,7 @@ const CHAMPS_DEVISES = [['base_currency', 'currency_symbol', 'symbol_position', 
 const CARACTERE_SEPARATEUR: Record<string, string> = { espace: ' ', point: '.', virgule: ',' };
 
 function FormulaireDevises({ valeurs, url }: { valeurs: DevisesValeurs; url: string | null }) {
-    const { form, v, etape, cadre } = useSection<DevisesValeurs>(zodResolver(devisesSchema), valeurs, CHAMPS_DEVISES, url);
+    const { form, v, etape, cadre } = useSection<DevisesValeurs>(devisesSchema, valeurs, CHAMPS_DEVISES, url);
     const {
         register,
         control,
@@ -1277,7 +1300,7 @@ const CHAMPS_SECURITE = [
 
 function FormulaireSecurite({ valeurs, contexte, url }: { valeurs: SecuriteValeurs; contexte: Props['contexte']; url: string | null }) {
     const schema = useMemo(() => securiteSchema(contexte), [contexte]);
-    const { form, v, etape, cadre } = useSection<SecuriteValeurs>(zodResolver(schema), valeurs, CHAMPS_SECURITE, url);
+    const { form, v, etape, cadre } = useSection<SecuriteValeurs>(schema, valeurs, CHAMPS_SECURITE, url);
     const {
         register,
         control,

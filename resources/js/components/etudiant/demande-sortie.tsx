@@ -6,12 +6,14 @@ import { toast } from 'sonner';
 import { Notice } from '@/components/etudiant/panneau';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { dateFr } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -40,12 +42,10 @@ const CONDITIONS = [
 /** Assistant en 3 étapes de demande de sortie de chambre (route etudiants.departure-requests.store). */
 export function DemandeSortie({ formulaire }: { formulaire: FormulaireSortie }) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const {
         register,
         control,
         handleSubmit,
-        trigger,
         setError,
         reset,
         formState: { errors, isSubmitting },
@@ -55,17 +55,14 @@ export function DemandeSortie({ formulaire }: { formulaire: FormulaireSortie }) 
         mode: 'onTouched',
     });
     const valeurs = useWatch({ control });
+    const manquants = champsManquants(sortieSchema(formulaire.dateMin, formulaire.motifs.map((m) => m.code)), valeurs, CHAMPS_ETAPE_SORTIE, {
+        date_sortie_prevue: 'Date de sortie prévue',
+        motif: 'Motif',
+        conditions_acceptees: 'Acceptation des conditions',
+    });
 
-    const allerA = async (cible: number) => {
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPE_SORTIE[index]))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
 
     const soumettre = handleSubmit(async (donnees) => {
         await envoyer(
@@ -89,7 +86,7 @@ export function DemandeSortie({ formulaire }: { formulaire: FormulaireSortie }) 
                 onSuccess: () => reset(),
             },
         );
-    });
+    }, (fautes) => setEtape(Math.max(0, CHAMPS_ETAPE_SORTIE.findIndex((champs) => champs.some((champ) => fautes[champ])))));
 
     const motif = formulaire.motifs.find((m) => m.code === valeurs.motif)?.libelle;
     const longueur = (valeurs.observations ?? '').length;
@@ -102,7 +99,7 @@ export function DemandeSortie({ formulaire }: { formulaire: FormulaireSortie }) 
                     Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                 </p>
             </div>
-            <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} className="mt-3 px-4" />
+            <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} className="mt-3 px-4" />
 
             <div className="flex flex-col gap-4 p-4">
                 {etape === 0 && (
@@ -177,6 +174,7 @@ export function DemandeSortie({ formulaire }: { formulaire: FormulaireSortie }) 
 
                 {etape === 2 && (
                     <>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} action="soumettre la demande" />
                         <dl className="grid gap-x-6 gap-y-2 rounded-brand bg-surface p-3 text-sm sm:grid-cols-2">
                             <Info libelle="Date de sortie" valeur={valeurs.date_sortie_prevue ? dateFr(valeurs.date_sortie_prevue) : null} />
                             <Info libelle="Motif" valeur={motif} />
@@ -240,7 +238,7 @@ export function DemandeSortie({ formulaire }: { formulaire: FormulaireSortie }) 
                         <ChevronRight {...ICON} />
                     </Button>
                 ) : (
-                    <Button key="envoyer" type="submit" disabled={isSubmitting} className="font-medium">
+                    <Button key="envoyer" type="submit" disabled={isSubmitting || manquants.length > 0} className="font-medium">
                         {isSubmitting ? <Loader2 {...ICON} className="animate-spin" /> : <Send {...ICON} />}
                         Soumettre la demande de sortie
                     </Button>

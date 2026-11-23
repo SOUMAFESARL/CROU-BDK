@@ -111,7 +111,7 @@ public function getTotalMontantTotal(): float;
 public function getTotalPaye(): float;
 public function getNombreLoyersEnRetard(): int;
 public function getTotalLoyersEnRetard(): float;
-public function getStatistiquesLoyers(?string $annee = null, ?string $mois = null, ?string $residence = null): array;
+public function getStatistiquesLoyers(?string $annee = null, ?string $mois = null, ?string $residence = null, ?string $campagne = null): array;
      public function getStatistiquesParResidence(): Collection;
     public function getStatistiquesParResidenceFiltre(?string $mois = null, ?string $annee = null): Collection;
 

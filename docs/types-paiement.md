@@ -1,0 +1,40 @@
+# Types de paiement
+
+Les natures de paiement proposées au champ **Type de paiement*** du formulaire **Nouveau paiement** (Paiements, `admin.hebergement.paiements.index`) se paramètrent dans le paramétrage hébergement, au lieu d'être écrites en dur.
+
+## Page
+
+Paramétrage hébergement (`/admin/gestion-hebergement/parametrage-herb`), rubrique « Parc immobilier », module **Types de paiement** (après « Types de chambre ») : route `admin.hebergement.parametrage-herb.type-paiement.index`, page React `Admin/Hebergement/Parametrage/TypesPaiement` (`TypePaiementController`, composant commun `ReferentielPage`).
+
+| Action | Route | Droit |
+| --- | --- | --- |
+| Liste, recherche (`?q=`) | `GET …/type-paiement` (`.index`) | `hebergement.types-paiement.view` |
+| Ajout | `POST …/type-paiement` (`.store`) | `hebergement.types-paiement.create` |
+| Modification | `PUT …/type-paiement/{id}` (`.update`) | `hebergement.types-paiement.update` |
+| Suppression | `DELETE …/type-paiement/{id}` (`.destroy`) | `hebergement.types-paiement.delete` |
+
+Droits dédiés du module `hebergement.types-paiement` (« Types de paiement »), créés par la migration `2026_11_23_000003_add_types_paiement_permissions.php` et attribués dans **Paramètres → Rôles et permissions**. La migration les accorde au rôle 1 et, pour ne retirer l'accès à personne, donne `view` aux rôles qui avaient `hebergement.parametrage.view` et `create` / `update` / `delete` à ceux qui avaient `hebergement.parametrage.configure`. `view` ouvre aussi l'accueil du paramétrage hébergement.
+
+Colonnes : **Libellé**, description, statut (Actif / Inactif), nombre de paiements, actions (modifier, supprimer). Champs : **libellé** (obligatoire, 100 caractères, unique sans tenir compte de la casse), **description** (facultative), **statut** (actif / inactif). Seuls les types **actifs** sont proposés dans « Nouveau paiement ». Le code interne n'est pas affiché.
+
+## Données
+
+Table `types_paiement` (migration `2026_11_23_000002_create_types_paiement_table.php`, modèle `App\Models\TypePaiement`) : `id_type_paiement` (UUID), `code`, `name`, `description`, `actif`, `systeme`, `ordre`.
+
+- Le **code** (interne, non affiché) est la valeur enregistrée dans `paiements.type_paiement`. Il est dérivé du libellé à la création (« Frais de dossier » → `frais_de_dossier`, suffixe `_2`, `_3`… si déjà pris) puis **ne change plus**, même si le libellé est modifié : l'historique reste lié.
+- La migration transforme la colonne `paiements.type_paiement` (énumération `loyer, caution, penalite, autre`) en `VARCHAR(50)` (MySQL) pour accepter les nouveaux codes.
+- **Types système** semés par la migration : `loyer`, `caution`, `penalite`, `autre`. Ils sont utilisés par le code (répartition et statistiques des loyers, caution des départs, paiements en ligne) : libellé et description modifiables, mais **toujours actifs** (la mention « système » n'est pas affichée).
+- Le bouton de suppression est proposé pour tous les types ; la suppression est refusée tant qu'un paiement (paiements supprimés compris) utilise le type. Un des quatre types d'origine supprimé n'est plus proposé à la saisie ; les paiements enregistrés par l'application gardent leur libellé par défaut. Un type ajouté et déjà utilisé se désactive à la place : il n'est plus proposé, et son libellé reste affiché sur les paiements existants (`Paiement::type_label` → `TypePaiement::libelle()`).
+
+## Formulaire « Nouveau paiement »
+
+- `PaiementController::index` envoie `typesPaiement` (`TypePaiement::options()` : types actifs, `[{value: code, label: nom}]`) ; `NouveauPaiementDialog` les affiche en **cases à cocher** (étape Paiement), « Loyer » coché par défaut (sinon le premier type actif).
+- **Plusieurs types** peuvent être cochés pour un même encaissement. Pour chaque type coché, l'agent ne saisit que le **nombre de mois** (1 à 12) : le **montant** est calculé (mois × loyer mensuel du **type de chambre** du résident, Paramétrage hébergement › Types de chambre ; à défaut, le prix de la chambre) et affiché sans être modifiable. Un total s'affiche dès deux types ; la vérification détaille « N mois × loyer = montant » par type. Méthode de paiement et notes sont communes. Pour le Loyer, le nombre de mois proposé couvre les arriérés et le mois en cours ; 1 mois pour les autres types.
+- Le formulaire envoie `lignes: [{type_paiement, mois}, …]` (au moins une ligne, types distincts) ; aucun montant venant du navigateur n'est pris en compte. `PaiementController::store` n'accepte que les codes des types actifs (`TypePaiement::codesActifs()`), recalcule chaque montant à partir du type de la chambre envoyée (`loyerMensuelChambre`) et refuse l'enregistrement si ce type n'a pas de loyer mensuel. La recherche de résidents (`loyer_mensuel`) utilise le même loyer. Les erreurs de saisie reviennent sous les champs (`lignes.N.mois`).
+- **Champ « Mois »** (avant « Méthode de paiement », dès que Loyer ou Avance est coché) : mois consécutifs à partir du mois qui suit le dernier mois payé (`prochain_mois`, `mm-aaaa`, renvoyé par la recherche de résidents ; `PaiementService::prochainMoisAPayer`). Sont cochés par défaut autant de mois que la somme des nombres de mois du Loyer et de l'Avance : le loyer prend les premiers, l'avance les suivants (chaque mois coché indique « Loyer » ou « Avance »). Cocher un mois coche aussi les précédents, décocher un mois décoche aussi les suivants, et les nombres de mois des types suivent (le loyer garde ses mois tant que possible, l'avance prend le reste). Le formulaire envoie `mois_concernes` ; `store` exige exactement les mois attendus (`PaiementService::moisConsecutifs`), sinon erreur sur `mois_concernes`.
+- **Avance** (type du paramétrage de code `avance`, `PaiementService::TYPE_AVANCE`) : comme le loyer, elle est répartie sur les loyers (arriérés, puis mois suivants, loyers créés et soldés à l'avance) ; elle est enregistrée après le loyer pour prendre les mois qui suivent. Le contrôle « paiement insuffisant » porte sur loyer + avance. Le « dernier mois payé » ne tient compte que des paiements de loyer ou d'avance (`PaiementRepository::getLastPaiementByEtudiant`) : une caution ou des frais enregistrés ensuite ne le faussent plus.
+- **Réadmission : pas de caution.** Pour un résident en réadmission, le type « Caution » n'est pas proposé (badge « Réadmission » à l'étape Paiement ; une caution déjà cochée est retirée au choix du résident) et `store` la refuse (erreur sur `lignes`). Le volet est celui de l'attribution confirmée, selon la même règle que la caution calculée à la génération des loyers : `CriteresCampagne::voletEtudiant` (campagne à un seul volet → ce volet ; sinon réadmission pour un étudiant déjà logé lors d'une autre campagne). La recherche de résidents renvoie `readmission` (booléen).
+- `PaiementService::creerPaiements` crée **un paiement par type coché**, dans une seule transaction : si l'un échoue, aucun n'est enregistré. Le contrôle « paiement insuffisant » ne porte que sur la ligne Loyer, avant tout enregistrement ; le message indique le nombre de mois minimum pour couvrir les arriérés.
+- **Seuls les types `loyer` et `avance` sont répartis sur les loyers** (`PaiementService::TYPES_LOYER`) : contrôle des arriérés (`verifierPaiementSuffisant`), puis affectation aux arriérés, au mois en cours et, pour le surplus, aux mois suivants (lignes `paiement_repartitions`).
+- **Tous les autres types** (caution, pénalité, autre et les types ajoutés, sauf l'avance) passent par `PaiementService::creerPaiementHorsLoyer` : paiement validé enregistré tel quel, sans loyer (`loyer_id` vide, `mois` vide), sans ligne de répartition, avec `montant_du` = montant versé. Les arriérés et le solde du résident ne changent pas, et aucun contrôle « paiement insuffisant » ne s'applique. Le formulaire ne propose alors pas de montant (la proposition « loyer + arriérés » est réservée au loyer) et l'indique à l'étape Paiement et à la vérification.
+- Le nettoyage des paiements « sans mois » qui suit l'enregistrement d'un loyer ne vise plus que les paiements de type `loyer` : il ne supprime plus les cautions ou autres paiements d'un résident.

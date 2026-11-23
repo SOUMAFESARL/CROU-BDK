@@ -7,6 +7,7 @@ import { RowAction, RowActions } from '@/components/data-table/row-action';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
@@ -15,6 +16,7 @@ import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { nombre } from '@/lib/text';
 import { repartirErreurs } from '@/components/vie-residentielle/shared';
@@ -39,6 +41,8 @@ export type ChampReferentiel = {
     requis?: string;
     placeholder?: string;
     hint?: string;
+    /** Valeur proposée à l'ajout (absente : champ vide). */
+    defaut?: string;
     /** Choix d'un champ `liste`. */
     options?: ComboboxOption[];
 };
@@ -49,6 +53,8 @@ type Props<T extends ElementReferentiel> = {
     /** Libellés : « type de cité », « un type de cité »… */
     singulier: string;
     un: string;
+    /** En-tête de la colonne du nom (« Nom » par défaut, « Libellé »…). */
+    enteteNom?: string;
     /** Accords au féminin (« Cette filière », « Aucune filière enregistrée »). */
     feminin?: boolean;
     /** Longueur maximale du nom, pour le formulaire par défaut (nom + description). */
@@ -63,8 +69,8 @@ type Props<T extends ElementReferentiel> = {
     urls: { index: string; store: string | null };
     /** Nombre d'éléments qui utilisent celui-ci (bloque la suppression) et son libellé. */
     usage: (element: T) => { total: number; libelle: string };
-    /** Conseil affiché quand la suppression est bloquée. */
-    conseilSuppression?: string;
+    /** Conseil affiché quand la suppression est bloquée (texte fixe ou selon l'élément). */
+    conseilSuppression?: string | ((element: T) => string);
     /** Colonnes ajoutées avant le nom (ordre d'affichage…). */
     colonnesAvant?: DataTableColumn<T>[];
     /** Ajout en une seule étape, sans écran de vérification. */
@@ -110,7 +116,7 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
         ...colonnesAvant,
         {
             key: 'name',
-            header: 'Nom',
+            header: props.enteteNom ?? 'Nom',
             cell: (e) => <span className="font-medium text-gray-900">{e.name}</span>,
         },
         ...(avecDescription
@@ -138,6 +144,7 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
     ];
 
     const utilisation = suppression ? usage(suppression) : null;
+    const conseil = suppression && typeof props.conseilSuppression === 'function' ? props.conseilSuppression(suppression) : (props.conseilSuppression as string | undefined);
     const filtre = Object.values(autresFiltres).some((v) => v !== '' && v !== 'tous');
 
     return (
@@ -217,7 +224,7 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
                 description={
                     utilisation && utilisation.total > 0
                         ? `${feminin ? 'Cette' : 'Ce'} ${singulier} est ${feminin ? 'utilisée' : 'utilisé'} par ${nombre(utilisation.total)} ${utilisation.libelle}. ${
-                              props.conseilSuppression ?? 'Choisissez un autre type pour ces éléments avant de le supprimer.'
+                              conseil ?? 'Choisissez un autre type pour ces éléments avant de le supprimer.'
                           }`
                         : 'Cette suppression est définitive.'
                 }
@@ -264,10 +271,12 @@ function Formulaire({
     } = useForm<ReferentielValeurs>({
         resolver: zodResolver(schema),
         mode: 'onTouched',
-        defaultValues: Object.fromEntries(champs.map((c) => [c.cle, String((element as Record<string, unknown> | null)?.[c.cle] ?? '')])),
+        defaultValues: Object.fromEntries(champs.map((c) => [c.cle, String((element as Record<string, unknown> | null)?.[c.cle] ?? (element ? '' : (c.defaut ?? '')))])),
     });
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<ReferentielValeurs>(etapes, trigger, element !== null);
     const valeurs = watch();
+    // Assistant en 2 étapes : l'enregistrement reste bloqué tant qu'un champ obligatoire est vide.
+    const manquants = direct ? [] : champsManquants(schema, valeurs, etapes, Object.fromEntries(champs.map((c) => [c.cle, c.label])));
 
     const enregistrer = (v: ReferentielValeurs) =>
         envoyer<ReferentielValeurs>(url!, Object.fromEntries(champs.map((c) => [c.cle, (v[c.cle] ?? '').trim()])), {
@@ -332,14 +341,17 @@ function Formulaire({
                         );
                     })
                 ) : (
-                    <Recap lignes={champs.map((champ) => ({ label: champ.label, valeur: apercu(champ) }))} />
+                    <>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={aller} />
+                        <Recap lignes={champs.map((champ) => ({ label: champ.label, valeur: apercu(champ) }))} />
+                    </>
                 )}
             </DialogBody>
             <PiedAssistant
                 etape={etape}
                 derniere={derniere}
                 envoi={isSubmitting}
-                desactive={!url}
+                desactive={!url || manquants.length > 0}
                 onAnnuler={onClose}
                 onPrecedent={() => aller(etape - 1)}
                 libelle={element ? 'Enregistrer les modifications' : 'Ajouter'}

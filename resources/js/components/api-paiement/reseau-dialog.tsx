@@ -6,11 +6,13 @@ import { z } from 'zod';
 import { ToggleCard } from '@/components/parc-immobilier/form/inputs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Stepper } from '@/components/ui/stepper';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { CLES_IDENTIFIANTS, ENVIRONNEMENTS, noteReseau, urlAttendue, type CleIdentifiant, type EnvironnementMtn, type Reseau } from './types';
 
@@ -108,8 +110,6 @@ export function ReseauDialog({ reseau, onClose }: Props) {
 
 function Formulaire({ reseau, onClose }: { reseau: Reseau; onClose: () => void }) {
     const [etape, setEtape] = useState(0);
-    // Réseau existant à modifier : toutes les étapes sont accessibles (les étapes intermédiaires restent validées avant d’avancer).
-    const [atteinte, setAtteinte] = useState(ETAPES.length - 1);
     const [erreurGenerale, setErreurGenerale] = useState<string | null>(null);
     const schema = useMemo(() => schemaPour(reseau), [reseau]);
     const {
@@ -129,26 +129,15 @@ function Formulaire({ reseau, onClose }: { reseau: Reseau; onClose: () => void }
 
     useEffect(() => setErreurGenerale(null), [etape]);
 
-    const aller = (index: number) => {
-        setEtape(index);
-        setAtteinte((max) => Math.max(max, index));
-    };
-
-    /** Avancer impose de valider chaque étape intermédiaire. */
-    const allerA = async (cible: number) => {
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPE[index], { shouldFocus: true }))) {
-                aller(index);
-                return;
-            }
-        }
-        aller(cible);
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const aller = (index: number) => setEtape(index);
+    const allerA = aller;
 
     const valeurs = watch();
     const changementEnvironnement = reseau.code === 'mtn' && valeurs.environment !== reseau.environment;
     const attendue = urlAttendue(reseau, valeurs.environment);
     const complet = schema.safeParse(valeurs).success;
+    const manquants = champsManquants(schema, valeurs, CHAMPS_ETAPE, { api_url: 'Lien API' });
 
     const enregistrer = (v: Valeurs) =>
         envoyer<Valeurs>(
@@ -217,7 +206,7 @@ function Formulaire({ reseau, onClose }: { reseau: Reseau; onClose: () => void }
                     Étape {etape + 1} sur {ETAPES.length} · Les clés sont chiffrées ; laissez un champ de clé vide pour conserver sa valeur actuelle.
                 </DialogDescription>
             </DialogHeader>
-            <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={(index) => void allerA(index)} />
+            <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={(index) => void allerA(index)} />
             <DialogBody className="space-y-4">
                 {erreurGenerale && (
                     <p role="alert" className="rounded-brand border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -365,6 +354,7 @@ function Formulaire({ reseau, onClose }: { reseau: Reseau; onClose: () => void }
                                 />
                             )}
                         />
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={aller} />
                         <dl className="divide-y rounded-brand border text-sm">
                             {reseau.code === 'mtn' && (
                                 <Ligne
@@ -381,7 +371,7 @@ function Formulaire({ reseau, onClose }: { reseau: Reseau; onClose: () => void }
                                 valeur={valeurs.is_active ? <Badge variant="success">Activé</Badge> : <Badge variant="neutral">Inactif · masqué</Badge>}
                             />
                         </dl>
-                        {Object.keys(errors).length > 0 && (
+                        {Object.keys(errors).length > 0 && manquants.length === 0 && (
                             <p role="alert" className="text-sm font-medium text-red-600">
                                 Certaines informations sont incomplètes : revenez aux étapes précédentes pour les corriger.
                             </p>

@@ -49,6 +49,10 @@ class DemandeRepository implements DemandeRepositoryInterface
             if (filled($datas['ville_bac'] ?? null)) {
                 $data['ville_bac'] = trim((string) $datas['ville_bac']);
             }
+            // Numéro de table au bac : idem, nouveaux bacheliers uniquement.
+            if (filled($datas['num_table_bac'] ?? null)) {
+                $data['num_table_bac'] = trim((string) $datas['num_table_bac']);
+            }
             //dd( $data);
            // dd($datas);
 

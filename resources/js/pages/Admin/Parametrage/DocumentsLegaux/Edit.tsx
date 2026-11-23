@@ -11,11 +11,13 @@ import { ICON } from '@/components/layout/app-sidebar';
 import { RecapSection } from '@/components/parc-immobilier/form/inputs';
 import { FormAlert, SectionTitle, useWizard, Wizard, type WizardStep } from '@/components/parc-immobilier/form/wizard';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Field } from '@/components/ui/field';
 import { FileDrop } from '@/components/ui/file-drop';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { dateFr } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -158,15 +160,8 @@ function Editeur({ document, versions, urls }: Props) {
         return trigger(STEPS[index].fields, { shouldFocus: true });
     };
 
-    const allerA = async (cible: number) => {
-        for (let index = wizard.current; index < cible; index++) {
-            if (!(await validerEtape(index))) {
-                wizard.goTo(index);
-                return;
-            }
-        }
-        wizard.goTo(cible);
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => wizard.goTo(cible);
 
     const enregistrer = async (valeurs: Valeurs) => {
         if (!urls.submit) return;
@@ -215,7 +210,7 @@ function Editeur({ document, versions, urls }: Props) {
             void handleSubmit(enregistrer)();
             return;
         }
-        if (await validerEtape(wizard.current)) wizard.next();
+        wizard.next();
     };
 
     const publier = () => {
@@ -246,6 +241,10 @@ function Editeur({ document, versions, urls }: Props) {
     };
 
     const valeurs = watch();
+    const manquants = [
+        ...champsManquants(schema, valeurs, STEPS.map((step) => step.fields)),
+        ...(fichierObligatoire && !fichier ? [{ cle: 'file', libelle: 'Fichier PDF du document', etape: ETAPE_FICHIER }] : []),
+    ].sort((a, b) => a.etape - b.etape);
     const modifie = isDirty || fichier !== null;
     const decrit = (champ: Champ) => (errors[champ] ? `${champ}-error` : undefined);
 
@@ -322,13 +321,13 @@ function Editeur({ document, versions, urls }: Props) {
                     steps={STEPS}
                     current={wizard.current}
                     reached={wizard.reached}
-                    onStepClick={(index) => void allerA(index)}
+                    onStepClick={allerA}
                     onPrevious={wizard.previous}
                     onNext={() => void suivant()}
                     cancelUrl={urls.index}
                     submitting={envoi}
                     submitLabel="Enregistrer le document"
-                    submitDisabled={!urls.submit}
+                    submitDisabled={!urls.submit || manquants.length > 0}
                 >
                     {erreurGenerale && <FormAlert>{erreurGenerale}</FormAlert>}
 
@@ -465,6 +464,7 @@ function Editeur({ document, versions, urls }: Props) {
 
                     {wizard.current === 3 && (
                         <div className="space-y-4">
+                            <ChampsManquants manquants={manquants} etapes={STEPS.map((step) => step.label)} onAller={wizard.goTo} action="enregistrer le document" />
                             <RecapSection
                                 title="Identification"
                                 onEdit={() => wizard.goTo(0)}

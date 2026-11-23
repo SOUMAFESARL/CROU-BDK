@@ -5,6 +5,7 @@ import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -12,6 +13,7 @@ import { Field } from '@/components/ui/field';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { aujourdhui, Encadre, Lignes, repartirErreurs, type ResidentOption } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { dateFr } from '@/lib/text';
 
@@ -85,7 +87,6 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
         register,
         handleSubmit,
         reset,
-        trigger,
         setError,
         getValues,
         formState: { errors, isSubmitting },
@@ -119,6 +120,11 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
 
     const v = getValues();
     const derniere = !decider || etape === etapes.length - 1;
+    // Décision en 2 étapes : navigation libre, enregistrement bloqué tant qu'un champ obligatoire est vide.
+    const valeurs = useWatch({ control });
+    const manquants = decider
+        ? champsManquants(schema, valeurs, CHAMPS_ETAPES, { sanction: 'Décision', etudiant_sanctionne_id: 'Étudiant sanctionné', sanction_fin: 'Fin de la suspension', decision: 'Décision retenue', commentaire: config?.commentaire ?? 'Commentaire' })
+        : [];
 
     return (
         <Dialog open={action !== null && rapport !== null} onOpenChange={(ouvert) => !ouvert && !isSubmitting && onClose()}>
@@ -142,7 +148,7 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
                             </div>
                         </div>
                     </DialogHeader>
-                    {decider && <Stepper steps={etapes} current={etape} reached={etape} onStepClick={(index) => index < etape && setEtape(index)} />}
+                    {decider && <Stepper steps={etapes} current={etape} reached={etapes.length - 1} onStepClick={setEtape} />}
                     <DialogBody className="space-y-4">
                         {erreurServeur && <Encadre ton="danger">{erreurServeur}</Encadre>}
                         {rapport && (
@@ -214,6 +220,7 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
 
                         {(!decider || etape === 1) && (
                             <>
+                                {decider && <ChampsManquants manquants={manquants} etapes={etapes} onAller={setEtape} />}
                                 {decider && (
                                     <Lignes
                                         lignes={[
@@ -246,11 +253,11 @@ export function TransitionDialog({ rapport, action, onClose, sanctions, resident
                                 </Button>
                             )}
                             {!derniere ? (
-                                <Button key="suivant" size="sm" className="h-10" onClick={async () => (await trigger(CHAMPS_ETAPES[0])) && setEtape(1)}>
+                                <Button key="suivant" size="sm" className="h-10" onClick={() => setEtape(1)}>
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={isSubmitting || manquants.length > 0}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
                                     {config?.bouton}
                                 </Button>

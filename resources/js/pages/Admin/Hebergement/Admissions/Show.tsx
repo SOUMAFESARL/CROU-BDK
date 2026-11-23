@@ -19,7 +19,7 @@ import {
     X,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
+import { ETATS_SANS_BADGE, EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
@@ -38,6 +38,7 @@ type Regle = { label: string; campagne: string; etudiant: string; etat: 'ok' | '
 type Volet = { volet: string; poids: number; situation: string; points: number; apport: number };
 type Bareme = { score: number | null; minimum: number; volets: Volet[]; erreur: string | null; score_decision: number | null };
 type Document = { id: string; type: string; url: string; statut: string; valider: string | null; rejeter: string | null };
+type Rejet = { id: string; motif: string | null; auteur: string | null; automatique: boolean; date: string | null };
 
 /** Informations saisies par l'étudiant, par étape du formulaire de demande (`CampagnesAdmissionController::profilDemande`). */
 type ProfilDemande = {
@@ -70,6 +71,7 @@ type ProfilDemande = {
         credits: number | null;
         credits_max: number;
         ville_bac: string | null;
+        num_table_bac: string | null;
     };
     situation: { boursier: boolean; observations: string | null };
     adresse: { region: string | null; ville: string | null; adresse: string | null; distance: number | null };
@@ -95,6 +97,8 @@ type Props = {
         /** Demande dérogée (bouton « Déroger ») : irrecevable ou refusée, elle est rendue recevable. */
         derogation: { auteur: string | null; date: string | null; motif: string | null } | null;
     } | null;
+    /** Rejets de la demande courante (passages en « Refusé »), du plus récent au plus ancien. */
+    rejets: Rejet[];
     /** Score du barème de scoring actif (seul score comparé au minimum de la décision automatique). */
     bareme: Bareme | null;
     documents: Document[] | null;
@@ -129,7 +133,7 @@ const STATUTS_INSCRIPTION: Record<string, [string, 'success' | 'warning' | 'info
 
 /** Traitement d'un dossier de candidature (remplace `admission/traiter-demande.blade.php`, `derogations.blade.php` et le mode admin de `dossier-cycle`). */
 export default function AdmissionShow(props: Props) {
-    const { etudiant, demande, discipline, eligibilite, bareme, documents, profil, historique, urls } = props;
+    const { etudiant, demande, discipline, eligibilite, rejets, bareme, documents, profil, historique, urls } = props;
     const [aDeroger, setADeroger] = useState(false);
 
     return (
@@ -143,9 +147,11 @@ export default function AdmissionShow(props: Props) {
                             {etudiant.matricule && ` · ${etudiant.matricule}`}
                             {demande?.date && ` · déposée le ${dateFr(demande.date)}`}
                         </span>
-                        <span>
-                            <EtatDossierBadge etat={demande?.etat} />
-                        </span>
+                        {!ETATS_SANS_BADGE.includes(demande?.etat ?? '') && (
+                            <span>
+                                <EtatDossierBadge etat={demande?.etat} />
+                            </span>
+                        )}
                     </div>
                 }
                 actions={
@@ -183,6 +189,8 @@ export default function AdmissionShow(props: Props) {
                     {bareme && <ScoreBareme {...bareme} />}
                     {eligibilite && <Eligibilite {...eligibilite} />}
                     {documents && <Documents documents={documents} />}
+                    {eligibilite?.derogation && <MotifDerogation {...eligibilite.derogation} />}
+                    {rejets.length > 0 && <MotifsRejet rejets={rejets} />}
                 </div>
 
                 <aside className="flex flex-col gap-6">
@@ -333,7 +341,6 @@ function Eligibilite({ volet_libelle, campagne, origine, regles, conformes, non_
                                 ? ` Demande dérogée${derogation.auteur ? ` par ${derogation.auteur}` : ''}${derogation.date ? ` le ${dateFr(derogation.date)}` : ''}.`
                                 : '')}
                     </p>
-                    {derogation?.motif && <p className="mt-1 text-sm whitespace-pre-line text-muted">Motif de la dérogation : {derogation.motif}</p>}
                 </div>
             </div>
             <div className="overflow-hidden rounded-brand border">
@@ -447,6 +454,47 @@ function Documents({ documents }: { documents: Document[] }) {
                 processing={enCours !== null}
                 onConfirm={() => aRejeter?.rejeter && appliquer(aRejeter.rejeter, aRejeter.id, () => setARejeter(null))}
             />
+        </Carte>
+    );
+}
+
+/** Motif saisi lors de la dérogation (demande rendue recevable par dérogation), affiché sous « Documents fournis ». */
+function MotifDerogation({ auteur, date, motif }: NonNullable<NonNullable<Props['eligibilite']>['derogation']>) {
+    return (
+        <Carte
+            id="motif-derogation"
+            icone={<Scale size={18} strokeWidth={1.25} />}
+            teinte="bg-[#FFF4DB] text-[#8A5A00]"
+            titre="Motif de la dérogation"
+            meta={(auteur || date) && `Dérogée${auteur ? ` par ${auteur}` : ''}${date ? ` le ${dateFr(date)}` : ''}`}
+        >
+            {motif ? <p className="text-sm whitespace-pre-line text-gray-900">{motif}</p> : <p className="text-sm text-muted">Aucun motif renseigné.</p>}
+        </Carte>
+    );
+}
+
+/** Motifs des rejets de la demande (passages en « Refusé » : agent, commission ou barème), affichés sous « Motif de la dérogation ». */
+function MotifsRejet({ rejets }: { rejets: Rejet[] }) {
+    return (
+        <Carte
+            id="motifs-rejet"
+            icone={<CircleX size={18} strokeWidth={1.25} />}
+            teinte="bg-red-50 text-[#B42318]"
+            titre="Motifs de rejet"
+            meta={`${rejets.length} rejet${rejets.length > 1 ? 's' : ''}`}
+        >
+            <ul className="divide-y">
+                {rejets.map((rejet) => (
+                    <li key={rejet.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
+                        <p className="text-sm whitespace-pre-line text-gray-900">{rejet.motif ?? 'Aucun motif renseigné.'}</p>
+                        <p className="text-xs text-muted">
+                            {[rejet.automatique ? 'Refus automatique (barème)' : rejet.auteur ? `Rejetée par ${rejet.auteur}` : 'Rejetée', rejet.date ? `le ${dateFr(rejet.date)}` : null]
+                                .filter(Boolean)
+                                .join(' ')}
+                        </p>
+                    </li>
+                ))}
+            </ul>
         </Carte>
     );
 }
@@ -577,6 +625,7 @@ function Profil({ etudiant, profil, documents }: { etudiant: Props['etudiant']; 
                             )}
                         </Ligne>
                         <Ligne terme="Ville du bac">{valeur(etudes.ville_bac, 'Non renseignée')}</Ligne>
+                        <Ligne terme="N° de table au bac">{valeur(etudes.num_table_bac, 'Non renseigné')}</Ligne>
                     </>
                 ) : (
                     <>

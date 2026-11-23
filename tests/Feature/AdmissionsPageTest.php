@@ -97,7 +97,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->agentLimite();
 
         $parNom = $this->page('liste', ['etat' => 'toutes'], query: ['q' => 'konan'])['props'];
-        $this->assertSame(['q' => 'konan', 'etat_dossier' => '', 'type' => ''], $parNom['filters']);
+        $this->assertSame(['q' => 'konan', 'etat_dossier' => '', 'type' => '', 'campagne' => ''], $parNom['filters']);
         $this->assertSame(['student'], collect($parNom['dossiers']['data'])->pluck('id')->all());
         $this->assertSame(['student'], collect($this->page('liste', ['etat' => 'toutes'], query: ['q' => 'M-001'])['props']['dossiers']['data'])->pluck('id')->all());
 
@@ -110,6 +110,36 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $inconnu = $this->page('liste', ['etat' => 'toutes'], query: ['etat_dossier' => 'pirate'])['props'];
         $this->assertSame('', $inconnu['filters']['etat_dossier']);
         $this->assertSame(1, $inconnu['dossiers']['total']);
+    }
+
+    public function test_liste_des_demandes_selon_la_campagne_choisie(): void
+    {
+        $this->agentLimite();
+        DB::table('campagne')->where('id_campagne', 'campaign')->update(['created_at' => now()]);
+        DB::table('campagne')->insert(['id_campagne' => 'ancienne', 'statut' => 'cloturee', 'created_at' => now()->subYear()]);
+        DB::table('demande')->where('etudiant_id', 'student')->update(['campagne_id' => 'ancienne']);
+
+        // Par défaut : campagne active, dont aucune demande n'a été déposée.
+        $props = $this->page('liste', ['etat' => 'toutes'])['props'];
+        $this->assertSame('campaign', $props['campagneActive']['id']);
+        $this->assertSame(['campaign', 'ancienne'], array_column($props['campagnes'], 'id'));
+        $this->assertSame([true, false], array_column($props['campagnes'], 'active'));
+        $this->assertSame(0, $props['dossiers']['total']);
+        $this->assertSame(0, $props['stats']['toutes']);
+
+        // Campagne choisie : ses demandes, et les indicateurs conservent le choix.
+        $props = $this->page('liste', ['etat' => 'toutes'], query: ['campagne' => 'ancienne'])['props'];
+        $this->assertSame('ancienne', $props['campagneActive']['id']);
+        $this->assertSame('ancienne', $props['filters']['campagne']);
+        $this->assertSame(['student'], collect($props['dossiers']['data'])->pluck('id')->all());
+        $this->assertSame(1, $props['stats']['toutes']);
+        $this->assertStringContainsString('campagne=ancienne', $props['urls']['filtres']['rejetees']);
+        // Décision de la commission et listes définitives : pas de choix de campagne.
+        $this->assertStringNotContainsString('campagne=', $props['urls']['filtres']['validees']);
+        $this->assertSame([], $this->page('liste', ['etat' => 'validees'], query: ['campagne' => 'ancienne'])['props']['campagnes']);
+
+        // Identifiant inconnu : campagne active.
+        $this->assertSame('campaign', $this->page('liste', ['etat' => 'toutes'], query: ['campagne' => 'pirate'])['props']['campagneActive']['id']);
     }
 
     public function test_demandes_recevables_et_rejetees_selon_les_criteres_de_la_campagne(): void
@@ -269,6 +299,11 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('soumis', $demande->value('etat_dossier'));
         $this->assertSame('Dérogation : Désistement annulé par l’étudiant.', DB::table('dossier_transitions')->orderByDesc('id')->value('motif'));
         $this->assertSame([], $ids('refusees'));
+        // La fiche conserve le motif du rejet (bloc « Motifs de rejet ») à côté de celui de la dérogation.
+        $props = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props'];
+        $this->assertSame('Désistement annulé par l’étudiant.', $props['eligibilite']['derogation']['motif']);
+        $this->assertCount(1, $props['rejets']);
+        $this->assertSame(['Désistement constaté.', false], [$props['rejets'][0]['motif'], $props['rejets'][0]['automatique']]);
         $ligne = $this->page('liste', ['etat' => 'recevables'], '/admin/gestion-hebergement/campagnes_admissions/liste/recevables', ['liste' => 'admission'])['props']['classement']['lignes']['data'][0];
         $this->assertSame(['student', 1, true], [$ligne['id'], $ligne['rang'], $ligne['derogee']]);
     }

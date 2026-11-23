@@ -155,7 +155,8 @@ class HebergementParametragePagesTest extends TestCase
         $this->assertSame(['Parc immobilier', 'Campagnes & admissions', 'Documents et entrée dans les lieux'], array_column($page['props']['sections'], 'titre'));
         $hrefs = collect($page['props']['sections'])->flatMap(fn ($s) => array_column($s['modules'], 'href'));
         $this->assertContains(route('admin.housing-entry.settings'), $hrefs);
-        $this->assertCount(9, $hrefs);
+        $this->assertCount(10, $hrefs);
+        $this->assertContains(route('admin.hebergement.parametrage-herb.type-paiement.index'), $hrefs);
         $this->assertContains(route('admin.hebergement.parametrage-herb.sanctions.index'), $hrefs);
     }
 

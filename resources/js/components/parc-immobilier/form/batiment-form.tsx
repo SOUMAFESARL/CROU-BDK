@@ -24,9 +24,11 @@ import { Controller, useForm, type FieldPath } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { champsManquants } from '@/lib/champs-manquants';
 import { cn } from '@/lib/utils';
 import { messageErreur, parcHttp } from '../http';
 import { nombre } from '../labels';
@@ -450,15 +452,9 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
         return ok;
     };
 
-    const allerA = async (cible: number) => {
-        for (let index = wizard.current; index < cible; index++) {
-            if (!(await validerEtape(index))) {
-                wizard.goTo(index);
-                return;
-            }
-        }
-        wizard.goTo(cible);
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => wizard.goTo(cible);
+    const manquants = champsManquants(schema, values, etapes.map((id) => champsEtape(id)));
 
     const envoyer = async (v: FormOutput) => {
         if (!submitUrl) return;
@@ -562,7 +558,7 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
             void handleSubmit(envoyer)();
             return;
         }
-        if (await validerEtape(wizard.current)) wizard.next();
+        wizard.next();
     };
 
     const chercherAdresse = async () => {
@@ -724,13 +720,13 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
                 steps={steps}
                 current={wizard.current}
                 reached={wizard.reached}
-                onStepClick={(index) => void allerA(index)}
+                onStepClick={allerA}
                 onPrevious={wizard.previous}
                 onNext={() => void suivant()}
                 cancelUrl={cancelUrl}
                 submitting={submitting}
                 submitLabel={isEdit ? 'Enregistrer les modifications' : 'Enregistrer le bâtiment'}
-                submitDisabled={!submitUrl}
+                submitDisabled={!submitUrl || manquants.length > 0}
             >
                 {erreurGenerale && <FormAlert>{erreurGenerale}</FormAlert>}
                 {!submitUrl && <FormAlert>Vous n’avez pas le droit d’enregistrer ce bâtiment.</FormAlert>}
@@ -1168,6 +1164,7 @@ export function BatimentForm({ item, campusId, cites, typesCite, users, preselec
 
                 {etapeCourante === 'verification' && (
                     <div className="space-y-4">
+                        <ChampsManquants manquants={manquants} etapes={steps.map((step) => step.label)} onAller={wizard.goTo} action="enregistrer le bâtiment" />
                         <RecapSection
                             title="Identification"
                             onEdit={() => goToEtape('identite')}

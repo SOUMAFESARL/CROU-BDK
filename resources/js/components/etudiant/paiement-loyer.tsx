@@ -25,9 +25,11 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Stepper } from "@/components/ui/stepper";
+import { champsManquants } from '@/lib/champs-manquants';
 import { montant, symboleDevise } from "@/lib/systeme";
 import { cn } from "@/lib/utils";
 import {
@@ -87,14 +89,12 @@ export function PaiementLoyerDialog({
 }: Props) {
     const { csrfToken } = usePage<SharedProps>().props;
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const [lancement, setLancement] = useState<Lancement | null>(null);
     const {
         register,
         control,
         handleSubmit,
         reset,
-        trigger,
         setError,
         formState: { errors, isSubmitting },
     } = useForm<PaiementLoyer>({
@@ -108,6 +108,15 @@ export function PaiementLoyerDialog({
     });
     const valeurs = useWatch({ control });
     const reseau = reseaux.find((r) => r.code === valeurs.reseau);
+    const manquants = champsManquants(
+        paiementLoyerSchema(
+            reseaux.map((r) => r.code),
+            loyer.soldeValeur,
+        ),
+        valeurs,
+        CHAMPS_ETAPE,
+        { reseau: "Moyen de paiement", montant: "Montant", telephone: "Téléphone" },
+    );
 
     useEffect(() => {
         if (!ouverte) return;
@@ -117,20 +126,11 @@ export function PaiementLoyerDialog({
             telephone,
         });
         setEtape(0);
-        setAtteinte(0);
         setLancement(null);
     }, [ouverte, reseaux, loyer.soldeValeur, telephone, reset]);
 
-    const allerA = async (cible: number) => {
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPE[index]))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; le paiement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
 
     const payer = handleSubmit(async (donnees) => {
         try {
@@ -191,7 +191,7 @@ export function PaiementLoyerDialog({
                 "Connexion interrompue. Vérifiez le suivi de vos paiements avant de réessayer.",
             );
         }
-    });
+    }, (fautes) => setEtape(Math.max(0, CHAMPS_ETAPE.findIndex((champs) => champs.some((champ) => fautes[champ])))));
 
     return (
         <Dialog
@@ -213,7 +213,7 @@ export function PaiementLoyerDialog({
                         <Stepper
                             steps={ETAPES}
                             current={etape}
-                            reached={atteinte}
+                            reached={ETAPES.length - 1}
                             onStepClick={allerA}
                             className="px-4 sm:px-6"
                         />
@@ -315,6 +315,7 @@ export function PaiementLoyerDialog({
 
                             {etape === 2 && (
                                 <>
+                                    <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} action="payer" />
                                     <Recapitulatif
                                         lignes={[
                                             ["Chambre", loyer.chambre],
@@ -354,7 +355,7 @@ export function PaiementLoyerDialog({
                                     <ChevronRight {...ICON} />
                                 </Button>
                             ) : (
-                                <Button key="envoyer" type="submit" disabled={isSubmitting} className="font-medium">
+                                <Button key="envoyer" type="submit" disabled={isSubmitting || manquants.length > 0} className="font-medium">
                                     {isSubmitting ? (
                                         <Loader2 {...ICON} className="animate-spin" />
                                     ) : (

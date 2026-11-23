@@ -178,6 +178,12 @@ class Loyer extends Model
     }
 
     // Scopes
+    /** Loyers facturés sur une attribution de la campagne. */
+    public function scopeDeCampagne($query, string $campagneId)
+    {
+        return $query->whereIn('assignation_id', AssignationChambre::query()->select('id_assignation')->where('campagne_id', $campagneId));
+    }
+
     public function scopeActif($query)
     {
         return $query->where('statut', 'actif');

@@ -20,9 +20,11 @@ import { Controller, useForm, useWatch, type Control, type FieldPath, type Field
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { champsManquants } from '@/lib/champs-manquants';
 import { montant } from '@/lib/systeme';
 import { cn } from '@/lib/utils';
 import { ChambreDialog, type ChambreModifiable } from '../chambre-dialog';
@@ -295,16 +297,29 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
         return true;
     };
 
-    const allerA = async (cible: number) => {
-        for (let index = wizard.current; index < cible; index++) {
-            if (!(await validerEtape(index))) {
-                wizard.goTo(index);
-                return;
-            }
-        }
+    /** Arrivée sur l'étape « Chambres » : une configuration prête à remplir. */
+    const preparerChambres = (cible: number) => {
+        if (cible < 2) return;
+        if (getValues('lignes').length === 0) setValue('lignes', [nouvelleLigne()]);
+        if (!getValues('unitaire.typeOccupation')) setValue('unitaire.typeOccupation', occupationDefaut);
+    };
+
+    // Navigation libre entre les étapes ; la création exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => {
         setErreurEtape(null);
+        preparerChambres(cible);
         wizard.goTo(cible);
     };
+
+    // Seuls les champs du mode choisi (lot ou unitaire) sont exigés.
+    const manquants = [
+        ...champsManquants(schema, values, [['cite', 'batiment'], ['niveau'], ['lignes', 'unitaire'], []], {
+            cite: 'Cité',
+            batiment: 'Bâtiment',
+            niveau: 'Niveau à configurer',
+        }).filter((item) => !item.cle.startsWith(values.mode === 'lot' ? 'unitaire' : 'lignes')),
+        ...(values.mode === 'lot' && values.lignes.length === 0 ? [{ cle: 'lignes', libelle: 'Au moins une configuration de chambres', etape: 2 }] : []),
+    ];
 
     /* ───────────── Envoi : création en lot (massCreateChambres) ou unitaire (quickCreateChambre) ───────────── */
     const envoyer = async () => {
@@ -364,12 +379,7 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
             await envoyer();
             return;
         }
-        if (await validerEtape(wizard.current)) {
-            // Première visite de l'étape « Chambres » : une configuration prête à remplir.
-            if (wizard.current === 1 && getValues('lignes').length === 0) setValue('lignes', [nouvelleLigne()]);
-            if (wizard.current === 1 && !getValues('unitaire.typeOccupation')) setValue('unitaire.typeOccupation', occupationDefaut);
-            wizard.next();
-        }
+        allerA(wizard.current + 1);
     };
 
     /* ───────────── Modifications des configurations ───────────── */
@@ -414,13 +424,13 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
                 steps={STEPS}
                 current={wizard.current}
                 reached={wizard.reached}
-                onStepClick={(index) => void allerA(index)}
+                onStepClick={allerA}
                 onPrevious={() => goTo(wizard.current - 1)}
                 onNext={() => void suivant()}
                 cancelUrl={urls.index}
                 submitting={submitting}
                 submitLabel={values.mode === 'lot' ? `Créer ${nombre.format(totalLot)} chambre(s)` : 'Créer la chambre'}
-                submitDisabled={values.mode === 'lot' ? !urls.massCreate : !urls.quickCreate}
+                submitDisabled={(values.mode === 'lot' ? !urls.massCreate : !urls.quickCreate) || manquants.length > 0}
             >
                 {erreurEtape && <FormAlert>{erreurEtape}</FormAlert>}
 
@@ -690,6 +700,7 @@ export function ChambreForm({ cites, batiments, typesCite, typesChambre, selecti
 
                 {wizard.current === 3 && (
                     <div className="space-y-4">
+                        <ChampsManquants manquants={manquants} etapes={STEPS.map((step) => step.label)} onAller={goTo} action="créer les chambres" />
                         <RecapSection
                             title="Emplacement"
                             onEdit={() => goTo(0)}

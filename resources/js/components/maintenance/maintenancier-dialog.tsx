@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowLeft, ArrowRight, Loader2, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { libelleSpecialite } from '@/components/maintenance/shared';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
@@ -12,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { Encadre, Lignes, repartirErreurs, type CiteOption } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { avecFormatTelephone, PROPS_TELEPHONE, telephoneObligatoire } from '@/lib/telephone';
 
@@ -29,19 +31,18 @@ type Valeurs = z.infer<typeof schema>;
 
 const CHAMPS_ETAPES: (keyof Valeurs)[][] = [['name', 'tel', 'email', 'adresse'], ['specialite', 'cite_id', 'notes'], []];
 const ETAPES = ['Identité', 'Spécialité', 'Vérification'];
+const LIBELLES = { name: 'Nom', tel: 'Téléphone', specialite: 'Spécialité' };
 const VIDES: Valeurs = { name: '', tel: '', email: '', adresse: '', specialite: '', cite_id: '', notes: '' };
 
 /** Enregistrer un maintenancier (action `store_maintenancier`). */
 export function MaintenancierDialog({ open, onClose, url, specialites, cites }: { open: boolean; onClose: () => void; url: string; specialites: string[]; cites: CiteOption[] }) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const [erreurServeur, setErreurServeur] = useState<string | null>(null);
     const {
         control,
         register,
         handleSubmit,
         reset,
-        trigger,
         setError,
         getValues,
         formState: { errors, isSubmitting },
@@ -51,25 +52,12 @@ export function MaintenancierDialog({ open, onClose, url, specialites, cites }: 
         if (open) {
             reset(VIDES);
             setEtape(0);
-            setAtteinte(0);
             setErreurServeur(null);
         }
     }, [open, reset]);
 
-    const allerA = async (cible: number) => {
-        if (cible <= etape) {
-            setEtape(cible);
-            return;
-        }
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPES[index]))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
 
     const onSubmit = (valeurs: Valeurs) => {
         setErreurServeur(null);
@@ -80,6 +68,7 @@ export function MaintenancierDialog({ open, onClose, url, specialites, cites }: 
     };
 
     const v = getValues();
+    const manquants = champsManquants(schema, useWatch({ control }), CHAMPS_ETAPES, LIBELLES);
 
     return (
         <Dialog open={open} onOpenChange={(ouvert) => !ouvert && !isSubmitting && onClose()}>
@@ -95,7 +84,7 @@ export function MaintenancierDialog({ open, onClose, url, specialites, cites }: 
                             Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                         </DialogDescription>
                     </DialogHeader>
-                    <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} />
+                    <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} />
                     <DialogBody className="space-y-4">
                         {erreurServeur && <Encadre ton="danger">{erreurServeur}</Encadre>}
 
@@ -161,17 +150,20 @@ export function MaintenancierDialog({ open, onClose, url, specialites, cites }: 
                         )}
 
                         {etape === 2 && (
-                            <Lignes
-                                lignes={[
-                                    ['Nom', v.name],
-                                    ['Téléphone', v.tel],
-                                    ['E-mail', v.email],
-                                    ['Adresse', v.adresse],
-                                    ['Spécialité', v.specialite ? libelleSpecialite(v.specialite) : ''],
-                                    ['Résidence', cites.find((c) => c.id === v.cite_id)?.name ?? 'Toutes les résidences'],
-                                    ['Notes', v.notes],
-                                ]}
-                            />
+                            <>
+                                <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} />
+                                <Lignes
+                                    lignes={[
+                                        ['Nom', v.name],
+                                        ['Téléphone', v.tel],
+                                        ['E-mail', v.email],
+                                        ['Adresse', v.adresse],
+                                        ['Spécialité', v.specialite ? libelleSpecialite(v.specialite) : ''],
+                                        ['Résidence', cites.find((c) => c.id === v.cite_id)?.name ?? 'Toutes les résidences'],
+                                        ['Notes', v.notes],
+                                    ]}
+                                />
+                            </>
                         )}
                     </DialogBody>
                     <DialogFooter className="sm:justify-between">
@@ -189,7 +181,7 @@ export function MaintenancierDialog({ open, onClose, url, specialites, cites }: 
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button key="creer" type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                                <Button key="creer" type="submit" size="sm" className="h-10" disabled={manquants.length > 0 || isSubmitting}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <UserPlus className="size-4" aria-hidden />}
                                     Enregistrer
                                 </Button>

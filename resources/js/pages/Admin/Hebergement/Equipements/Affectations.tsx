@@ -28,6 +28,7 @@ import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
@@ -37,6 +38,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { dateFr, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -400,6 +402,7 @@ function EtatDialog({ affectation, onClose }: { affectation: Affectation | null;
 }
 
 const ETAPES = ['Matériel', 'Emplacement', 'Vérification'];
+const LIBELLES = { equipement_id: 'Équipement', quantite: 'Quantité', etat: 'État à la sortie', cite_id: 'Cité' };
 const CHAMPS_ETAPE: (keyof AffectationSaisie)[][] = [['equipement_id', 'quantite', 'etat'], ['cite_id', 'batiment_id', 'chambre_id'], ['notes']];
 
 const affectationSchema = (stocks: Map<string, number>) =>
@@ -423,18 +426,16 @@ const affectationSchema = (stocks: Map<string, number>) =>
 type AffectationSaisie = z.input<ReturnType<typeof affectationSchema>>;
 type AffectationValeurs = z.output<ReturnType<typeof affectationSchema>>;
 
-/** Assistant d'affectation en 3 étapes : chaque étape est validée avant la suivante (règles serveur inchangées). */
+/** Assistant d'affectation en 3 étapes : navigation libre, enregistrement bloqué tant qu'un champ obligatoire est vide (règles serveur inchangées). */
 function AffectationWizard({ open, onClose, url, equipements, cites, batiments, chambres }: Props & { open: boolean; onClose: () => void; url: string }) {
     const stocks = useMemo(() => new Map(equipements.map((equipement) => [equipement.id, equipement.stock])), [equipements]);
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const [erreurServeur, setErreurServeur] = useState<string | null>(null);
     const {
         register,
         control,
         handleSubmit,
         reset,
-        trigger,
         setValue,
         setError,
         getValues,
@@ -447,7 +448,6 @@ function AffectationWizard({ open, onClose, url, equipements, cites, batiments, 
         if (open) {
             reset({ equipement_id: '', quantite: 1, etat: 'bon', cite_id: '', batiment_id: '', chambre_id: '', notes: '' });
             setEtape(0);
-            setAtteinte(0);
             setErreurServeur(null);
         }
     }, [open, reset]);
@@ -455,18 +455,10 @@ function AffectationWizard({ open, onClose, url, equipements, cites, batiments, 
     const batimentsCite = batiments.filter((batiment) => batiment.cite_id === citeId);
     const chambresBatiment = chambres.filter((chambre) => chambre.batiment_id === batimentId);
     const stock = stocks.get(equipementId ?? '');
+    const manquants = champsManquants(affectationSchema(stocks), useWatch({ control }), CHAMPS_ETAPE, LIBELLES);
 
-    const allerA = async (cible: number) => {
-        // Avancer valide toutes les étapes intermédiaires ; reculer est toujours permis.
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPE[index]))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
 
     const onSubmit = (valeurs: AffectationValeurs) => {
         setErreurServeur(null);
@@ -505,7 +497,7 @@ function AffectationWizard({ open, onClose, url, equipements, cites, batiments, 
                             Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                         </DialogDescription>
                     </DialogHeader>
-                    <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} />
+                    <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} />
                     <DialogBody className="space-y-4">
                         {erreurServeur && (
                             <p role="alert" className="flex items-center gap-2 rounded-brand border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -634,6 +626,7 @@ function AffectationWizard({ open, onClose, url, equipements, cites, batiments, 
 
                         {etape === 2 && (
                             <>
+                                <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} />
                                 <p className="text-sm text-muted">Contrôlez l’affectation avant de l’enregistrer : la quantité sera retirée du magasin.</p>
                                 <dl className="divide-y rounded-brand border text-sm">
                                     <Recap terme="Équipement" valeur={equipements.find((equipement) => equipement.id === valeurs.equipement_id)?.name} />
@@ -666,7 +659,7 @@ function AffectationWizard({ open, onClose, url, equipements, cites, batiments, 
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                                <Button key="envoyer" type="submit" size="sm" className="h-10" disabled={manquants.length > 0 || isSubmitting}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
                                     Confirmer l’affectation
                                 </Button>

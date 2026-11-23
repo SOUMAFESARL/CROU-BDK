@@ -1,13 +1,15 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CalendarCheck, ChevronLeft, ChevronRight, ExternalLink, FileCheck2, FileText, FolderOpen, Info, Loader2, ShieldCheck } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useForm, useWatch } from 'react-hook-form';
 import { Liste, Ligne, Notice, Panneau } from '@/components/etudiant/panneau';
 import { ICON } from '@/components/layout/app-sidebar';
 import { EtudiantLayout } from '@/components/layout/etudiant-layout';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Stepper } from '@/components/ui/stepper';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { cn } from '@/lib/utils';
 import { approbationSchema, type Approbation } from '@/schemas/approbation-contrat';
@@ -74,23 +76,25 @@ function FormulaireApprobation({
     liens: ApprobationContratProps['liens'];
 }) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const {
         control,
         handleSubmit,
-        trigger,
         formState: { errors, isSubmitting },
     } = useForm<Approbation>({ resolver: zodResolver(approbationSchema), defaultValues: { lu: false, consent: false } });
 
-    const allerA = async (cible: number) => {
-        if (cible > etape && !(await trigger('lu'))) return;
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
-
-    const approuver = handleSubmit(async () => {
-        await envoyer(liens.approuver, { contract_id: contrat.id, document_hash: contrat.empreinte, consent: 1 });
+    // Navigation libre entre les étapes ; l'approbation exige les deux cases cochées (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
+    const manquants = champsManquants(approbationSchema, useWatch({ control }), [['lu'], ['consent']], {
+        lu: 'J’ai lu l’intégralité de mon contrat de logement',
+        consent: 'Consentement à l’approbation du contrat',
     });
+
+    const approuver = handleSubmit(
+        async () => {
+            await envoyer(liens.approuver, { contract_id: contrat.id, document_hash: contrat.empreinte, consent: 1 });
+        },
+        (fautes) => setEtape(fautes.lu ? 0 : 1),
+    );
 
     return (
         <form onSubmit={approuver} noValidate className="rounded-brand border bg-white">
@@ -101,7 +105,7 @@ function FormulaireApprobation({
                     Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                 </p>
             </div>
-            <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} className="mt-3 px-4 md:px-5" />
+            <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} className="mt-3 px-4 md:px-5" />
 
             <div className="flex flex-col gap-4 p-4 md:p-5">
                 {etape === 0 ? (
@@ -131,6 +135,7 @@ function FormulaireApprobation({
                     </>
                 ) : (
                     <>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} action="approuver votre contrat" />
                         <Notice icone={FileCheck2}>
                             Votre approbation est enregistrée pour cette version du contrat. Votre rendez-vous d’entrée sera ensuite proposé selon les créneaux du service Logement.
                         </Notice>
@@ -169,7 +174,7 @@ function FormulaireApprobation({
                         <ChevronRight {...ICON} />
                     </Button>
                 ) : (
-                    <Button key="envoyer" type="submit" disabled={isSubmitting} className="font-medium">
+                    <Button key="envoyer" type="submit" disabled={isSubmitting || manquants.length > 0} className="font-medium">
                         {isSubmitting ? <Loader2 {...ICON} className="animate-spin" /> : <ShieldCheck {...ICON} />}
                         Approuver mon contrat
                     </Button>

@@ -7,11 +7,13 @@ import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { ErreurGenerale, Note, Recap, useAssistant } from '@/components/parametrage-hebergement/shared';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
 import { StatCard } from '@/components/ui/stat-card';
 import { Stepper } from '@/components/ui/stepper';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { montant as montantSysteme, symboleDevise } from '@/lib/systeme';
 import { dateFr, nombre, saisieMilliers } from '@/lib/text';
@@ -92,6 +94,11 @@ function Formulaire({ settings, url, departs }: { settings: Props['settings']; u
     const grille = useFieldArray({ control, name: 'grille' });
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<Valeurs>(CHAMPS, trigger, true);
     const v = watch();
+    const manquants = champsManquants(parametresSchema, v, CHAMPS, {
+        notice_days: 'Durée du préavis',
+        late_notice_penalty: 'Pénalité de préavis',
+        unpaid_blocking_threshold: 'Seuil de blocage des impayés',
+    });
 
     const enregistrer = (valeurs: Valeurs) =>
         envoyer<Valeurs>(
@@ -245,28 +252,31 @@ function Formulaire({ settings, url, departs }: { settings: Props['settings']; u
                 )}
 
                 {etape === 3 && (
-                    <Recap
-                        lignes={[
-                            { label: 'Durée du préavis', valeur: `${nombre(Number(v.notice_days))} jour(s)` },
-                            { label: 'Pénalité de préavis', valeur: fcfa(enEntier(v.late_notice_penalty)) },
-                            { label: 'Seuil de blocage des impayés', valeur: enEntier(v.unpaid_blocking_threshold) > 0 ? fcfa(enEntier(v.unpaid_blocking_threshold)) : 'Désactivé' },
-                            {
-                                label: 'Grille des dégradations',
-                                valeur:
-                                    v.grille.length === 0 ? (
-                                        'Aucune ligne'
-                                    ) : (
-                                        <ul className="space-y-0.5">
-                                            {v.grille.map((r, i) => (
-                                                <li key={i}>
-                                                    {r.label} : {fcfa(enEntier(r.amount))}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    ),
-                            },
-                        ]}
-                    />
+                    <>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={aller} />
+                        <Recap
+                            lignes={[
+                                { label: 'Durée du préavis', valeur: `${nombre(Number(v.notice_days))} jour(s)` },
+                                { label: 'Pénalité de préavis', valeur: fcfa(enEntier(v.late_notice_penalty)) },
+                                { label: 'Seuil de blocage des impayés', valeur: enEntier(v.unpaid_blocking_threshold) > 0 ? fcfa(enEntier(v.unpaid_blocking_threshold)) : 'Désactivé' },
+                                {
+                                    label: 'Grille des dégradations',
+                                    valeur:
+                                        v.grille.length === 0 ? (
+                                            'Aucune ligne'
+                                        ) : (
+                                            <ul className="space-y-0.5">
+                                                {v.grille.map((r, i) => (
+                                                    <li key={i}>
+                                                        {r.label} : {fcfa(enEntier(r.amount))}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        ),
+                                },
+                            ]}
+                        />
+                    </>
                 )}
             </div>
             <div className="flex flex-col-reverse gap-2 border-t px-6 py-4 sm:flex-row sm:justify-between">
@@ -283,7 +293,7 @@ function Formulaire({ settings, url, departs }: { settings: Props['settings']; u
                             <ArrowLeft className="size-4" aria-hidden /> Précédent
                         </Button>
                     )}
-                    <Button type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                    <Button type="submit" size="sm" className="h-10" disabled={isSubmitting || (derniere && manquants.length > 0)}>
                         {derniere ? (
                             <>
                                 {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Save className="size-4" aria-hidden />}

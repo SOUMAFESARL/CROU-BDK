@@ -10,6 +10,7 @@ import { ErreurGenerale, Note, PiedAssistant, Recap, useAssistant } from '@/comp
 import { ToggleCard } from '@/components/parc-immobilier/form/inputs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { StatCard } from '@/components/ui/stat-card';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { dateFr, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -196,6 +198,7 @@ function Formulaire({ options, terms, timezone, url }: { options: Options; terms
     } = useForm<EntreeValeurs>({ resolver: zodResolver(schema) as unknown as Resolver<EntreeValeurs>, mode: 'onTouched', defaultValues: valeursInitiales });
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<EntreeValeurs>(champs, trigger, true);
     const v = watch();
+    const manquants = champsManquants(schema, v, champs, Object.fromEntries(terms.map((t) => [`contract.${t.key}`, t.label])));
     const erreurContrat = (cle: string) => (errors.contract as Record<string, { message?: string }> | undefined)?.[cle]?.message;
 
     const enregistrer = (valeurs: EntreeValeurs) =>
@@ -391,6 +394,7 @@ function Formulaire({ options, terms, timezone, url }: { options: Options; terms
 
                 {etape === 3 && (
                     <div className="space-y-4">
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={aller} />
                         <Recap
                             lignes={[
                                 { label: 'Parcours automatique', valeur: v.enabled ? <Badge variant="success">Activé</Badge> : <Badge variant="neutral">Désactivé</Badge> },
@@ -411,7 +415,7 @@ function Formulaire({ options, terms, timezone, url }: { options: Options; terms
                                 { label: 'Conditions du contrat', valeur: `${nombre(terms.length)} clauses renseignées` },
                             ]}
                         />
-                        {Object.keys(errors).length > 0 && (
+                        {Object.keys(errors).length > 0 && manquants.length === 0 && (
                             <p role="alert" className="flex items-center gap-2 text-sm font-medium text-red-600">
                                 <CircleAlert className="size-4" aria-hidden /> Certaines informations sont incomplètes : revenez aux étapes précédentes.
                             </p>
@@ -429,6 +433,7 @@ function Formulaire({ options, terms, timezone, url }: { options: Options; terms
                 }}
                 onPrecedent={() => aller(etape - 1)}
                 libelle="Enregistrer les paramètres"
+                desactive={manquants.length > 0}
             />
         </form>
     );

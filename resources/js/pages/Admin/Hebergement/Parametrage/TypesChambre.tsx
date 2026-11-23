@@ -275,13 +275,7 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
 
                 {etape === 0 && (
                     <>
-                        <Field
-                            id="tc-name"
-                            label="Nom du type"
-                            required
-                            error={errors.name?.message}
-                            hint="« Individuelle », « Double » et « Triple » fixent la capacité des chambres (1, 2 ou 3 places) ; tout autre nom compte pour 1 place."
-                        >
+                        <Field id="tc-name" label="Nom du type" required error={errors.name?.message}>
                             <Input id="tc-name" maxLength={100} placeholder="Ex. Individuelle, Double…" invalid={!!errors.name} autoFocus {...register('name')} />
                         </Field>
                         <Field id="tc-description" label="Description" error={errors.description?.message}>
@@ -298,13 +292,7 @@ function Formulaire({ type, url, disponibles, onClose }: { type: TypeChambre | n
                         control={control}
                         name="montant"
                         render={({ field }) => (
-                            <Field
-                                id="tc-montant"
-                                label={`Loyer mensuel (${symboleDevise()})`}
-                                required
-                                error={errors.montant?.message}
-                                hint="La caution et l’avance se paramètrent dans les critères de chaque campagne (admission, réadmission)."
-                            >
+                            <Field id="tc-montant" label={`Loyer mensuel (${symboleDevise()})`} required error={errors.montant?.message}>
                                 <Input
                                     id="tc-montant"
                                     inputMode="numeric"

@@ -8,11 +8,13 @@ import { PhotosEdl } from "@/components/etudiant/photos-edl";
 import { SignaturePad } from "@/components/etudiant/signature-pad";
 import { ICON } from "@/components/layout/app-sidebar";
 import { Button } from "@/components/ui/button";
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { DatePicker } from "@/components/ui/date-picker";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Stepper } from "@/components/ui/stepper";
 import { Textarea } from "@/components/ui/textarea";
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from "@/lib/inertia-form";
 import { cn } from "@/lib/utils";
 import {
@@ -66,7 +68,6 @@ type Props = {
 /** Assistant en 3 étapes de l'état des lieux d'entrée (création ou modification tant que le CROU n'a pas signé). */
 export function FormulaireEntreeEdl({ entree, lieu, etudiantId, urlCreation, annuler, onEnregistre }: Props) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(entree ? ETAPES.length - 1 : 0);
     const [preparations, setPreparations] = useState(0);
     const formulaire = useRef<HTMLFormElement>(null);
     const signatureExistante = !!entree?.signatureEtudiant;
@@ -74,7 +75,6 @@ export function FormulaireEntreeEdl({ entree, lieu, etudiantId, urlCreation, ann
         register,
         control,
         handleSubmit,
-        trigger,
         setValue,
         setError,
         formState: { errors, isSubmitting },
@@ -104,19 +104,12 @@ export function FormulaireEntreeEdl({ entree, lieu, etudiantId, urlCreation, ann
             if (champ instanceof HTMLInputElement || champ instanceof HTMLTextAreaElement) champ.focus({ preventScroll: true });
         });
 
-    const allerA = async (cible: number) => {
-        // Avancer valide les étapes intermédiaires ; reculer est toujours permis.
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPE[index]))) {
-                setEtape(index);
-                montrerPremiereErreur();
-                return;
-            }
-        }
+    // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => {
         setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
         formulaire.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     };
+    const manquants = champsManquants(entreeSchema(signatureExistante), useWatch({ control }), CHAMPS_ETAPE);
 
     const enregistrer = handleSubmit(
         async (valeurs) => {
@@ -188,7 +181,7 @@ export function FormulaireEntreeEdl({ entree, lieu, etudiantId, urlCreation, ann
             badge={`Étape ${etape + 1} sur ${ETAPES.length}`}
         >
             <form ref={formulaire} onSubmit={enregistrer} noValidate className="flex scroll-mt-20 flex-col gap-4">
-                <Stepper steps={ETAPES} current={etape} reached={atteinte} onStepClick={allerA} className="-mx-4 px-4 md:-mx-5 md:px-5" />
+                <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={allerA} className="-mx-4 px-4 md:-mx-5 md:px-5" />
                 <p className="text-xs text-muted">
                     Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                 </p>
@@ -295,6 +288,7 @@ export function FormulaireEntreeEdl({ entree, lieu, etudiantId, urlCreation, ann
                                 )}
                             />
                         </Field>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={allerA} />
                     </div>
                 )}
 
@@ -320,7 +314,7 @@ export function FormulaireEntreeEdl({ entree, lieu, etudiantId, urlCreation, ann
                             <ChevronRight {...ICON} />
                         </Button>
                     ) : (
-                        <Button key="envoyer" type="submit" disabled={isSubmitting || preparations > 0} className="font-medium">
+                        <Button key="envoyer" type="submit" disabled={isSubmitting || preparations > 0 || manquants.length > 0} className="font-medium">
                             {isSubmitting ? <Loader2 {...ICON} className="animate-spin" /> : <Save {...ICON} />}
                             {entree ? "Enregistrer les modifications" : "Enregistrer l’état des lieux"}
                         </Button>

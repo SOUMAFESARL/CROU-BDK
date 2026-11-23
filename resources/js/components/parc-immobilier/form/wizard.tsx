@@ -7,9 +7,10 @@ import { cn } from '@/lib/utils';
 export type WizardStep = { label: string; description: string; icon: LucideIcon };
 
 /**
- * Étape courante + plus haute étape atteinte (on ne saute jamais une étape non validée).
- * `toutesAccessibles` (modification d'un élément existant) : toutes les étapes sont cliquables d'emblée ;
- * le formulaire valide quand même les étapes intermédiaires avant d'avancer (`allerA`).
+ * Étape courante + plus haute étape atteinte (sert à cocher les étapes déjà parcourues).
+ * Toutes les étapes sont cliquables dans `Wizard`, même si des champs obligatoires sont vides ;
+ * l'enregistrement reste bloqué tant que le formulaire est incomplet (`submitDisabled` + `ChampsManquants`).
+ * `toutesAccessibles` (modification d'un élément existant) : toutes les étapes sont considérées comme parcourues.
  */
 export function useWizard(count: number, { toutesAccessibles = false }: { toutesAccessibles?: boolean } = {}) {
     const [current, setCurrent] = useState(0);
@@ -55,7 +56,7 @@ type WizardProps = {
 
 /**
  * Formulaire en plusieurs étapes : liste des étapes à gauche (écran large) ou barre de progression (mobile),
- * contenu de l'étape, puis Précédent / Suivant. « Suivant » valide l'étape avant d'avancer (`onNext`).
+ * contenu de l'étape, puis Précédent / Suivant. Navigation libre ; le bouton final est désactivé via `submitDisabled`.
  */
 export function Wizard({
     steps,
@@ -77,14 +78,14 @@ export function Wizard({
 
     return (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-            {/* Écran large : étapes cliquables (seulement celles déjà atteintes). */}
+            {/* Écran large : toutes les étapes sont cliquables. */}
             <nav aria-label="Étapes du formulaire" className="hidden lg:block">
                 <ol className="sticky top-24 space-y-1">
                     {steps.map((item, index) => {
                         // Étape validée : déjà dépassée au moins une fois.
                         const done = index !== current && (isDone ? isDone(index) : index < reached);
                         const active = index === current;
-                        const accessible = index <= reached && !submitting;
+                        const accessible = !submitting;
                         const Icon = item.icon;
 
                         return (
@@ -129,10 +130,10 @@ export function Wizard({
                         </span>
                         <span>{progression} %</span>
                     </div>
-                    {/* Segments cliquables : on passe directement à une étape déjà atteinte. */}
+                    {/* Segments cliquables : on passe directement à n'importe quelle étape. */}
                     <ol aria-label="Étapes du formulaire" className="mt-2 flex gap-1">
                         {steps.map((item, index) => {
-                            const accessible = index <= reached && !submitting;
+                            const accessible = !submitting;
                             return (
                                 <li key={item.label} className="flex-1">
                                     <button

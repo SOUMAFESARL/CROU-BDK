@@ -33,6 +33,8 @@ La migration `2026_11_13_000002_add_discipline_configure_permission.php` ajoute 
 
 Les décisions disciplinaires (rapports d’incident, sanctions directes) gardent leurs droits (`hebergement.discipline.create`, `.update`) : elles proposent les types actifs du paramétrage.
 
+La migration `2026_11_23_000003_add_types_paiement_permissions.php` ajoute le module **« Types de paiement »** (`hebergement.types-paiement`) et ses droits `.view`, `.create`, `.update`, `.delete` pour la page du même nom (paramétrage hébergement, rubrique « Parc immobilier », voir `docs/types-paiement.md`). Ils sont accordés au rôle 1, et repris des droits `hebergement.parametrage.view` (→ `view`) et `.configure` (→ `create`, `update`, `delete`) pour les rôles qui les avaient.
+
 Attribuer les droits nécessaires dans **Paramètres → Rôles et permissions**. Créer un utilisateur exige `utilisateurs.create` et `parametrage.roles.assign`. Modifier son rôle exige aussi `parametrage.roles.assign`. Seul le rôle 1 peut affecter le rôle 1 ou modifier un compte qui le possède.
 
 Validation ciblée :

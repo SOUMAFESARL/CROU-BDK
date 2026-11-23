@@ -1,14 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowLeft, ArrowRight, Loader2, Send, TriangleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { nombre } from '@/lib/text';
 
@@ -44,7 +46,6 @@ export function RelanceDialog({ open, onClose, url, nombreRetard }: { open: bool
         control,
         handleSubmit,
         reset,
-        trigger,
         getValues,
         setError,
         formState: { errors, isSubmitting },
@@ -57,9 +58,8 @@ export function RelanceDialog({ open, onClose, url, nombreRetard }: { open: bool
         }
     }, [open, reset]);
 
-    const suivant = async () => {
-        if (await trigger()) setEtape(1);
-    };
+    // Navigation libre entre les étapes ; l'envoi exige les champs obligatoires (`manquants`).
+    const suivant = () => setEtape(1);
 
     const onSubmit = (valeurs: Valeurs) =>
         envoyer<Valeurs>(url, valeurs, {
@@ -72,6 +72,7 @@ export function RelanceDialog({ open, onClose, url, nombreRetard }: { open: bool
         });
 
     const valeurs = getValues();
+    const manquants = champsManquants(schema, useWatch({ control }), [['mode_envoi', 'message_relance'], []], { mode_envoi: 'Mode d’envoi', message_relance: 'Message' });
 
     return (
         <Dialog open={open} onOpenChange={(ouvert) => !ouvert && !isSubmitting && onClose()}>
@@ -83,7 +84,7 @@ export function RelanceDialog({ open, onClose, url, nombreRetard }: { open: bool
                             Étape {etape + 1} sur {ETAPES.length} · Les champs marqués <span className="text-red-600">*</span> sont obligatoires.
                         </DialogDescription>
                     </DialogHeader>
-                    <Stepper steps={ETAPES} current={etape} reached={etape} onStepClick={(index) => index < etape && setEtape(index)} />
+                    <Stepper steps={ETAPES} current={etape} reached={ETAPES.length - 1} onStepClick={setEtape} />
                     <DialogBody className="space-y-4">
                         <p className="flex items-start gap-2 rounded-brand border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                             <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -135,6 +136,7 @@ export function RelanceDialog({ open, onClose, url, nombreRetard }: { open: bool
                             </>
                         )}
 
+                        {etape === 1 && <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={setEtape} action="envoyer les relances" />}
                         {etape === 1 && (
                             <dl className="divide-y rounded-brand border text-sm">
                                 <div className="flex flex-col gap-0.5 px-4 py-2.5 sm:flex-row sm:justify-between sm:gap-4">
@@ -163,7 +165,7 @@ export function RelanceDialog({ open, onClose, url, nombreRetard }: { open: bool
                                     Suivant <ArrowRight className="size-4" aria-hidden />
                                 </Button>
                             ) : (
-                                <Button type="submit" size="sm" className="h-10" disabled={isSubmitting}>
+                                <Button type="submit" size="sm" className="h-10" disabled={isSubmitting || manquants.length > 0}>
                                     {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Send className="size-4" aria-hidden />}
                                     Envoyer les relances
                                 </Button>

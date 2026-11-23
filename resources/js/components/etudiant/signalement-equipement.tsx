@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Notice } from "@/components/etudiant/panneau";
 import { ICON } from "@/components/layout/app-sidebar";
 import { Button } from "@/components/ui/button";
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { DatePicker } from "@/components/ui/date-picker";
 import {
     Dialog,
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Stepper } from "@/components/ui/stepper";
 import { Textarea } from "@/components/ui/textarea";
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from "@/lib/inertia-form";
 import { cn } from "@/lib/utils";
 import {
@@ -99,13 +101,11 @@ export function SignalementEquipement({
     titre = "Signaler un équipement défectueux",
 }: Props) {
     const [etape, setEtape] = useState(0);
-    const [atteinte, setAtteinte] = useState(0);
     const {
         register,
         control,
         handleSubmit,
         reset,
-        trigger,
         setValue,
         getValues,
         setError,
@@ -116,6 +116,11 @@ export function SignalementEquipement({
         mode: "onTouched",
     });
     const valeurs = useWatch({ control });
+    const manquants = champsManquants(
+        signalementSchema(categories.map((c) => c.code)),
+        valeurs,
+        CHAMPS_ETAPE,
+    );
 
     useEffect(() => {
         if (!ouverte) return;
@@ -135,7 +140,6 @@ export function SignalementEquipement({
                   { ...VIDE, equipement: equipements.length === 0 ? "autre" : "" },
         );
         setEtape(0);
-        setAtteinte(0);
     }, [ouverte, equipementInitial, equipements, categories, reset]);
 
     const choisirEquipement = (valeur: string) => {
@@ -153,17 +157,8 @@ export function SignalementEquipement({
             setValue("titre", `${equipement.nom} défectueux`);
     };
 
-    const allerA = async (cible: number) => {
-        // Avancer valide toutes les étapes intermédiaires ; reculer est toujours permis.
-        for (let index = etape; index < cible; index++) {
-            if (!(await trigger(CHAMPS_ETAPE[index]))) {
-                setEtape(index);
-                return;
-            }
-        }
-        setEtape(cible);
-        setAtteinte((max) => Math.max(max, cible));
-    };
+    // Navigation libre entre les étapes ; l'envoi exige les champs obligatoires (`manquants`).
+    const allerA = (cible: number) => setEtape(cible);
 
     const envoyerSignalement = handleSubmit(
         async ({ equipement, ...donnees }) => {
@@ -202,6 +197,15 @@ export function SignalementEquipement({
             );
             if (ok) fermer();
         },
+        (fautes) =>
+            setEtape(
+                Math.max(
+                    0,
+                    CHAMPS_ETAPE.findIndex((champs) =>
+                        champs.some((champ) => fautes[champ]),
+                    ),
+                ),
+            ),
     );
 
     const equipementChoisi =
@@ -232,7 +236,7 @@ export function SignalementEquipement({
                     <Stepper
                         steps={ETAPES}
                         current={etape}
-                        reached={atteinte}
+                        reached={ETAPES.length - 1}
                         onStepClick={allerA}
                         className="px-4 sm:px-6"
                     />
@@ -524,6 +528,12 @@ export function SignalementEquipement({
                                         ],
                                     ]}
                                 />
+                                <ChampsManquants
+                                    manquants={manquants}
+                                    etapes={ETAPES}
+                                    onAller={setEtape}
+                                    action="envoyer le signalement"
+                                />
                                 <Notice icone={Info}>
                                     Un numéro de suivi vous sera communiqué.
                                     Vous suivrez l’avancement dans « Mes
@@ -566,7 +576,7 @@ export function SignalementEquipement({
                             <Button
                                 key="envoyer"
                                 type="submit"
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || manquants.length > 0}
                                 className="font-medium"
                             >
                                 {isSubmitting ? (

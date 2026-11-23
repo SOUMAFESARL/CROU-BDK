@@ -46,8 +46,8 @@ const nombreValide = (valeur: string, min: number, max: number) => {
 };
 
 /**
- * `terminales` : identifiants des niveaux « Terminale ». Niveau précédent = Terminale → note au bac sur 400 et ville du bac
- * obligatoires ; sinon moyenne générale sur 20 (la ville du bac n'est pas demandée).
+ * `terminales` : identifiants des niveaux « Terminale ». Niveau précédent = Terminale → note au bac sur 400, ville et numéro
+ * de table du bac obligatoires ; sinon moyenne générale sur 20 (la ville du bac n'est pas demandée).
  */
 export const demandeHebergementSchema = (documents: DocumentDemande[], terminales: string[] = [], ordreNiveaux: string[] = []) =>
     z.object({
@@ -72,6 +72,7 @@ export const demandeHebergementSchema = (documents: DocumentDemande[], terminale
         moyenne: z.string().trim(),
         credit_valider: nombre(0, 60, 'Le nombre de crédits doit être compris entre 0 et 60.').refine((valeur) => valeur === '' || Number.isInteger(Number(valeur)), 'Saisissez un nombre entier de crédits.'),
         ville_bac: z.string().trim().max(150, '150 caractères au maximum.'),
+        num_table_bac: z.string().trim().max(50, '50 caractères au maximum.'),
         // Situation sociale
         boursier: z.boolean(),
         // Adresse
@@ -103,6 +104,9 @@ export const demandeHebergementSchema = (documents: DocumentDemande[], terminale
         if (apresTerminale && donnees.ville_bac === '') {
             ctx.addIssue({ code: 'custom', path: ['ville_bac'], message: 'La ville/commune d’obtention du bac est obligatoire.' });
         }
+        if (apresTerminale && donnees.num_table_bac === '') {
+            ctx.addIssue({ code: 'custom', path: ['num_table_bac'], message: 'Le numéro de table au bac est obligatoire.' });
+        }
     });
 
 export type DemandeHebergement = z.infer<ReturnType<typeof demandeHebergementSchema>>;
@@ -112,7 +116,7 @@ export const ETAPES = ['Identité', 'Études', 'Situation', 'Adresse', 'Document
 /** Champs validés à chaque étape de l'assistant (et utilisés pour replacer les erreurs serveur). */
 export const CHAMPS_ETAPE: (keyof DemandeHebergement)[][] = [
     ['genre', 'name', 'date_naissance', 'lieu_naissance', 'nationalite', 'telephone', 'email', 'type_piece', 'num_piece', 'date_exp_piece', 'groupe_sanguin'],
-    ['matricule', 'niveau_precedent', 'niveau', 'filiere', 'moyenne', 'credit_valider', 'ville_bac'],
+    ['matricule', 'niveau_precedent', 'niveau', 'filiere', 'moyenne', 'credit_valider', 'ville_bac', 'num_table_bac'],
     ['boursier'],
     ['region', 'ville', 'adresse', 'distance'],
     ['documents', 'certifie'],

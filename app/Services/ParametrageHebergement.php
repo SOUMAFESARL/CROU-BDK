@@ -22,11 +22,12 @@ class ParametrageHebergement
     private const SECTIONS = [
         [
             'titre' => 'Parc immobilier',
-            'description' => 'Référentiels utilisés par les cités, les bâtiments et les chambres.',
+            'description' => 'Référentiels utilisés par les cités, les bâtiments, les chambres et les paiements.',
             'modules' => [
                 ['label' => 'Types de cité', 'icon' => 'city', 'route' => 'admin.hebergement.parametrage-herb.type-cite.index', 'description' => 'Catégories de résidences'],
                 ['label' => 'Types d’équipements', 'icon' => 'sofa', 'route' => 'admin.hebergement.parametrage-herb.type-equipement.index', 'description' => 'Familles de matériel'],
                 ['label' => 'Types de chambre', 'icon' => 'bed', 'route' => 'admin.hebergement.parametrage-herb.type-chambre.index', 'description' => 'Tarifs et équipements par type'],
+                ['label' => 'Types de paiement', 'icon' => 'wallet', 'route' => 'admin.hebergement.parametrage-herb.type-paiement.index', 'description' => 'Choix du formulaire « Nouveau paiement »'],
             ],
         ],
         [

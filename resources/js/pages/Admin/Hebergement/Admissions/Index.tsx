@@ -52,14 +52,22 @@ type Props = {
     etat: Filtre;
     /** Demandes recevables seulement : onglets liste des demandes / listes provisoires d'admission et de réadmission. */
     classement: Classement | null;
-    /** `type` : type de demande (admission ou réadmission), vide pour tous. */
-    filters: { q: string; etat_dossier: string; type: string };
+    /** `type` : type de demande (admission ou réadmission), vide pour tous ; `campagne` : campagne choisie dans le bandeau (vide : campagne par défaut). */
+    filters: { q: string; etat_dossier: string; type: string; campagne: string };
     /** États possibles de `Demande.etat_dossier` (`DossierWorkflow::LABELS`). */
     etatsDossier: { value: string; label: string }[];
     colonnes: { personnel: boolean; historique: boolean };
-    campagneActive: { annee: string; echeance: string | null; moyenne_min: number | string | null; distance_min: number | string | null } | null;
+    /** Liste des demandes : campagnes proposées dans le bandeau, la plus récente d'abord (vide sur les autres onglets). */
+    campagnes: CampagneOption[];
+    /** Liste des demandes : campagne choisie (par défaut la campagne active) ; autres onglets : campagne active. */
+    campagneActive: (CampagneOption & { echeance: string | null; moyenne_min: number | string | null; distance_min: number | string | null }) | null;
     urls: { campagnes: string | null; leverRefus: string | null; filtres: Record<Filtre, string> | null };
 };
+
+type CampagneOption = { id: string; libelle: string | null; annee: string | null; active: boolean };
+
+/** Libellé et année d'une campagne (liste du bandeau). */
+const nomCampagne = (campagne: CampagneOption) => [campagne.libelle || 'Campagne', campagne.annee].filter(Boolean).join(' ');
 
 /** Filtre « Type de demande » de la liste des demandes. */
 const TYPES_DEMANDE = [
@@ -80,7 +88,7 @@ const TITRES: Record<Filtre, string> = {
  * Liste des demandes de logement (remplace `admission/admission.blade.php`).
  * Les étudiants déjà logés sont suivis sur la page « Résidents & contrats ».
  */
-export default function AdmissionsIndex({ dossiers, stats, etat, classement, filters, etatsDossier, colonnes, campagneActive, urls }: Props) {
+export default function AdmissionsIndex({ dossiers, stats, etat, classement, filters, etatsDossier, colonnes, campagnes, campagneActive, urls }: Props) {
     /**
      * Onglets « Décision de la commission » et « Listes définitives » : pages à part du menu, sans les indicateurs de la
      * liste des demandes.
@@ -162,8 +170,13 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
     const premierRendu = useRef(true);
 
     // Recherche et filtre côté serveur (retour en page 1, onglet KPI conservé par l'URL).
-    const appliquer = (valeurs: { q: string; etat_dossier: string; type?: string }) => {
-        const parametres = Object.fromEntries(Object.entries(valeurs).filter(([, valeur]) => (valeur ?? '').trim() !== '').map(([cle, valeur]) => [cle, (valeur ?? '').trim()]));
+    const appliquer = (valeurs: { q: string; etat_dossier: string; type?: string; campagne?: string }) => {
+        // La campagne choisie dans le bandeau est conservée (recherche, filtres, réinitialisation).
+        const parametres = Object.fromEntries(
+            Object.entries({ campagne: filters.campagne, ...valeurs })
+                .filter(([, valeur]) => (valeur ?? '').trim() !== '')
+                .map(([cle, valeur]) => [cle, (valeur ?? '').trim()]),
+        );
         // L'onglet ouvert (liste provisoire, demandes validées ou file d'attente) est conservé.
         if (classement && classement.liste !== 'demandes' && classement.liste !== 'toutes') parametres.liste = classement.liste;
         router.get(window.location.pathname, parametres, { preserveState: true, preserveScroll: true, replace: true });
@@ -299,10 +312,30 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                 aside={
                     campagneActive ? (
                         <>
-                            <span className="inline-flex items-center gap-1.5 rounded-brand border border-[#C6E3A6] bg-soft px-3 py-1 text-[#004D00]">
-                                <CirclePlay className="size-4" aria-hidden />
-                                <strong className="font-medium">Campagne active {campagneActive.annee}</strong>
-                            </span>
+                            {ongletMenu === 'admissions' && campagnes.length > 0 ? (
+                                // Liste des demandes : les indicateurs et les listes suivent la campagne choisie (libellé + année).
+                                <Select value={campagneActive.id} onValueChange={(id) => appliquer({ q: recherche, etat_dossier: filters.etat_dossier, type: filters.type, campagne: id })}>
+                                    <SelectTrigger aria-label="Campagne affichée" className="h-9 w-full border-[#C6E3A6] bg-soft text-[#004D00] sm:w-72">
+                                        <span className="flex min-w-0 items-center gap-1.5">
+                                            <CirclePlay className="size-4 shrink-0" aria-hidden />
+                                            <SelectValue />
+                                        </span>
+                                    </SelectTrigger>
+                                    <SelectContent align="end">
+                                        {campagnes.map((option) => (
+                                            <SelectItem key={option.id} value={option.id}>
+                                                {nomCampagne(option)}
+                                                {option.active && <span className="text-muted"> · active</span>}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            ) : (
+                                <span className="inline-flex items-center gap-1.5 rounded-brand border border-[#C6E3A6] bg-soft px-3 py-1 text-[#004D00]">
+                                    <CirclePlay className="size-4" aria-hidden />
+                                    <strong className="font-medium">Campagne active {campagneActive.annee}</strong>
+                                </span>
+                            )}
                             {campagneActive.echeance && <Element icone={<CalendarClock className="size-4" aria-hidden />}>Échéance : {dateFr(campagneActive.echeance)}</Element>}
                             {campagneActive.moyenne_min && <Element icone={<GraduationCap className="size-4" aria-hidden />}>Moyenne min. {campagneActive.moyenne_min}/20</Element>}
                             {campagneActive.distance_min && <Element icone={<MapPin className="size-4" aria-hidden />}>Distance min. {campagneActive.distance_min} km</Element>}

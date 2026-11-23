@@ -42,8 +42,8 @@ class DemandeHebergementRequest extends EtudiantRequest
 
     /**
      * Redoublant si le niveau précédent est le niveau actuel (plus de case à cocher) ;
-     * après la Terminale, ni crédits ni matricule : la moyenne saisie est la note au bac (/400) et la ville du bac est demandée ;
-     * sinon, la ville du bac n'est pas demandée.
+     * après la Terminale, ni crédits ni matricule : la moyenne saisie est la note au bac (/400), la ville et le numéro de table du bac
+     * sont demandés ; sinon, ni la ville ni le numéro de table du bac ne sont demandés.
      * L'année académique précédente n'est plus saisie : elle se déduit de celle de la campagne (2026-2027 → 2025-2026).
      */
     protected function prepareForValidation(): void
@@ -57,8 +57,12 @@ class DemandeHebergementRequest extends EtudiantRequest
         if ($this->apresTerminale()) {
             $donnees['credit_valider'] = null;
             $donnees['matricule'] = null;
+            if (is_string($this->input('num_table_bac'))) {
+                $donnees['num_table_bac'] = mb_strtoupper(trim($this->input('num_table_bac')));
+            }
         } else {
             $donnees['ville_bac'] = null;
+            $donnees['num_table_bac'] = null;
         }
         $this->merge($donnees);
     }
@@ -105,6 +109,7 @@ class DemandeHebergementRequest extends EtudiantRequest
             ? ['nullable', 'numeric', 'min:1', 'max:'.self::NOTE_BAC_MAX]
             : ['nullable', 'numeric', 'min:1', 'max:20'];
         $rules['ville_bac'] = $this->apresTerminale() ? ['required', 'string', 'max:150'] : ['nullable'];
+        $rules['num_table_bac'] = $this->apresTerminale() ? ['required', 'string', 'max:50'] : ['nullable'];
         // Nombre de crédits validés sur l'année précédente (60 crédits par an), pas un pourcentage.
         $rules['credit_valider'] = ['nullable', 'integer', 'min:0', 'max:'.DemandeEtudiant::CREDITS_PAR_AN];
         if ($this->compteExistant()) {
@@ -140,6 +145,8 @@ class DemandeHebergementRequest extends EtudiantRequest
             'niveau_precedent.required' => 'Choisissez votre niveau d’étude précédent.',
             'ville_bac.required' => 'La ville/commune d’obtention du bac est obligatoire.',
             'ville_bac.max' => 'La ville/commune d’obtention du bac ne doit pas dépasser 150 caractères.',
+            'num_table_bac.required' => 'Le numéro de table au bac est obligatoire.',
+            'num_table_bac.max' => 'Le numéro de table au bac ne doit pas dépasser 50 caractères.',
             'matricule.max' => 'Le matricule ne doit pas dépasser 50 caractères.',
             'moyenne.numeric' => 'La note doit être un nombre.',
             'moyenne.min' => $this->apresTerminale() ? 'La note au bac doit être comprise entre 1 et '.self::NOTE_BAC_MAX.'.' : 'La moyenne doit être comprise entre 1 et 20.',

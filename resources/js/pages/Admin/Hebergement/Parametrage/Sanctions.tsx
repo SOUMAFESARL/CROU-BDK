@@ -10,6 +10,7 @@ import { Bloc, ErreurGenerale, Note, PiedAssistant, Recap, useAssistant } from '
 import { ChoiceCard, ToggleCard } from '@/components/parc-immobilier/form/inputs';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -19,6 +20,7 @@ import { Stepper } from '@/components/ui/stepper';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { repartirErreurs } from '@/components/vie-residentielle/shared';
+import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
@@ -278,6 +280,7 @@ function FormulaireType({
     });
     const { etape, atteinte, aller, allerA, toutValider, derniere } = useAssistant<TypeSanctionValeurs>(ETAPES_TYPE, trigger, type !== null);
     const v = useWatch({ control }) as TypeSanctionValeurs;
+    const manquants = champsManquants(schema, v, ETAPES_TYPE, { libelle: 'Libellé', points_retires: 'Points retirés', effet: 'Effet' });
     // L'effet d'une sanction déjà appliquée est figé : les sanctions existantes en dépendent.
     const effetFige = (type?.utilisations ?? 0) > 0;
 
@@ -365,22 +368,25 @@ function FormulaireType({
                     </>
                 )}
                 {etape === 2 && (
-                    <Recap
-                        lignes={[
-                            { label: 'Libellé', valeur: <span className="font-medium">{v.libelle}</span> },
-                            { label: 'Points retirés', valeur: `−${v.points_retires} pts` },
-                            { label: 'Effet', valeur: effets.find((e) => e.value === v.effet)?.label ?? '—' },
-                            { label: 'Proposée', valeur: v.actif ? 'Oui' : 'Non' },
-                            { label: 'Description', valeur: v.description?.trim() || <span className="text-muted">Aucune</span> },
-                        ]}
-                    />
+                    <>
+                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={aller} />
+                        <Recap
+                            lignes={[
+                                { label: 'Libellé', valeur: <span className="font-medium">{v.libelle}</span> },
+                                { label: 'Points retirés', valeur: `−${v.points_retires} pts` },
+                                { label: 'Effet', valeur: effets.find((e) => e.value === v.effet)?.label ?? '—' },
+                                { label: 'Proposée', valeur: v.actif ? 'Oui' : 'Non' },
+                                { label: 'Description', valeur: v.description?.trim() || <span className="text-muted">Aucune</span> },
+                            ]}
+                        />
+                    </>
                 )}
             </DialogBody>
             <PiedAssistant
                 etape={etape}
                 derniere={derniere}
                 envoi={isSubmitting}
-                desactive={!url}
+                desactive={!url || manquants.length > 0}
                 onAnnuler={onClose}
                 onPrecedent={() => aller(etape - 1)}
                 libelle={type ? 'Enregistrer les modifications' : 'Ajouter'}

@@ -28,6 +28,10 @@ class PaiementRepository implements PaiementRepositoryInterface
             $query->where('cite_id', $filters['residence']);
         }
         
+        if (!empty($filters['campagne'])) {
+            $query->deCampagne((string) $filters['campagne']);
+        }
+
         if (!empty($filters['statut'])) {
             $query->where('statut_paiement', $filters['statut']);
         }
@@ -108,9 +112,10 @@ class PaiementRepository implements PaiementRepositoryInterface
         return $totalPaiements > 0 ? round(($totalPaye / $totalPaiements) * 100, 1) : 0;
     }
 
-    public function getNombrePaiementsMois(): int
+    public function getNombrePaiementsMois(?string $campagne = null): int
     {
         return $this->model
+            ->when($campagne, fn ($query) => $query->deCampagne($campagne))
             ->whereMonth('date_paiement', now()->month)
             ->whereYear('date_paiement', now()->year)
             ->count();
@@ -260,9 +265,12 @@ class PaiementRepository implements PaiementRepositoryInterface
 
     public function getLastPaiementByEtudiant(string $etudiantId): ?object
 {
+    // Seuls les paiements répartis sur les loyers (loyer, avance) portent des mois : une caution ou des frais
+    // enregistrés après ne doivent pas faire repartir le calcul du mois en cours.
     return $this->model
         ->where('resident_id', $etudiantId)
         ->where('statut_paiement', 'valide')
+        ->where(fn ($q) => $q->whereIn('type_paiement', \App\Http\Services\PaiementService::TYPES_LOYER)->orWhereNull('type_paiement'))
         ->orderBy('created_at', 'desc')
         ->first();
 }
