@@ -188,6 +188,8 @@ return [
         'admin.map.api.export' => 'hebergement.parc.export',
         'admin.map.api.nearby' => 'hebergement.parc.view',
         'admin.map.api.stats' => 'hebergement.parc.view',
+        'admin.parametrage.admission-sms.index' => 'parametrage.configuration.view',
+        'admin.parametrage.admission-sms.update' => 'parametrage.configuration.configure',
         'admin.parametrage.configuration.index' => 'parametrage.configuration.view',
         'admin.parametrage.configuration.update' => 'parametrage.configuration.configure',
         'admin.parametrage.countrie.delete' => 'parametrage.referentiels.delete',

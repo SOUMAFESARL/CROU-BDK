@@ -17,6 +17,8 @@ use App\Repositories\Interfaces\EtudiantRepositoryInterface;
 use App\Http\Services\CampagneValidationService;
 use App\Models\Campagne;
 use App\Services\AdminAccess;
+use App\Services\AdmissionResultDiffusion;
+use Illuminate\Support\Facades\DB;
 use App\Services\AdminViewAccess;
 use App\Http\Services\DossierWorkflow;
 use App\Http\Services\DecisionAutomatiqueDossier;
@@ -624,11 +626,11 @@ class CampagnesAdmissionController extends Controller
      * Publication d'un onglet des listes définitives (`liste` : « Demandes validées » ou « File d'attente » ; `volet` :
      * `toutes` — les volets ouverts — ou un type de demande ; classement recalculé côté serveur) : chaque volet qui a
      * des demandes approuvées et n'est pas encore publié (ou a reçu une approbation depuis sa publication) est publié ;
-     * la liste peut alors être téléchargée. La notification des étudiants sera ajoutée ici.
+     * la liste peut alors être téléchargée et ses notifications sont enregistrées pour l’envoi.
      */
-    public function publierListeDefinitive(Request $request, string $liste, string $volet)
+    public function publierListeDefinitive(Request $request, string $liste, string $volet, AdmissionResultDiffusion $diffusion)
     {
-        if (! Schema::hasTable('publication_liste_definitive')) {
+        if (! Schema::hasTable('publication_liste_definitive') || ! Schema::hasTable(AdmissionResultDiffusion::TABLE)) {
             throw ValidationException::withMessages(['publication' => 'La publication n’est pas encore disponible : la base de données doit être mise à jour.']);
         }
         $admin = $request->user('admin');
@@ -636,24 +638,40 @@ class CampagnesAdmissionController extends Controller
         $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
         [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $this->campagneActive());
         $publies = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
-        $etat = $this->etatPublication($campagne, $listes['definitives'], $publies, $liste);
-        if (! $campagne || $etat['volets'] === []) {
+
+        if (! $campagne) {
             throw ValidationException::withMessages(['publication' => 'Aucune demande approuvée à publier dans cette liste.']);
         }
-        if ($etat['publiee']) {
-            throw ValidationException::withMessages(['publication' => 'Cette liste est déjà publiée.']);
-        }
-        $table = \Illuminate\Support\Facades\DB::table('publication_liste_definitive');
-        foreach ($etat['a_publier'] as $v) {
-            $cle = ['campagne_id' => (string) $campagne->getKey(), 'liste' => $liste, 'volet' => $v];
-            $valeurs = ['date_publication' => now(), 'publiee_par' => (string) $admin?->getKey(), 'updated_at' => now()];
-            (clone $table)->where($cle)->exists()
-                ? (clone $table)->where($cle)->update($valeurs)
-                : (clone $table)->insert($cle + $valeurs + ['id' => (string) Str::uuid(), 'created_at' => now()]);
-        }
+
+        DB::transaction(function () use ($campagne, $listes, $publies, $liste, $admin, $population, $classement, $diffusion) {
+            Campagne::query()->whereKey($campagne->getKey())->lockForUpdate()->firstOrFail();
+
+            $etat = $this->etatPublication($campagne, $listes['definitives'], $publies, $liste);
+            if ($etat['volets'] === []) {
+                throw ValidationException::withMessages(['publication' => 'Aucune demande approuvée à publier dans cette liste.']);
+            }
+            if ($etat['publiee']) {
+                throw ValidationException::withMessages(['publication' => 'Cette liste est déjà publiée.']);
+            }
+
+            $date = now();
+            $publications = array_map(fn (string $v) => [
+                'id' => (string) Str::uuid(),
+                'campagne_id' => (string) $campagne->getKey(),
+                'liste' => $liste,
+                'volet' => $v,
+                'date_publication' => $date,
+                'publiee_par' => (string) $admin?->getKey(),
+                'created_at' => $date,
+                'updated_at' => $date,
+            ], $etat['a_publier']);
+            DB::table('publication_liste_definitive')->upsert($publications, ['campagne_id', 'liste', 'volet'], ['date_publication', 'publiee_par', 'updated_at']);
+
+            $diffusion->prepare($campagne, $population, $classement, $listes['definitives'], $etat['a_publier'], $liste);
+        }, 3);
 
         return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives'] + ($liste === 'attente' ? ['liste' => 'attente'] : []) + ($volet !== 'toutes' ? ['type' => $volet] : []))
-            ->with('success', ($liste === 'attente' ? 'File d’attente publiée' : 'Liste des demandes validées publiée').' : elle peut être téléchargée.');
+            ->with('success', ($liste === 'attente' ? 'File d’attente publiée' : 'Liste des demandes validées publiée').' : elle peut être téléchargée. Les notifications de résultats ont été programmées.');
     }
 
     /**

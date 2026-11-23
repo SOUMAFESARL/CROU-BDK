@@ -549,6 +549,12 @@ Route::middleware(['admin'])->group(function () {
             });
 
 
+            Route::controller(\App\Http\Controllers\admin\parametrage\AdmissionSmsController::class)
+                ->prefix('configuration-sms')->name('admission-sms.')->group(function () {
+                    Route::get('/', 'index')->name('index');
+                    Route::put('/', 'update')->name('update');
+                });
+
             Route::prefix('legal-documents')->name('legal-documents.')->controller(LegalDocumentController::class)->middleware('permission:parametrage.legal-documents.manage')->group(function () {
                 Route::get('/', 'index')->name('index');
                 Route::get('/create', 'create')->name('create');
