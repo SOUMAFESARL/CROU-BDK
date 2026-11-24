@@ -511,7 +511,7 @@ class CampagnesAdmissionController extends Controller
      * « Recevable », `DossierWorkflow`), « Mettre en attente » (l'état du dossier ne change pas) et « Rejeter » (« Refusé »,
      * motif obligatoire), avec le droit de changer l'état du dossier ; sur la décision de la commission, une demande en
      * attente peut être validée ou rejetée, une demande validée seulement rejetée (elle passe alors dans « Demandes
-     * refusées »), et le bouton « Approuver » des « Demandes validées » fait passer les demandes validées et la file
+     * refusées »), et le bouton « Approuver » de ses deux onglets fait passer les demandes validées et la file
      * d'attente (les deux volets, ou le type filtré) dans les listes définitives ; la liste définitive n'a pas d'action.
      *
      * @param  'provisoire'|'validee'|'definitive'  $type
@@ -554,9 +554,9 @@ class CampagnesAdmissionController extends Controller
         $lien = fn (string $onglet) => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
             ? route('admin.hebergement.campagnes_admission.admission', ['etat' => $etat] + ($onglet === 'demandes' ? [] : ['liste' => $onglet]) + ($voletFiltre ? ['type' => $voletFiltre] : []) + $choixCampagne)
             : null;
-        // Approbation en commission, depuis l'onglet « Demandes validées » seulement : elle porte aussi sur la file d'attente
-        // (validée puis approuvée) ; les demandes passent dans les listes définitives.
-        $approbation = $type === 'validee' && $liste === 'validees' && $volets !== [] && $peut('approuver')
+        // Approbation en commission, même bouton (même action, même droit) sur les deux onglets : elle porte sur les
+        // demandes validées et sur la file d'attente (validée puis approuvée) ; elles passent dans les listes définitives.
+        $approbation = $type === 'validee' && $volets !== [] && $permissions->allows($admin, 'commission_validees', 'approuver')
             ? [
                 // La campagne choisie dans le bandeau est approuvée (celle affichée).
                 'url' => route('admin.hebergement.campagnes_admission.liste_validee_approuver', ['volet' => $voletFiltre ?? 'toutes'] + $choixCampagne),
@@ -784,7 +784,7 @@ class CampagnesAdmissionController extends Controller
     public function publierListeDefinitive(Request $request, string $volet, AdmissionResultDiffusion $diffusion)
     {
         $this->autoriserListe($request, 'definitive_validees', 'publier');
-        if (! Schema::hasTable('publication_liste_definitive') || ! Schema::hasTable(AdmissionResultDiffusion::TABLE)) {
+        if (! Schema::hasTable('publication_liste_definitive') || ! Schema::hasColumn(AdmissionResultDiffusion::TABLE, 'body_html')) {
             throw ValidationException::withMessages(['publication' => 'La publication n’est pas encore disponible : la base de données doit être mise à jour.']);
         }
         $admin = $request->user('admin');
@@ -830,6 +830,9 @@ class CampagnesAdmissionController extends Controller
             return $etats->keys()->all();
         }, 3);
 
+        // Envoi dès la réponse rendue, sans attendre le planificateur (`admissions:notifier`), qui reprend les restes.
+        defer(fn () => $diffusion->sendAll());
+
         $message = match ($publiees) {
             ['validees'] => 'Liste des demandes validées publiée : elle peut être téléchargée.',
             ['attente'] => 'File d’attente publiée : elle peut être téléchargée.',
@@ -838,7 +841,9 @@ class CampagnesAdmissionController extends Controller
 
         // Onglet « File d'attente » quand elle seule a été publiée.
         return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives'] + ($publiees === ['attente'] ? ['liste' => 'attente'] : []) + ($volet !== 'toutes' ? ['type' => $volet] : []))
-            ->with('success', $message.' Les notifications de résultats ont été programmées.');
+            ->with('success', $message.(in_array(true, AdmissionResultDiffusion::channels(\App\Models\ConfigApp::query()->first()), true)
+                ? ' Les notifications de résultats sont en cours d’envoi.'
+                : ' Aucune notification programmée : l’e-mail et le SMS sont désactivés (Configurations système › Notifications).'));
     }
 
     /**
@@ -1143,7 +1148,7 @@ class CampagnesAdmissionController extends Controller
     }
 
     /**
-     * Approbation en commission de la « Décision de la commission » (bouton de l'onglet « Demandes validées ») : toutes
+     * Approbation en commission de la « Décision de la commission » (même bouton sur ses deux onglets) : toutes
      * les demandes de la liste, validées et en file d'attente (`toutes` : les deux volets ouverts ; sinon le type de
      * demande filtré ; classement recalculé côté serveur, sans la recherche de l'écran), sont approuvées
      * (`demande.date_approbation_commission`) et passent chacune dans son onglet des « Listes définitives ».

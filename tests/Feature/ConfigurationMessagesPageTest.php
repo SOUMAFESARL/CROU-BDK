@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Http\Middleware\EnforceSystemSecurity;
 use App\Http\Middleware\LogUserActivity;
+use App\Mail\AdmissionResultMail;
 use App\Models\ConfigApp;
 use App\Models\Role;
 use App\Models\User;
@@ -100,22 +101,57 @@ class ConfigurationMessagesPageTest extends TestCase
         $this->assertSame('<p><strong>Bravo</strong> à vous</p>', $props['formatted'][$cle]);
     }
 
-    public function test_objets_et_textes_email_et_adresse_de_reclamation_sont_persistes(): void
+    public function test_les_objets_email_sont_persistes(): void
     {
-        $emails = AdmissionEmailTemplates::resolve([]);
-        $emails[AdmissionSmsTemplates::ATTENTE] = ['subject' => 'Décision de la commission', 'body' => 'Votre demande est en attente.'];
+        // Ancien corps propre à l'e-mail : abandonné au profit du corps commun.
+        ConfigApp::first()->update(['admission_sms_templates' => ['emails' => [AdmissionSmsTemplates::DEFINITIVE => ['subject' => 'Ancien objet', 'body' => 'Ancien corps']]]]);
+        $this->assertSame('Ancien objet', $this->page()['props']['subjects'][AdmissionSmsTemplates::DEFINITIVE]);
+
+        $subjects = AdmissionEmailTemplates::subjects([]);
+        $subjects[AdmissionSmsTemplates::ATTENTE] = 'Décision de la commission';
         $messages = AdmissionSmsTemplates::resolve([]);
 
         $this->put(route('admin.parametrage.configuration-messages.update'), [
             'messages' => $messages,
-            'emails' => $emails,
-            'reclamation_email' => 'reclamations@example.test',
+            'subjects' => $subjects,
         ])->assertRedirect(route('admin.parametrage.configuration-messages.index'));
 
         $props = $this->page()['props'];
-        $this->assertEquals($emails, $props['emails']);
-        $this->assertSame('reclamations@example.test', $props['effectiveReclamationEmail']);
+        $this->assertEquals($subjects, $props['subjects']);
+        $this->assertSame(['subject' => $subjects[AdmissionSmsTemplates::DEFINITIVE]], ConfigApp::first()->admission_sms_templates['emails'][AdmissionSmsTemplates::DEFINITIVE]);
         $this->assertSame($messages, $props['messages']);
+    }
+
+    public function test_un_objet_vide_est_refuse(): void
+    {
+        $this->put(route('admin.parametrage.configuration-messages.update'), [
+            'messages' => AdmissionSmsTemplates::resolve([]),
+            'subjects' => array_replace(AdmissionEmailTemplates::subjects([]), [AdmissionSmsTemplates::ATTENTE => '']),
+        ])->assertSessionHasErrors('subjects.'.AdmissionSmsTemplates::ATTENTE);
+    }
+
+    public function test_les_types_d_envoi_suivent_la_configuration_des_notifications(): void
+    {
+        $this->assertSame(['email' => true, 'sms' => false], $this->page()['props']['channels']);
+
+        Schema::table('config_app', function (Blueprint $table) {
+            $table->boolean('email_enabled')->nullable();
+            $table->boolean('sms_enabled')->nullable();
+        });
+        DB::table('config_app')->update(['email_enabled' => false, 'sms_enabled' => true]);
+
+        $props = $this->page()['props'];
+        $this->assertSame(['email' => false, 'sms' => true], $props['channels']);
+        $this->assertSame(route('admin.parametrage.configuration.index', ['menus' => 'notifications']), $props['urls']['notifications']);
+    }
+
+    public function test_l_email_reprend_la_mise_en_forme_et_a_defaut_le_texte(): void
+    {
+        $mail = fn (?string $html) => new AdmissionResultMail('Objet', "Bravo\n<b>à vous</b>", $html, null, null);
+
+        $mail('<p><strong>Bravo</strong></p>')->assertSeeInHtml('<p><strong>Bravo</strong></p>', false);
+        $mail('<p><strong>Bravo</strong></p>')->assertSeeInText('Bravo');
+        $mail(null)->assertSeeInHtml('&lt;b&gt;à vous&lt;/b&gt;', false);
     }
 
     public function test_un_message_vide_est_refuse_mais_pas_un_message_long(): void

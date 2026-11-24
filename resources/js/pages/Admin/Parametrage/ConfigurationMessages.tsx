@@ -1,15 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { CircleCheck, Clock, Info, MessageSquareText, RotateCcw, Save, XCircle, type LucideIcon } from 'lucide-react';
+import { Link } from '@inertiajs/react';
+import { CircleCheck, Clock, Info, Mail, MessageSquareText, RotateCcw, Save, XCircle, type LucideIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
 import { htmlVide, RichTextEditor } from '@/components/ui/rich-text-editor';
-import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
 import { cn } from '@/lib/utils';
 
@@ -23,15 +24,16 @@ type Props = {
     formatted: Modeles;
     /** Textes par défaut, pour « Rétablir le texte par défaut ». */
     defaults: Modeles;
-    emails: Record<string, { subject: string; body: string }>;
-    reclamationEmail: string;
-    effectiveReclamationEmail: string | null;
+    /** Objet de l’e-mail de chaque modèle ; le corps est commun avec le SMS. */
+    subjects: Modeles;
+    /** Types d’envoi activés dans Configurations système › Notifications. */
+    channels: { email: boolean; sms: boolean };
     /** `update` absent sans le droit `parametrage.configuration.configure` : page en lecture seule. */
-    urls: { update: string | null };
+    urls: { update: string | null; notifications: string | null };
 };
 
-/** Les `messages` contiennent du HTML ; le SMS envoyé en est la version texte. */
-type Valeurs = { messages: Modeles; emails: Props['emails']; reclamation_email: string };
+/** Les `messages` contiennent du HTML, envoyé tel quel par e-mail ; le SMS en est la version texte. */
+type Valeurs = { messages: Modeles; subjects: Modeles };
 
 const corps = (html: string) => new DOMParser().parseFromString(html, 'text/html').body;
 
@@ -72,8 +74,16 @@ const APPARENCE: Record<string, { icone: LucideIcon; ton: string; aide: string }
 
 const APPARENCE_PAR_DEFAUT = { icone: MessageSquareText, ton: 'bg-soft text-primary', aide: '' };
 
+function TypeEnvoi({ icone: Icone, label, actif }: { icone: LucideIcon; label: string; actif: boolean }) {
+    return (
+        <span className={cn('inline-flex items-center gap-1.5 rounded-brand px-2.5 py-1 text-xs', actif ? 'bg-soft text-primary' : 'bg-surface text-muted')}>
+            <Icone {...ICON} aria-hidden /> {label} : {actif ? 'activé' : 'désactivé'}
+        </span>
+    );
+}
+
 /** Configuration des messages envoyés après la publication des listes définitives (remplace `parametrage/admission-sms.blade.php`). */
-export default function ConfigurationMessages({ labels, messages, formatted, defaults, emails, reclamationEmail, effectiveReclamationEmail, urls }: Props) {
+export default function ConfigurationMessages({ labels, messages, formatted, defaults, subjects, channels, urls }: Props) {
     const cles = Object.keys(labels);
     const lectureSeule = urls.update === null;
 
@@ -85,12 +95,11 @@ export default function ConfigurationMessages({ labels, messages, formatted, def
                         cles.map((cle) => [cle, z.string().refine((html) => !htmlVide(html), 'Saisissez le texte du message.')]),
                     ),
                 ),
-                emails: z.object(Object.fromEntries(cles.map((cle) => [cle, z.object({
-                    subject: z.string().trim().min(1, 'Saisissez l’objet.').max(180),
-                    body: z.string().trim().min(1, 'Saisissez le texte de l’e-mail.').max(12000),
-                })]))),
-                reclamation_email: z.string().trim().max(254)
-                    .refine((address) => !address || z.email().safeParse(address).success, 'Renseignez une adresse e-mail valide.'),
+                subjects: z.object(
+                    Object.fromEntries(
+                        cles.map((cle) => [cle, z.string().trim().min(1, 'Saisissez l’objet de l’e-mail.').max(180, '180 caractères au maximum.')]),
+                    ),
+                ),
             }),
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [cles.join('|')],
@@ -110,7 +119,7 @@ export default function ConfigurationMessages({ labels, messages, formatted, def
         setValue,
         reset,
         formState: { errors, isDirty, isSubmitting },
-    } = useForm<Valeurs>({ resolver: zodResolver(schema), defaultValues: { messages: initiaux, emails, reclamation_email: reclamationEmail } });
+    } = useForm<Valeurs>({ resolver: zodResolver(schema), defaultValues: { messages: initiaux, subjects } });
 
     const enregistrer = handleSubmit(async (valeurs) => {
         if (!urls.update) return;
@@ -124,11 +133,7 @@ export default function ConfigurationMessages({ labels, messages, formatted, def
             {
                 method: 'put',
                 setError,
-                champs: ['reclamation_email', ...cles.flatMap((cle) => [
-                    `messages.${cle}` as const,
-                    `emails.${cle}.subject` as const,
-                    `emails.${cle}.body` as const,
-                ])],
+                champs: cles.flatMap((cle) => [`messages.${cle}` as const, `subjects.${cle}` as const]),
             },
         );
         if (ok) reset(valeurs);
@@ -147,23 +152,28 @@ export default function ConfigurationMessages({ labels, messages, formatted, def
                 </p>
             )}
 
-            <form onSubmit={enregistrer} noValidate>
-                <div className="mb-4 rounded-brand border bg-white p-4">
-                    <label className="text-sm font-medium" htmlFor="reclamation-email">Adresse de réception des réclamations</label>
-                    <Input id="reclamation-email" type="email" className="mt-2 max-w-lg"
-                        {...register('reclamation_email')} readOnly={lectureSeule} aria-describedby="reclamation-info" />
-                    <p id="reclamation-info" className="mt-2 text-xs text-muted">
-                        {effectiveReclamationEmail
-                            ? `Adresse actuellement utilisée : ${effectiveReclamationEmail}. Si le champ est vide, l’adresse de contact du CROU est utilisée.`
-                            : 'Renseignez la boîte qui traitera les réclamations pour activer le lien dans les e-mails.'}
-                    </p>
-                    {errors.reclamation_email?.message && <p role="alert" className="mt-2 text-xs text-red-600">{errors.reclamation_email.message}</p>}
+            <section aria-labelledby="types-envoi" className="mb-4 rounded-brand border bg-white p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                    <h2 id="types-envoi" className="mr-1 text-sm font-medium text-gray-900">
+                        Type d’envoi
+                    </h2>
+                    <TypeEnvoi icone={Mail} label="E-mail" actif={channels.email} />
+                    <TypeEnvoi icone={MessageSquareText} label="SMS" actif={channels.sms} />
+                    {urls.notifications && (
+                        <Link href={urls.notifications} className="ml-auto rounded-brand text-xs font-medium text-primary hover:underline focus-visible:ring-2 focus-visible:ring-secondary focus-visible:outline-none">
+                            Modifier dans les notifications
+                        </Link>
+                    )}
                 </div>
+            </section>
+
+            <form onSubmit={enregistrer} noValidate>
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                     {cles.map((cle) => {
                         const { icone: Icone, ton, aide } = APPARENCE[cle] ?? APPARENCE_PAR_DEFAUT;
-                        const id = `sms-${cle}`;
+                        const id = `message-${cle}`;
                         const erreur = errors.messages?.[cle]?.message;
+                        const erreurObjet = errors.subjects?.[cle]?.message;
 
                         return (
                             <section key={cle} aria-labelledby={`${id}-titre`} className="flex flex-col gap-3 rounded-brand border bg-white p-4">
@@ -179,20 +189,19 @@ export default function ConfigurationMessages({ labels, messages, formatted, def
                                     </div>
                                 </div>
 
-                                <div className="space-y-2">
-                                    <label className="text-xs font-medium" htmlFor={`email-subject-${cle}`}>Objet de l’e-mail</label>
-                                    <Input id={`email-subject-${cle}`} {...register(`emails.${cle}.subject`)}
-                                        readOnly={lectureSeule} maxLength={180} aria-invalid={Boolean(errors.emails?.[cle]?.subject)} />
-                                    {errors.emails?.[cle]?.subject?.message && <p role="alert" className="text-xs text-red-600">{errors.emails[cle].subject.message}</p>}
-                                    <label className="text-xs font-medium" htmlFor={`email-body-${cle}`}>Message de l’e-mail</label>
-                                    <Textarea id={`email-body-${cle}`} {...register(`emails.${cle}.body`)}
-                                        readOnly={lectureSeule} rows={5} maxLength={12000} invalid={Boolean(errors.emails?.[cle]?.body)} />
-                                    {errors.emails?.[cle]?.body?.message && <p role="alert" className="text-xs text-red-600">{errors.emails[cle].body.message}</p>}
-                                    <p className="text-xs text-muted">
-                                        {cle === 'definitive' ? 'Les accès étudiants sont ajoutés automatiquement.' : 'L’option de réclamation est ajoutée automatiquement.'}
-                                    </p>
-                                </div>
-                                <label htmlFor={id} className="border-t pt-3 text-xs font-medium">Message SMS</label>
+                                <Field id={`objet-${cle}`} label="Objet de l’e-mail" error={erreurObjet} required>
+                                    <Input
+                                        id={`objet-${cle}`}
+                                        {...register(`subjects.${cle}`)}
+                                        readOnly={lectureSeule}
+                                        maxLength={180}
+                                        invalid={Boolean(erreurObjet)}
+                                        aria-describedby={erreurObjet ? `objet-${cle}-error` : undefined}
+                                    />
+                                </Field>
+                                <p id={`${id}-label`} className="-mb-1.5 text-sm font-medium text-gray-800">
+                                    Message (e-mail et SMS)<span className="ml-0.5 text-red-600">*</span>
+                                </p>
                                 <Controller
                                     control={control}
                                     name={`messages.${cle}`}
@@ -206,7 +215,7 @@ export default function ConfigurationMessages({ labels, messages, formatted, def
                                                     onBlur={field.onBlur}
                                                     readOnly={lectureSeule}
                                                     invalid={Boolean(erreur)}
-                                                    aria-labelledby={`${id}-titre`}
+                                                    aria-labelledby={`${id}-titre ${id}-label`}
                                                     aria-describedby={erreur ? `${id}-error` : undefined}
                                                 />
                                                 {!lectureSeule && field.value !== texteVersHtml(defaults[cle]) && (
@@ -228,6 +237,9 @@ export default function ConfigurationMessages({ labels, messages, formatted, def
                                             </>
                                     )}
                                 />
+                                {cle === 'definitive' && (
+                                    <p className="text-xs text-muted">Dans l’e-mail, les accès à l’espace étudiant sont ajoutés automatiquement.</p>
+                                )}
                             </section>
                         );
                     })}

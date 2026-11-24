@@ -11,6 +11,7 @@ use App\Models\Etudiant;
 use App\Repositories\Interfaces\ConfigAppRepositoryInterface;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Schema;
@@ -26,7 +27,21 @@ class AdmissionResultDiffusion
     ) {}
 
     /**
-     * Enregistre les notifications dans la transaction de publication, avant tout envoi.
+     * Types d'envoi activés dans Paramétrage › Configurations système › Notifications.
+     *
+     * @return array{email: bool, sms: bool}
+     */
+    public static function channels(?ConfigApp $config): array
+    {
+        return [
+            'email' => (bool) ($config?->email_enabled ?? true),
+            'sms' => (bool) ($config?->sms_enabled ?? false),
+        ];
+    }
+
+    /**
+     * Enregistre les notifications dans la transaction de publication, avant tout envoi : une par étudiant et par type
+     * d'envoi activé. Le corps est commun : mis en forme dans l'e-mail, en texte brut dans le SMS.
      *
      * @param Collection<int, Etudiant> $population
      */
@@ -56,9 +71,12 @@ class AdmissionResultDiffusion
             }
         }
 
-        $settings = $this->config->getConfig()?->admission_sms_templates ?? [];
-        $sms = AdmissionSmsTemplates::resolve($settings);
-        $emails = AdmissionEmailTemplates::resolve($settings);
+        $config = $this->config->getConfig();
+        $settings = $config?->admission_sms_templates ?? [];
+        $channels = self::channels($config);
+        $messages = AdmissionSmsTemplates::resolve($settings);
+        $formatted = AdmissionSmsTemplates::formatted($settings);
+        $subjects = AdmissionEmailTemplates::subjects($settings);
         $date = now();
         $deliveries = [];
         foreach ($destinataires as [$etudiant, $resultat]) {
@@ -67,28 +85,32 @@ class AdmissionResultDiffusion
                 ->first(fn ($address) => filter_var($address, FILTER_VALIDATE_EMAIL));
             $phone = collect([$etudiant->telephone1, $etudiant->telephone2])
                 ->map(fn ($number) => numeroCI((string) $number))->first(fn ($number) => $number !== false);
-            $emailTemplate = $emails[$resultat];
             $commun = [
                 'campagne_id' => $campagneId,
                 'demande_id' => (string) $etudiant->derniereDemande->getKey(),
                 'resultat' => $resultat,
+                'body' => $messages[$resultat],
                 'created_at' => $date,
                 'updated_at' => $date,
             ];
-            $deliveries[] = $commun + [
-                'channel' => 'email',
-                'destination' => $email,
-                'subject' => $emailTemplate['subject'],
-                'body' => $emailTemplate['body'],
-                'status' => $email ? 'pending' : 'missing_contact',
-            ];
-            $deliveries[] = $commun + [
-                'channel' => 'sms',
-                'destination' => $phone,
-                'subject' => null,
-                'body' => $sms[$resultat],
-                'status' => $phone ? 'pending' : 'missing_contact',
-            ];
+            if ($channels['email']) {
+                $deliveries[] = $commun + [
+                    'channel' => 'email',
+                    'destination' => $email,
+                    'subject' => $subjects[$resultat],
+                    'body_html' => $formatted[$resultat] ?? null,
+                    'status' => $email ? 'pending' : 'missing_contact',
+                ];
+            }
+            if ($channels['sms']) {
+                $deliveries[] = $commun + [
+                    'channel' => 'sms',
+                    'destination' => $phone,
+                    'subject' => null,
+                    'body_html' => null,
+                    'status' => $phone ? 'pending' : 'missing_contact',
+                ];
+            }
         }
 
         foreach (array_chunk($deliveries, 200) as $batch) {
@@ -96,10 +118,24 @@ class AdmissionResultDiffusion
         }
     }
 
-    public function sendPending(int $limit = 30): void
+    /** Transmet toutes les notifications en attente, par lots (après une publication) ; le planificateur reprend un envoi interrompu. */
+    public function sendAll(): void
+    {
+        ignore_user_abort(true);
+        if (PHP_SAPI !== 'cli') {
+            set_time_limit(0);
+        }
+
+        while ($this->sendPending() > 0) {
+            // Lot suivant.
+        }
+    }
+
+    /** @return int Nombre de notifications traitées (transmises ou en échec). */
+    public function sendPending(int $limit = 30): int
     {
         if (!Schema::hasTable(self::TABLE)) {
-            return;
+            return 0;
         }
 
         // Un envoi interrompu après transmission ne peut pas être confirmé sans le prestataire.
@@ -108,7 +144,7 @@ class AdmissionResultDiffusion
 
         $pending = DB::table(self::TABLE)->where('status', 'pending');
         if (!(clone $pending)->exists()) {
-            return;
+            return 0;
         }
 
         $settings = ConfigApp::query()->first();
@@ -125,6 +161,7 @@ class AdmissionResultDiffusion
             }
         }
 
+        $processed = 0;
         foreach ($pending->orderBy('id')->limit($limit)->get() as $delivery) {
             $entry = DB::table(self::TABLE)->where('id', $delivery->id);
             if (!(clone $entry)->where('status', 'pending')->update(['status' => 'sending', 'updated_at' => now()])) {
@@ -137,7 +174,10 @@ class AdmissionResultDiffusion
                 } else {
                     $sent = Mail::to($delivery->destination)->send($this->email($delivery)) !== null;
                 }
-            } catch (\Throwable) {
+            } catch (\Throwable $exception) {
+                Log::warning('Notification de résultat non transmise.', [
+                    'delivery' => $delivery->id, 'channel' => $delivery->channel, 'error' => $exception->getMessage(),
+                ]);
                 $sent = false;
             }
 
@@ -146,7 +186,10 @@ class AdmissionResultDiffusion
                 'sent_at' => $sent ? now() : null,
                 'updated_at' => now(),
             ]);
+            $processed++;
         }
+
+        return $processed;
     }
 
     private function email(object $delivery): AdmissionResultMail
@@ -179,6 +222,6 @@ class AdmissionResultDiffusion
             $reclamation = ['email' => $address, 'url' => 'mailto:'.$address.'?'.$query, 'reference' => $reference];
         }
 
-        return new AdmissionResultMail($delivery->subject, $delivery->body, $access, $reclamation);
+        return new AdmissionResultMail($delivery->subject, $delivery->body, $delivery->body_html ?? null, $access, $reclamation);
     }
 }

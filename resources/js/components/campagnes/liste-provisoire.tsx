@@ -121,8 +121,8 @@ export type Classement = {
      */
     publication: { publiee: boolean; date: string | null; url: string | null; validees: number; attente: number } | null;
     /**
-     * « Approuver » les demandes validées et la file d'attente, depuis l'onglet « Demandes validées » de la décision de
-     * la commission : elles passent dans l'onglet correspondant des listes définitives — celles de la file d'attente
+     * « Approuver » les demandes validées et la file d'attente, depuis l'un ou l'autre onglet de la décision de
+     * la commission (même action) : elles passent dans l'onglet correspondant des listes définitives — celles de la file d'attente
      * sont d'abord validées (dossier « Recevable ») ; null ailleurs ou sans droit.
      */
     approbation: { url: string; validees: number; attente: number } | null;

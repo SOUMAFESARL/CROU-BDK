@@ -9,6 +9,8 @@ class AdmissionResultMail extends Mailable
     public function __construct(
         public string $subjectLine,
         public string $messageText,
+        /** Mise en forme déjà nettoyée à l'enregistrement du modèle ; `null` : texte simple. */
+        public ?string $messageHtml,
         public ?array $access,
         public ?array $reclamation,
     ) {}

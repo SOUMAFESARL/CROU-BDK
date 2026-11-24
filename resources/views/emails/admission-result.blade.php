@@ -2,7 +2,7 @@
 <html lang="fr">
 <head><meta charset="utf-8"><title>{{ $subjectLine }}</title></head>
 <body style="font-family: sans-serif; color: #172b28; line-height: 1.6">
-    <div>{!! nl2br(e($messageText)) !!}</div>
+    <div>{!! $messageHtml ?? nl2br(e($messageText)) !!}</div>
 
     @if($access)
         <h2 style="font-size: 18px">Accès à votre espace étudiant</h2>

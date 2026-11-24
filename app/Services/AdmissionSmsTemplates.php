@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+/** Corps des messages de résultat (texte brut), commun au SMS et à l'e-mail. */
 class AdmissionSmsTemplates
 {
     public const DEFINITIVE = 'definitive';
@@ -27,5 +28,11 @@ class AdmissionSmsTemplates
         }
 
         return array_replace(self::DEFAULTS, array_intersect_key($saved, self::LABELS));
+    }
+
+    /** Mise en forme (HTML nettoyé) des messages enregistrés avec l'éditeur, utilisée par l'e-mail. */
+    public static function formatted(array $saved): array
+    {
+        return array_intersect_key($saved['formatted'] ?? [], self::LABELS);
     }
 }

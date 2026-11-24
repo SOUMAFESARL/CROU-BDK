@@ -4,41 +4,29 @@ namespace App\Services;
 
 use App\Models\ConfigApp;
 
+/** E-mails des résultats : objet propre à l'e-mail, corps commun avec le SMS (`AdmissionSmsTemplates`). */
 final class AdmissionEmailTemplates
 {
     private const DEFAULTS = [
-        AdmissionSmsTemplates::DEFINITIVE => [
-            'subject' => 'CROU — Votre demande figure sur la liste définitive',
-            'body' => "Bonjour,\n\nVotre demande de logement est retenue sur la liste définitive publiée. Consultez votre espace étudiant pour connaître la suite à donner à votre demande.",
-        ],
-        AdmissionSmsTemplates::ATTENTE => [
-            'subject' => 'CROU — Votre demande figure sur la liste d’attente définitive',
-            'body' => "Bonjour,\n\nVotre demande de logement figure sur la liste d’attente définitive publiée.",
-        ],
-        AdmissionSmsTemplates::NON_RETENUE => [
-            'subject' => 'CROU — Résultat de votre demande de logement',
-            'body' => "Bonjour,\n\nVotre demande de logement n’a pas été retenue à l’issue de l’examen de votre dossier.",
-        ],
+        AdmissionSmsTemplates::DEFINITIVE => 'CROU — Votre demande figure sur la liste définitive',
+        AdmissionSmsTemplates::ATTENTE => 'CROU — Votre demande figure sur la liste d’attente définitive',
+        AdmissionSmsTemplates::NON_RETENUE => 'CROU — Résultat de votre demande de logement',
     ];
 
-    public static function resolve(array $saved): array
+    /** @return array<string, string> objet de l'e-mail par résultat */
+    public static function subjects(array $saved): array
     {
-        $templates = self::DEFAULTS;
-        foreach ($templates as $key => $defaults) {
-            $templates[$key] = array_replace($defaults, array_intersect_key($saved['emails'][$key] ?? [], $defaults));
+        $subjects = self::DEFAULTS;
+        foreach ($subjects as $key => $default) {
+            $subjects[$key] = $saved['emails'][$key]['subject'] ?? $default;
         }
 
-        return $templates;
+        return $subjects;
     }
 
+    /** Les réclamations sont reçues à l'adresse de contact du CROU (Configurations système › Profil). */
     public static function reclamationEmail(?ConfigApp $config): ?string
     {
-        foreach ([$config?->admission_sms_templates['reclamation_email'] ?? null, $config?->email] as $address) {
-            if (filter_var($address, FILTER_VALIDATE_EMAIL)) {
-                return $address;
-            }
-        }
-
-        return null;
+        return filter_var($config?->email, FILTER_VALIDATE_EMAIL) ?: null;
     }
 }

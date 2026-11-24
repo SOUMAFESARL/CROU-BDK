@@ -100,7 +100,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
     const ongletMenu = etat === 'validees' ? 'validees' : etat === 'definitives' ? 'definitives' : 'admissions';
     /** Hors listes provisoires (décision de la commission, listes définitives) : admissions et réadmissions mêlées, filtrables par type. */
     const parType = classement !== null && classement.type !== 'provisoire';
-    /** Approbation en commission des demandes validées de la décision de la commission : fenêtre de confirmation. */
+    /** Approbation en commission de la décision de la commission (demandes validées et file d'attente) : fenêtre de confirmation. */
     const [aApprouver, setAApprouver] = useState(false);
     const [approbation, setApprobation] = useState(false);
     const [erreurApprobation, setErreurApprobation] = useState<string | null>(null);

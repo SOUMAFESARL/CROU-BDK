@@ -5,8 +5,9 @@ namespace App\Http\Controllers\admin\parametrage;
 use App\Http\Controllers\Controller;
 use App\Repositories\Interfaces\ConfigAppRepositoryInterface;
 use App\Services\AdminAccess;
-use App\Services\AdmissionSmsTemplates;
 use App\Services\AdmissionEmailTemplates;
+use App\Services\AdmissionResultDiffusion;
+use App\Services\AdmissionSmsTemplates;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -16,7 +17,7 @@ class AdmissionSmsController extends Controller
 {
     public function __construct(private ConfigAppRepositoryInterface $config) {}
 
-    /** Modèles de SMS des résultats d'admission (page React `Admin/Parametrage/ConfigurationMessages`). */
+    /** Modèles des messages (e-mail et SMS) des résultats d'admission (page React `Admin/Parametrage/ConfigurationMessages`). */
     public function index(Request $request, AdminAccess $access): Response
     {
         $config = $this->config->getConfig();
@@ -26,13 +27,14 @@ class AdmissionSmsController extends Controller
         return Inertia::render('Admin/Parametrage/ConfigurationMessages', [
             'labels' => AdmissionSmsTemplates::LABELS,
             'messages' => AdmissionSmsTemplates::resolve($saved),
-            'formatted' => (object) array_intersect_key($saved['formatted'] ?? [], AdmissionSmsTemplates::LABELS),
+            'formatted' => (object) AdmissionSmsTemplates::formatted($saved),
             'defaults' => AdmissionSmsTemplates::resolve([]),
-            'emails' => AdmissionEmailTemplates::resolve($saved),
-            'reclamationEmail' => $saved['reclamation_email'] ?? '',
-            'effectiveReclamationEmail' => AdmissionEmailTemplates::reclamationEmail($config),
+            'subjects' => AdmissionEmailTemplates::subjects($saved),
+            'channels' => AdmissionResultDiffusion::channels($config),
             'urls' => [
                 'update' => $canEdit ? route('admin.parametrage.configuration-messages.update') : null,
+                'notifications' => $access->allows($request->user('admin'), 'admin.parametrage.configuration.index')
+                    ? route('admin.parametrage.configuration.index', ['menus' => 'notifications']) : null,
             ],
         ]);
     }
@@ -41,17 +43,13 @@ class AdmissionSmsController extends Controller
     {
         $rules = ['messages' => 'required|array:'.implode(',', array_keys(AdmissionSmsTemplates::LABELS))];
         $rules['formatted'] = 'sometimes|array:'.implode(',', array_keys(AdmissionSmsTemplates::LABELS));
-        $rules['emails'] = 'sometimes|array:'.implode(',', array_keys(AdmissionSmsTemplates::LABELS));
-        $rules['reclamation_email'] = 'sometimes|nullable|email:rfc|max:254';
-        $attributes = ['reclamation_email' => 'adresse de réception des réclamations'];
+        $rules['subjects'] = 'sometimes|array:'.implode(',', array_keys(AdmissionSmsTemplates::LABELS));
+        $attributes = [];
         foreach (AdmissionSmsTemplates::LABELS as $key => $label) {
             $rules["messages.$key"] = 'required|string';
             $attributes["messages.$key"] = $label;
-            $rules["emails.$key"] = 'required_with:emails|array:subject,body';
-            $rules["emails.$key.subject"] = ['required_with:emails', 'string', 'max:180', 'not_regex:/[\r\n]/'];
-            $rules["emails.$key.body"] = 'required_with:emails|string|max:12000';
-            $attributes["emails.$key.subject"] = 'objet — '.$label;
-            $attributes["emails.$key.body"] = 'e-mail — '.$label;
+            $rules["subjects.$key"] = ['required_with:subjects', 'string', 'max:180', 'not_regex:/[\r\n]/'];
+            $attributes["subjects.$key"] = 'objet — '.$label;
             $rules["formatted.$key"] = 'nullable|string';
             $attributes["formatted.$key"] = $label;
         }
@@ -68,10 +66,15 @@ class AdmissionSmsController extends Controller
             }
         }
 
+        // Corps commun : seul l'objet reste propre à l'e-mail.
+        $emails = array_map(
+            fn (string $subject) => ['subject' => $subject],
+            array_replace(AdmissionEmailTemplates::subjects($saved), $data['subjects'] ?? []),
+        );
+
         $this->config->updateOrCreate([
             'admission_sms_templates' => array_replace(
-                $saved, $data['messages'], ['formatted' => $formatted],
-                array_intersect_key($data, array_flip(['emails', 'reclamation_email'])),
+                $saved, $data['messages'], ['formatted' => $formatted, 'emails' => $emails],
             ),
         ]);
 

@@ -26,6 +26,8 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         });
         $this->creerTablesEditionEtudiant();
         (require database_path('migrations/2026_11_23_000002_create_admission_result_deliveries_table.php'))->up();
+        (require database_path('migrations/2026_11_24_000004_add_body_html_to_admission_result_deliveries.php'))->up();
+        (require database_path('migrations/2026_10_14_000002_create_etudiant_password_reset_tokens_table.php'))->up();
         Schema::table('admission_derogations', function (Blueprint $t) {
             $t->string('etudiant_id')->nullable();
             $t->string('campagne_id')->nullable();
@@ -951,8 +953,28 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
             ->assertRedirect()->assertSessionHas('error');
         // Réadmissions vides : rien à publier.
         $this->post(route('admin.hebergement.campagnes_admission.liste_definitive_publier', ['volet' => 'readmission']))->assertSessionHasErrors('publication');
+        // Type d'envoi choisi dans les notifications : SMS et e-mail, avec un corps commun.
+        Schema::table('config_app', function (Blueprint $t) {
+            foreach (['email_enabled', 'sms_enabled'] as $colonne) {
+                $t->boolean($colonne)->nullable();
+            }
+            foreach (['admission_sms_templates', 'region_id', 'ville_id'] as $colonne) {
+                $t->text($colonne)->nullable();
+            }
+        });
+        DB::table('config_app')->updateOrInsert(['config_id' => 'ed3acb1a-d6f6-45c0-979a-b6bbbc08cd05'], [
+            'email_enabled' => true, 'sms_enabled' => true,
+            'admission_sms_templates' => json_encode(['definitive' => 'Bravo', 'formatted' => ['definitive' => '<p><strong>Bravo</strong></p>'], 'emails' => ['definitive' => ['subject' => 'Résultat']]]),
+        ]);
+        DB::table('etudiants')->where('id_etudiant', 'other')->update(['email1' => 'other@example.com']);
         // Publication : le téléchargement apparaît, le bouton « Publier » disparaît.
         $this->post($publier)->assertRedirect(route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives']))->assertSessionHasNoErrors();
+        $envoi = fn (string $type) => DB::table('admission_result_deliveries')->where('channel', $type)->where('resultat', 'definitive')->get(['subject', 'body', 'body_html'])->unique()->map(fn ($e) => (array) $e)->all();
+        $this->assertSame([['subject' => 'Résultat', 'body' => 'Bravo', 'body_html' => '<p><strong>Bravo</strong></p>']], $envoi('email'));
+        $this->assertSame([['subject' => null, 'body' => 'Bravo', 'body_html' => null]], $envoi('sms'));
+        // Envoi immédiat après la publication, sans planificateur ; le SMS sans passerelle n'est pas transmis.
+        $this->assertSame('sent', DB::table('admission_result_deliveries')->where('channel', 'email')->where('destination', 'other@example.com')->value('status'));
+        $this->assertFalse(DB::table('admission_result_deliveries')->where('channel', 'sms')->where('status', 'sent')->exists());
         // Une publication par volet ayant des demandes approuvées (ici les admissions seules).
         $this->assertSame(['admission'], DB::table('publication_liste_definitive')->pluck('volet')->all());
         $definitives = $liste('definitives');
@@ -1046,9 +1068,9 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         // Demande en attente : validation ou rejet (plus de mise en attente).
         $this->assertSame([true, true, null], [$ligne['decision']['valider'], $ligne['decision']['rejeter'], $ligne['decision']['attente']]);
         $this->assertSame([0, 1], [$commission['compteurs']['validees'], $commission['compteurs']['attente']]);
-        // Pas de bouton sur la file d'attente : l'approbation des « Demandes validées » porte aussi sur elle.
+        // Même bouton sur les deux onglets : l'approbation porte sur les demandes validées et la file d'attente.
         $approuver = route('admin.hebergement.campagnes_admission.liste_validee_approuver', ['volet' => 'toutes']);
-        $this->assertNull($commission['approbation']);
+        $this->assertSame($validees['approbation'], $commission['approbation']);
         $this->assertSame(['url' => $approuver, 'validees' => 0, 'attente' => 1], $validees['approbation']);
         $this->post($attente)->assertSessionHasErrors('attente');
 
