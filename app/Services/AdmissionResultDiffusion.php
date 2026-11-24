@@ -4,32 +4,20 @@ namespace App\Services;
 
 use App\Http\Services\Eligibilite\CriteresCampagne;
 use App\Models\Campagne;
+use App\Mail\AdmissionResultMail;
 use App\Models\ConfigApp;
+use App\Models\DemandeEtudiant;
 use App\Models\Etudiant;
 use App\Repositories\Interfaces\ConfigAppRepositoryInterface;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Schema;
 
 class AdmissionResultDiffusion
 {
     public const TABLE = 'admission_result_deliveries';
-
-    private const EMAILS = [
-        AdmissionSmsTemplates::DEFINITIVE => [
-            'Votre demande figure sur la liste définitive',
-            'Votre demande de logement est retenue sur la liste définitive publiée.',
-        ],
-        AdmissionSmsTemplates::ATTENTE => [
-            'Votre demande figure sur la liste d’attente définitive',
-            'Votre demande de logement figure sur la liste d’attente définitive publiée.',
-        ],
-        AdmissionSmsTemplates::NON_RETENUE => [
-            'Résultat de votre demande de logement',
-            'Votre demande de logement n’a pas été retenue à l’issue de l’examen de votre dossier.',
-        ],
-    ];
 
     public function __construct(
         private ConfigAppRepositoryInterface $config,
@@ -68,7 +56,9 @@ class AdmissionResultDiffusion
             }
         }
 
-        $sms = AdmissionSmsTemplates::resolve($this->config->getConfig()?->admission_sms_templates ?? []);
+        $settings = $this->config->getConfig()?->admission_sms_templates ?? [];
+        $sms = AdmissionSmsTemplates::resolve($settings);
+        $emails = AdmissionEmailTemplates::resolve($settings);
         $date = now();
         $deliveries = [];
         foreach ($destinataires as [$etudiant, $resultat]) {
@@ -77,7 +67,7 @@ class AdmissionResultDiffusion
                 ->first(fn ($address) => filter_var($address, FILTER_VALIDATE_EMAIL));
             $phone = collect([$etudiant->telephone1, $etudiant->telephone2])
                 ->map(fn ($number) => numeroCI((string) $number))->first(fn ($number) => $number !== false);
-            [$subject, $body] = self::EMAILS[$resultat];
+            $emailTemplate = $emails[$resultat];
             $commun = [
                 'campagne_id' => $campagneId,
                 'demande_id' => (string) $etudiant->derniereDemande->getKey(),
@@ -88,8 +78,8 @@ class AdmissionResultDiffusion
             $deliveries[] = $commun + [
                 'channel' => 'email',
                 'destination' => $email,
-                'subject' => 'CROU — '.$subject,
-                'body' => "Bonjour,\n\n".$body."\n\nConsultez votre espace étudiant pour connaître les détails et la suite à donner à votre demande.\n\nLe CROU",
+                'subject' => $emailTemplate['subject'],
+                'body' => $emailTemplate['body'],
                 'status' => $email ? 'pending' : 'missing_contact',
             ];
             $deliveries[] = $commun + [
@@ -145,8 +135,7 @@ class AdmissionResultDiffusion
                 if ($delivery->channel === 'sms') {
                     $sent = EnvoiSMS($delivery->destination, $delivery->body);
                 } else {
-                    $sent = Mail::raw($delivery->body, fn ($message) => $message
-                        ->to($delivery->destination)->subject($delivery->subject)) !== null;
+                    $sent = Mail::to($delivery->destination)->send($this->email($delivery)) !== null;
                 }
             } catch (\Throwable) {
                 $sent = false;
@@ -158,5 +147,38 @@ class AdmissionResultDiffusion
                 'updated_at' => now(),
             ]);
         }
+    }
+
+    private function email(object $delivery): AdmissionResultMail
+    {
+        $demande = DemandeEtudiant::with('etudiant')->find($delivery->demande_id);
+        $access = $reclamation = null;
+        if ($delivery->resultat === AdmissionSmsTemplates::DEFINITIVE) {
+            $student = $demande?->etudiant;
+            $identifier = trim((string) $student?->email1);
+            $identifier = strcasecmp($identifier, $delivery->destination) === 0 ? $identifier : null;
+            $activation = $identifier && blank($student->getRawOriginal('password'));
+            $forgotUrl = route('etudiant.password.request');
+            $access = [
+                'identifier' => $identifier,
+                'loginUrl' => route('etudiant.login'),
+                'forgotUrl' => $forgotUrl,
+                'activation' => $activation,
+                'expire' => (int) config('auth.passwords.etudiants.expire', 60),
+                'passwordUrl' => $activation ? route('etudiant.password.reset', [
+                    'token' => Password::broker('etudiants')->createToken($student),
+                    'email' => $identifier,
+                ]) : $forgotUrl,
+            ];
+        } elseif ($address = AdmissionEmailTemplates::reclamationEmail($this->config->getConfig())) {
+            $reference = $demande?->numero_demande ?: $delivery->demande_id;
+            $query = http_build_query([
+                'subject' => 'Réclamation — demande '.$reference,
+                'body' => "Bonjour,\n\nRéférence de la demande : ".$reference."\nMotif de la réclamation :\n\n",
+            ], '', '&', PHP_QUERY_RFC3986);
+            $reclamation = ['email' => $address, 'url' => 'mailto:'.$address.'?'.$query, 'reference' => $reference];
+        }
+
+        return new AdmissionResultMail($delivery->subject, $delivery->body, $access, $reclamation);
     }
 }
