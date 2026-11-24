@@ -7,6 +7,7 @@ use App\Http\Middleware\LogUserActivity;
 use App\Models\ConfigApp;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\AdmissionEmailTemplates;
 use App\Services\AdmissionSmsTemplates;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -82,6 +83,24 @@ class ConfigurationMessagesPageTest extends TestCase
 
         $this->assertSame($messages[AdmissionSmsTemplates::ATTENTE], ConfigApp::first()->admission_sms_templates[AdmissionSmsTemplates::ATTENTE]);
         $this->assertSame($messages, $this->page()['props']['messages']);
+    }
+
+    public function test_objets_et_textes_email_et_adresse_de_reclamation_sont_persistes(): void
+    {
+        $emails = AdmissionEmailTemplates::resolve([]);
+        $emails[AdmissionSmsTemplates::ATTENTE] = ['subject' => 'Décision de la commission', 'body' => 'Votre demande est en attente.'];
+        $messages = AdmissionSmsTemplates::resolve([]);
+
+        $this->put(route('admin.parametrage.configuration-messages.update'), [
+            'messages' => $messages,
+            'emails' => $emails,
+            'reclamation_email' => 'reclamations@example.test',
+        ])->assertRedirect(route('admin.parametrage.configuration-messages.index'));
+
+        $props = $this->page()['props'];
+        $this->assertEquals($emails, $props['emails']);
+        $this->assertSame('reclamations@example.test', $props['effectiveReclamationEmail']);
+        $this->assertSame($messages, $props['messages']);
     }
 
     public function test_un_message_vide_est_refuse_mais_pas_un_message_long(): void

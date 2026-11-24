@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
 import { Textarea } from '@/components/ui/textarea';
 import { envoyer } from '@/lib/inertia-form';
@@ -19,11 +20,14 @@ type Props = {
     messages: Modeles;
     /** Textes par défaut, pour « Rétablir le texte par défaut ». */
     defaults: Modeles;
+    emails: Record<string, { subject: string; body: string }>;
+    reclamationEmail: string;
+    effectiveReclamationEmail: string | null;
     /** `update` absent sans le droit `parametrage.configuration.configure` : page en lecture seule. */
     urls: { update: string | null };
 };
 
-type Valeurs = { messages: Modeles };
+type Valeurs = { messages: Modeles; emails: Props['emails']; reclamation_email: string };
 
 const APPARENCE: Record<string, { icone: LucideIcon; ton: string; aide: string }> = {
     definitive: { icone: CircleCheck, ton: 'bg-soft text-primary', aide: 'Envoyé aux étudiants retenus à la publication de la liste définitive.' },
@@ -34,7 +38,7 @@ const APPARENCE: Record<string, { icone: LucideIcon; ton: string; aide: string }
 const APPARENCE_PAR_DEFAUT = { icone: MessageSquareText, ton: 'bg-soft text-primary', aide: '' };
 
 /** Configuration des messages envoyés après la publication des listes définitives (remplace `parametrage/admission-sms.blade.php`). */
-export default function ConfigurationMessages({ labels, messages, defaults, urls }: Props) {
+export default function ConfigurationMessages({ labels, messages, defaults, emails, reclamationEmail, effectiveReclamationEmail, urls }: Props) {
     const cles = Object.keys(labels);
     const lectureSeule = urls.update === null;
 
@@ -46,6 +50,12 @@ export default function ConfigurationMessages({ labels, messages, defaults, urls
                         cles.map((cle) => [cle, z.string().trim().min(1, 'Saisissez le texte du message.')]),
                     ),
                 ),
+                emails: z.object(Object.fromEntries(cles.map((cle) => [cle, z.object({
+                    subject: z.string().trim().min(1, 'Saisissez l’objet.').max(180),
+                    body: z.string().trim().min(1, 'Saisissez le texte de l’e-mail.').max(12000),
+                })]))),
+                reclamation_email: z.string().trim().max(254)
+                    .refine((address) => !address || z.email().safeParse(address).success, 'Renseignez une adresse e-mail valide.'),
             }),
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [cles.join('|')],
@@ -53,19 +63,24 @@ export default function ConfigurationMessages({ labels, messages, defaults, urls
 
     const {
         control,
+        register,
         handleSubmit,
         setError,
         setValue,
         reset,
         formState: { errors, isDirty, isSubmitting },
-    } = useForm<Valeurs>({ resolver: zodResolver(schema), defaultValues: { messages } });
+    } = useForm<Valeurs>({ resolver: zodResolver(schema), defaultValues: { messages, emails, reclamation_email: reclamationEmail } });
 
     const enregistrer = handleSubmit(async (valeurs) => {
         if (!urls.update) return;
         const ok = await envoyer<Valeurs>(urls.update, valeurs, {
             method: 'put',
             setError,
-            champs: cles.map((cle) => `messages.${cle}` as const),
+            champs: ['reclamation_email', ...cles.flatMap((cle) => [
+                `messages.${cle}` as const,
+                `emails.${cle}.subject` as const,
+                `emails.${cle}.body` as const,
+            ])],
         });
         if (ok) reset(valeurs);
     });
@@ -74,7 +89,7 @@ export default function ConfigurationMessages({ labels, messages, defaults, urls
         <AdminLayout title="Configuration des messages">
             <PageHeader
                 title="Configuration des messages"
-                description="Personnalisez le SMS envoyé à chaque étudiant selon le résultat de sa demande de logement, après la publication de la liste définitive."
+                description="Personnalisez les SMS et les e-mails envoyés à la publication des résultats d’admission."
             />
 
             {lectureSeule && (
@@ -85,6 +100,17 @@ export default function ConfigurationMessages({ labels, messages, defaults, urls
             )}
 
             <form onSubmit={enregistrer} noValidate>
+                <div className="mb-4 rounded-brand border bg-white p-4">
+                    <label className="text-sm font-medium" htmlFor="reclamation-email">Adresse de réception des réclamations</label>
+                    <Input id="reclamation-email" type="email" className="mt-2 max-w-lg"
+                        {...register('reclamation_email')} readOnly={lectureSeule} aria-describedby="reclamation-info" />
+                    <p id="reclamation-info" className="mt-2 text-xs text-muted">
+                        {effectiveReclamationEmail
+                            ? `Adresse actuellement utilisée : ${effectiveReclamationEmail}. Si le champ est vide, l’adresse de contact du CROU est utilisée.`
+                            : 'Renseignez la boîte qui traitera les réclamations pour activer le lien dans les e-mails.'}
+                    </p>
+                    {errors.reclamation_email?.message && <p role="alert" className="mt-2 text-xs text-red-600">{errors.reclamation_email.message}</p>}
+                </div>
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
                     {cles.map((cle) => {
                         const { icone: Icone, ton, aide } = APPARENCE[cle] ?? APPARENCE_PAR_DEFAUT;
@@ -99,12 +125,26 @@ export default function ConfigurationMessages({ labels, messages, defaults, urls
                                     </span>
                                     <div className="min-w-0">
                                         <h2 id={`${id}-titre`} className="text-sm font-medium text-gray-900">
-                                            <label htmlFor={id}>{labels[cle]}</label>
+                                            {labels[cle]}
                                         </h2>
                                         {aide && <p className="text-xs text-muted">{aide}</p>}
                                     </div>
                                 </div>
 
+                                <div className="space-y-2">
+                                    <label className="text-xs font-medium" htmlFor={`email-subject-${cle}`}>Objet de l’e-mail</label>
+                                    <Input id={`email-subject-${cle}`} {...register(`emails.${cle}.subject`)}
+                                        readOnly={lectureSeule} maxLength={180} aria-invalid={Boolean(errors.emails?.[cle]?.subject)} />
+                                    {errors.emails?.[cle]?.subject?.message && <p role="alert" className="text-xs text-red-600">{errors.emails[cle].subject.message}</p>}
+                                    <label className="text-xs font-medium" htmlFor={`email-body-${cle}`}>Message de l’e-mail</label>
+                                    <Textarea id={`email-body-${cle}`} {...register(`emails.${cle}.body`)}
+                                        readOnly={lectureSeule} rows={5} maxLength={12000} invalid={Boolean(errors.emails?.[cle]?.body)} />
+                                    {errors.emails?.[cle]?.body?.message && <p role="alert" className="text-xs text-red-600">{errors.emails[cle].body.message}</p>}
+                                    <p className="text-xs text-muted">
+                                        {cle === 'definitive' ? 'Les accès étudiants sont ajoutés automatiquement.' : 'L’option de réclamation est ajoutée automatiquement.'}
+                                    </p>
+                                </div>
+                                <label htmlFor={id} className="border-t pt-3 text-xs font-medium">Message SMS</label>
                                 <Controller
                                     control={control}
                                     name={`messages.${cle}`}
@@ -145,7 +185,7 @@ export default function ConfigurationMessages({ labels, messages, defaults, urls
 
                 {!lectureSeule && (
                     <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-t pt-4">
-                        <Button type="button" variant="outline" disabled={!isDirty || isSubmitting} onClick={() => reset({ messages })}>
+                        <Button type="button" variant="outline" disabled={!isDirty || isSubmitting} onClick={() => reset()}>
                             Annuler les modifications
                         </Button>
                         <Button type="submit" disabled={!isDirty || isSubmitting}>
