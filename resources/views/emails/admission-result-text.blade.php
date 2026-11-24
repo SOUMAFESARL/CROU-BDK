@@ -18,4 +18,4 @@ Pour faire une réclamation, répondez à ce message ou écrivez à {!! $reclama
 Indiquez la référence de votre demande ({!! $reclamation['reference'] !!}) et le motif de votre demande de réexamen.
 
 @endif
-Le CROU
+{{ systemAppName() }}

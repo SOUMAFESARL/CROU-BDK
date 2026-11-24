@@ -22,7 +22,7 @@ class IdentifiantsEtudiant
     public function envoyer(Etudiant $etudiant, ?string $introduction = null): bool
     {
         if (!$this->aEnvoyer($etudiant)) return false;
-        $motDePasse = Str::password(10, symbols: false);
+        $motDePasse = $this->generer();
         try {
             // Même transport que les autres e-mails : SMTP du paramétrage, et pas seulement celui du .env.
             app(AnnonceDiffusionService::class)->configureMail();
@@ -32,7 +32,18 @@ class IdentifiantsEtudiant
             report($exception);
             return false;
         }
-        $etudiant->forceFill(['password' => Hash::make($motDePasse)])->save();
+        $this->enregistrer($etudiant, $motDePasse);
         return true;
+    }
+
+    public function generer(): string
+    {
+        return Str::password(10, symbols: false);
+    }
+
+    /** À appeler une fois le mot de passe transmis à l'étudiant. */
+    public function enregistrer(Etudiant $etudiant, string $motDePasse): void
+    {
+        $etudiant->forceFill(['password' => Hash::make($motDePasse)])->save();
     }
 }

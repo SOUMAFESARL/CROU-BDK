@@ -29,7 +29,9 @@ class AdmissionSmsController extends Controller
             'messages' => AdmissionSmsTemplates::resolve($saved),
             'formatted' => (object) AdmissionSmsTemplates::formatted($saved),
             'defaults' => AdmissionSmsTemplates::resolve([]),
+            'variables' => AdmissionSmsTemplates::VARIABLES,
             'subjects' => AdmissionEmailTemplates::subjects($saved),
+            'enabled' => AdmissionSmsTemplates::enabled($saved),
             'channels' => AdmissionResultDiffusion::channels($config),
             'urls' => [
                 'update' => $canEdit ? route('admin.parametrage.configuration-messages.update') : null,
@@ -44,14 +46,17 @@ class AdmissionSmsController extends Controller
         $rules = ['messages' => 'required|array:'.implode(',', array_keys(AdmissionSmsTemplates::LABELS))];
         $rules['formatted'] = 'sometimes|array:'.implode(',', array_keys(AdmissionSmsTemplates::LABELS));
         $rules['subjects'] = 'sometimes|array:'.implode(',', array_keys(AdmissionSmsTemplates::LABELS));
+        $rules['enabled'] = 'sometimes|array:'.implode(',', array_keys(AdmissionSmsTemplates::LABELS));
         $attributes = [];
         foreach (AdmissionSmsTemplates::LABELS as $key => $label) {
-            $rules["messages.$key"] = 'required|string';
+            $rules["messages.$key"] = ['required', 'string', $this->variablesRule($key)];
             $attributes["messages.$key"] = $label;
             $rules["subjects.$key"] = ['required_with:subjects', 'string', 'max:180', 'not_regex:/[\r\n]/'];
             $attributes["subjects.$key"] = 'objet — '.$label;
-            $rules["formatted.$key"] = 'nullable|string';
+            $rules["formatted.$key"] = ['nullable', 'string', $this->variablesRule($key)];
             $attributes["formatted.$key"] = $label;
+            $rules["enabled.$key"] = 'sometimes|boolean';
+            $attributes["enabled.$key"] = 'envoi — '.$label;
         }
 
         $data = $request->validate($rules, [], $attributes);
@@ -72,13 +77,33 @@ class AdmissionSmsController extends Controller
             array_replace(AdmissionEmailTemplates::subjects($saved), $data['subjects'] ?? []),
         );
 
+        $enabled = array_map(
+            fn ($value) => (bool) $value,
+            array_replace(AdmissionSmsTemplates::enabled($saved), $data['enabled'] ?? []),
+        );
+
         $this->config->updateOrCreate([
             'admission_sms_templates' => array_replace(
-                $saved, $data['messages'], ['formatted' => $formatted, 'emails' => $emails],
+                $saved, $data['messages'], ['formatted' => $formatted, 'emails' => $emails, 'enabled' => $enabled],
             ),
         ]);
 
-        return to_route('admin.parametrage.configuration-messages.index')->with('success', 'Les modèles de messages ont été enregistrés.');
+        return to_route('admin.parametrage.configuration-messages.index')->with('success', 'La configuration des messages a été enregistrée.');
+    }
+
+    /** Les informations entre accolades d'un message ne peuvent être ni supprimées ni inventées. */
+    private function variablesRule(string $key): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail) use ($key) {
+            $text = str_starts_with($attribute, 'formatted.') ? $this->cleanFormatting((string) $value) : (string) $value;
+            $present = AdmissionSmsTemplates::placeholders($text);
+            $expected = AdmissionSmsTemplates::VARIABLES[$key];
+            if ($missing = array_diff($expected, $present)) {
+                $fail('Les informations entre accolades ne peuvent pas être supprimées. Il manque : '.implode(', ', $missing).'.');
+            } elseif ($unknown = array_diff($present, $expected)) {
+                $fail('Information entre accolades inconnue pour ce message : '.implode(', ', $unknown).'.');
+            }
+        };
     }
 
     private function cleanFormatting(string $html): string

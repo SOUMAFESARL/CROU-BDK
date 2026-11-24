@@ -8,8 +8,8 @@ use App\Models\ConfigApp;
 final class AdmissionEmailTemplates
 {
     private const DEFAULTS = [
-        AdmissionSmsTemplates::DEFINITIVE => 'CROU — Votre demande figure sur la liste définitive',
-        AdmissionSmsTemplates::ATTENTE => 'CROU — Votre demande figure sur la liste d’attente définitive',
+        AdmissionSmsTemplates::DEFINITIVE => 'Votre demande figure sur la liste définitive',
+        AdmissionSmsTemplates::ATTENTE => 'Votre demande figure sur la liste d’attente définitive',
         AdmissionSmsTemplates::NON_RETENUE => 'CROU — Résultat de votre demande de logement',
     ];
 

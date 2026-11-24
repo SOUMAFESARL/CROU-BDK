@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Http\Services\Eligibilite\CriteresCampagne;
+use App\Http\Services\IdentifiantsEtudiant;
 use App\Models\Campagne;
 use App\Mail\AdmissionResultMail;
 use App\Models\ConfigApp;
@@ -11,6 +12,7 @@ use App\Models\Etudiant;
 use App\Repositories\Interfaces\ConfigAppRepositoryInterface;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Password;
@@ -20,10 +22,14 @@ class AdmissionResultDiffusion
 {
     public const TABLE = 'admission_result_deliveries';
 
+    /** @var array<string, string> mots de passe créés pendant ce traitement, communs à l'e-mail et au SMS d'un étudiant */
+    private array $motsDePasse = [];
+
     public function __construct(
         private ConfigAppRepositoryInterface $config,
         private CriteresCampagne $criteres,
         private AnnonceDiffusionService $mailSettings,
+        private IdentifiantsEtudiant $identifiants,
     ) {}
 
     /**
@@ -41,11 +47,14 @@ class AdmissionResultDiffusion
 
     /**
      * Enregistre les notifications dans la transaction de publication, avant tout envoi : une par étudiant et par type
-     * d'envoi activé. Le corps est commun : mis en forme dans l'e-mail, en texte brut dans le SMS.
+     * d'envoi activé, sauf pour les messages désactivés (Configuration des messages). Le corps est commun : mis en forme
+     * dans l'e-mail, en texte brut dans le SMS. Les informations entre accolades y sont remplies, sauf le mot de passe
+     * (rempli à l'envoi pour ne pas être enregistré en clair).
      *
      * @param Collection<int, Etudiant> $population
+     * @return int Nombre de notifications concernées par la publication.
      */
-    public function prepare(Campagne $campagne, Collection $population, array $classement, array $definitives, array $volets, string $liste): void
+    public function prepare(Campagne $campagne, Collection $population, array $classement, array $definitives, array $volets, string $liste): int
     {
         $campagneId = (string) $campagne->getKey();
         $attente = $liste === 'attente';
@@ -77,19 +86,31 @@ class AdmissionResultDiffusion
         $messages = AdmissionSmsTemplates::resolve($settings);
         $formatted = AdmissionSmsTemplates::formatted($settings);
         $subjects = AdmissionEmailTemplates::subjects($settings);
+        $enabled = AdmissionSmsTemplates::enabled($settings);
+        $lien = AdmissionSmsTemplates::platformUrl($config);
         $date = now();
         $deliveries = [];
         foreach ($destinataires as [$etudiant, $resultat]) {
+            if (!$enabled[$resultat]) {
+                continue;
+            }
             $email = collect([$etudiant->email1, $etudiant->email2])
                 ->map(fn ($address) => trim((string) $address))
                 ->first(fn ($address) => filter_var($address, FILTER_VALIDATE_EMAIL));
             $phone = collect([$etudiant->telephone1, $etudiant->telephone2])
                 ->map(fn ($number) => numeroCI((string) $number))->first(fn ($number) => $number !== false);
+            $valeurs = [
+                '{{Nom_etudiant}}' => trim((string) $etudiant->name),
+                '{{libelle_campagne}}' => trim((string) $campagne->libelle),
+                '{{annee_campagne}}' => trim((string) $campagne->annee_campagne),
+                '{{lien_plateforme}}' => $lien,
+                '{{Email_etudiant}}' => trim((string) $etudiant->email1),
+            ];
             $commun = [
                 'campagne_id' => $campagneId,
                 'demande_id' => (string) $etudiant->derniereDemande->getKey(),
                 'resultat' => $resultat,
-                'body' => $messages[$resultat],
+                'body' => AdmissionSmsTemplates::fill($messages[$resultat], $valeurs),
                 'created_at' => $date,
                 'updated_at' => $date,
             ];
@@ -98,7 +119,7 @@ class AdmissionResultDiffusion
                     'channel' => 'email',
                     'destination' => $email,
                     'subject' => $subjects[$resultat],
-                    'body_html' => $formatted[$resultat] ?? null,
+                    'body_html' => isset($formatted[$resultat]) ? AdmissionSmsTemplates::fill($formatted[$resultat], $valeurs, true) : null,
                     'status' => $email ? 'pending' : 'missing_contact',
                 ];
             }
@@ -116,6 +137,8 @@ class AdmissionResultDiffusion
         foreach (array_chunk($deliveries, 200) as $batch) {
             DB::table(self::TABLE)->insertOrIgnore($batch);
         }
+
+        return count($deliveries);
     }
 
     /** Transmet toutes les notifications en attente, par lots (après une publication) ; le planificateur reprend un envoi interrompu. */
@@ -148,6 +171,11 @@ class AdmissionResultDiffusion
         }
 
         $settings = ConfigApp::query()->first();
+
+        // Message désactivé après la publication : ses envois restent en attente jusqu'à sa réactivation.
+        $enabled = AdmissionSmsTemplates::enabled($settings?->admission_sms_templates ?? []);
+        $pending->whereNotIn('resultat', array_keys($enabled, false, true));
+
         if (!$settings?->sms_enabled || $settings->sms_provider !== 'helper_json' || !$settings->sms_api_url || !$settings->sms_api_key || !$settings->sms_sender) {
             $pending->where('channel', '!=', 'sms');
         }
@@ -169,10 +197,15 @@ class AdmissionResultDiffusion
             }
 
             try {
+                [$etudiant, $motDePasse] = $this->remplirMotDePasse($delivery);
                 if ($delivery->channel === 'sms') {
                     $sent = EnvoiSMS($delivery->destination, $delivery->body);
                 } else {
                     $sent = Mail::to($delivery->destination)->send($this->email($delivery)) !== null;
+                }
+                // Le mot de passe n'est enregistré que s'il a été transmis.
+                if ($sent && $motDePasse !== null && $this->identifiants->aEnvoyer($etudiant)) {
+                    $this->identifiants->enregistrer($etudiant, $motDePasse);
                 }
             } catch (\Throwable $exception) {
                 Log::warning('Notification de résultat non transmise.', [
@@ -192,11 +225,50 @@ class AdmissionResultDiffusion
         return $processed;
     }
 
+    /**
+     * Remplit le mot de passe du message (en mémoire seulement) : créé pour un compte qui n'en a pas encore ; un compte
+     * qui en a déjà un n'est jamais modifié, l'étudiant est invité à utiliser le sien.
+     *
+     * @return array{0: ?Etudiant, 1: ?string} étudiant et mot de passe communiqué
+     */
+    private function remplirMotDePasse(object $delivery): array
+    {
+        $html = $delivery->body_html ?? null;
+        if (!str_contains($delivery->body.$html, AdmissionSmsTemplates::PASSWORD)) {
+            return [null, null];
+        }
+
+        $etudiant = DemandeEtudiant::with('etudiant')->find($delivery->demande_id)?->etudiant;
+        // Identifiants envoyés par e-mail : seulement à l'adresse de connexion de l'étudiant.
+        $destinataire = $delivery->channel === 'sms' || strcasecmp(trim((string) $etudiant?->email1), $delivery->destination) === 0;
+        $motDePasse = null;
+        if ($etudiant && $destinataire) {
+            $id = (string) $etudiant->getKey();
+            if ($this->identifiants->aEnvoyer($etudiant)) {
+                $motDePasse = $this->motsDePasse[$id] ??= $this->identifiants->generer();
+            } elseif (isset($this->motsDePasse[$id]) && Hash::check($this->motsDePasse[$id], (string) $etudiant->getRawOriginal('password'))) {
+                $motDePasse = $this->motsDePasse[$id];
+            }
+        }
+
+        $valeurs = [AdmissionSmsTemplates::PASSWORD => $motDePasse ?? 'votre mot de passe actuel (à défaut, « Mot de passe oublié » sur la page de connexion)'];
+        $delivery->body = AdmissionSmsTemplates::fill($delivery->body, $valeurs);
+        if ($html !== null) {
+            $delivery->body_html = AdmissionSmsTemplates::fill($html, $valeurs, true);
+        }
+        $delivery->acces_dans_message = true;
+
+        return [$etudiant, $motDePasse];
+    }
+
     private function email(object $delivery): AdmissionResultMail
     {
         $demande = DemandeEtudiant::with('etudiant')->find($delivery->demande_id);
         $access = $reclamation = null;
-        if ($delivery->resultat === AdmissionSmsTemplates::DEFINITIVE) {
+        // Accès ajoutés seulement si le message ne les contient pas déjà (modèles antérieurs aux informations entre accolades).
+        if ($delivery->resultat === AdmissionSmsTemplates::DEFINITIVE && ($delivery->acces_dans_message ?? false)) {
+            $access = null;
+        } elseif ($delivery->resultat === AdmissionSmsTemplates::DEFINITIVE) {
             $student = $demande?->etudiant;
             $identifier = trim((string) $student?->email1);
             $identifier = strcasecmp($identifier, $delivery->destination) === 0 ? $identifier : null;

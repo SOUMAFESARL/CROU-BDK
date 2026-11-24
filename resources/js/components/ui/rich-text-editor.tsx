@@ -1,7 +1,10 @@
-import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react';
+import type { Node as NoeudDocument } from '@tiptap/pm/model';
+import { Plugin } from '@tiptap/pm/state';
+import { EditorContent, Extension, mergeAttributes, Node, useEditor, useEditorState, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Bold, Heading2, Italic, Link2, List, ListOrdered, Quote, Redo2, Underline, Undo2, type LucideIcon } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 /** Extensions communes à l'édition et à l'affichage : le rendu n'accepte que ces balises (pas de script ni de style). */
@@ -17,8 +20,78 @@ const extensionsSimples = [
     StarterKit.configure({ heading: false, link: false, blockquote: false, code: false, codeBlock: false, strike: false, horizontalRule: false }),
 ];
 
+/** Information de la base de données (« {{nom}} ») : insérée d'un bloc, non modifiable caractère par caractère. */
+const Variable = Node.create({
+    name: 'variable',
+    group: 'inline',
+    inline: true,
+    atom: true,
+    selectable: true,
+    addAttributes: () => ({
+        nom: {
+            default: '',
+            parseHTML: (element: HTMLElement) => element.getAttribute('data-variable') ?? '',
+            renderHTML: (attributs: { nom: string }) => ({ 'data-variable': attributs.nom }),
+        },
+    }),
+    parseHTML: () => [{ tag: 'span[data-variable]' }],
+    renderHTML: ({ node, HTMLAttributes }) => ['span', mergeAttributes(HTMLAttributes), `{{${node.attrs.nom}}}`],
+    renderText: ({ node }) => `{{${node.attrs.nom}}}`,
+});
+
+function variablesPresentes(document: NoeudDocument): Set<string> {
+    const noms = new Set<string>();
+    document.descendants((noeud) => {
+        if (noeud.type.name === 'variable') noms.add(String(noeud.attrs.nom));
+    });
+    return noms;
+}
+
+/** Refuse toute saisie (effacement, coupe, collage par-dessus…) qui ferait disparaître une information obligatoire. */
+const VariablesProtegees = Extension.create({
+    name: 'variablesProtegees',
+    addProseMirrorPlugins: () => [
+        new Plugin({
+            filterTransaction: (transaction, etat) => {
+                // `preventUpdate` : contenu remplacé par la page (réinitialisation), pas par une saisie.
+                if (!transaction.docChanged || transaction.getMeta('preventUpdate')) return true;
+                const apres = variablesPresentes(transaction.doc);
+                const conservees = [...variablesPresentes(etat.doc)].every((nom) => apres.has(nom));
+                if (!conservees) {
+                    toast.info('Les informations entre accolades proviennent de la base de données : elles ne peuvent pas être supprimées.', { id: 'variables-protegees' });
+                }
+                return conservees;
+            },
+        }),
+    ],
+});
+
+/** Transforme les « {{nom}} » du texte en blocs protégés, pour l'éditeur. */
+export function avecVariables(html: string, variables: readonly string[]): string {
+    const corps = new DOMParser().parseFromString(html, 'text/html').body;
+    const parcours = document.createTreeWalker(corps, NodeFilter.SHOW_TEXT);
+    const textes: Text[] = [];
+    while (parcours.nextNode()) textes.push(parcours.currentNode as Text);
+    textes
+        .filter((texte) => !texte.parentElement?.hasAttribute('data-variable'))
+        .forEach((texte) => {
+            const morceaux = texte.data.split(/(\{\{[^{}]*\}\})/);
+            if (!morceaux.some((morceau) => variables.includes(morceau))) return;
+            texte.replaceWith(
+                ...morceaux.filter(Boolean).map((morceau) => {
+                    if (!variables.includes(morceau)) return morceau;
+                    const bloc = document.createElement('span');
+                    bloc.setAttribute('data-variable', morceau.slice(2, -2));
+                    bloc.textContent = morceau;
+                    return bloc;
+                }),
+            );
+        });
+    return corps.innerHTML;
+}
+
 const contenuClasses =
-    'text-sm leading-relaxed text-gray-800 [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-3 [&_blockquote]:border-secondary [&_blockquote]:pl-3 [&_blockquote]:text-muted [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-medium [&_h3]:mt-2 [&_h3]:font-medium [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5';
+    'text-sm leading-relaxed text-gray-800 [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-3 [&_blockquote]:border-secondary [&_blockquote]:pl-3 [&_blockquote]:text-muted [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-medium [&_h3]:mt-2 [&_h3]:font-medium [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_[data-variable]]:rounded [&_[data-variable]]:bg-soft [&_[data-variable]]:px-1 [&_[data-variable]]:text-primary [&_[data-variable].ProseMirror-selectednode]:ring-2 [&_[data-variable].ProseMirror-selectednode]:ring-secondary';
 
 type Bouton = { label: string; icon: LucideIcon; actif?: (editor: Editor) => boolean; action: (editor: Editor) => void };
 
@@ -64,6 +137,8 @@ type RichTextEditorProps = {
     placeholder?: string;
     /** Limite la mise en forme à gras, italique, souligné et listes. */
     simple?: boolean;
+    /** La valeur contient des informations protégées (voir `avecVariables`), qui ne peuvent pas être supprimées. */
+    protegerVariables?: boolean;
     readOnly?: boolean;
     'aria-labelledby'?: string;
     'aria-describedby'?: string;
@@ -73,10 +148,14 @@ type RichTextEditorProps = {
 export const htmlVide = (html: string) => html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim() === '';
 
 /** Éditeur de texte riche Tiptap (remplace Summernote) ; la valeur échangée reste du HTML. */
-export function RichTextEditor({ id, value, onChange, onBlur, invalid, placeholder, simple = false, readOnly = false, ...aria }: RichTextEditorProps) {
+export function RichTextEditor({ id, value, onChange, onBlur, invalid, placeholder, simple = false, protegerVariables = false, readOnly = false, ...aria }: RichTextEditorProps) {
     const boutons = simple ? BOUTONS_SIMPLES : BOUTONS;
+    const extensionsUtilisees = useMemo(() => {
+        const base = simple ? extensionsSimples : extensions;
+        return protegerVariables ? [...base, Variable, VariablesProtegees] : base;
+    }, [simple, protegerVariables]);
     const editor = useEditor({
-        extensions: simple ? extensionsSimples : extensions,
+        extensions: extensionsUtilisees,
         content: value,
         editable: !readOnly,
         immediatelyRender: false,

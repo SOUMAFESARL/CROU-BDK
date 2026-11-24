@@ -715,7 +715,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                                 classement.publication.validees > 0 && classement.publication.attente > 0
                                     ? 'seront publiées : elles pourront ensuite être téléchargées'
                                     : 'sera publiée : elle pourra ensuite être téléchargée'
-                            } en Excel ou en PDF. Les étudiants concernés seront notifiés de leur résultat.`}
+                            } en Excel ou en PDF. Les étudiants concernés seront notifiés de leur résultat, selon les messages activés dans « Configuration des messages ».`}
                             {erreurPublication && (
                                 <p role="alert" className="mt-2 text-xs font-medium text-red-600">
                                     {erreurPublication}

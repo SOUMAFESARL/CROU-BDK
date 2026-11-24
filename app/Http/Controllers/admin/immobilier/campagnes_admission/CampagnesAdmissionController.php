@@ -797,7 +797,7 @@ class CampagnesAdmissionController extends Controller
             throw ValidationException::withMessages(['publication' => 'Aucune demande approuvée à publier.']);
         }
 
-        $publiees = DB::transaction(function () use ($campagne, $listes, $publies, $admin, $population, $classement, $diffusion) {
+        [$publiees, $notifications] = DB::transaction(function () use ($campagne, $listes, $publies, $admin, $population, $classement, $diffusion) {
             Campagne::query()->whereKey($campagne->getKey())->lockForUpdate()->firstOrFail();
 
             $etats = collect(['validees', 'attente'])
@@ -823,11 +823,12 @@ class CampagnesAdmissionController extends Controller
             ], $etat['a_publier']))->values()->all();
             DB::table('publication_liste_definitive')->upsert($publications, ['campagne_id', 'liste', 'volet'], ['date_publication', 'publiee_par', 'updated_at']);
 
+            $notifications = 0;
             foreach ($etats as $liste => $etat) {
-                $diffusion->prepare($campagne, $population, $classement, $listes['definitives'], $etat['a_publier'], $liste);
+                $notifications += $diffusion->prepare($campagne, $population, $classement, $listes['definitives'], $etat['a_publier'], $liste);
             }
 
-            return $etats->keys()->all();
+            return [$etats->keys()->all(), $notifications];
         }, 3);
 
         // Envoi dès la réponse rendue, sans attendre le planificateur (`admissions:notifier`), qui reprend les restes.
@@ -841,9 +842,11 @@ class CampagnesAdmissionController extends Controller
 
         // Onglet « File d'attente » quand elle seule a été publiée.
         return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives'] + ($publiees === ['attente'] ? ['liste' => 'attente'] : []) + ($volet !== 'toutes' ? ['type' => $volet] : []))
-            ->with('success', $message.(in_array(true, AdmissionResultDiffusion::channels(\App\Models\ConfigApp::query()->first()), true)
-                ? ' Les notifications de résultats sont en cours d’envoi.'
-                : ' Aucune notification programmée : l’e-mail et le SMS sont désactivés (Configurations système › Notifications).'));
+            ->with('success', $message.match (true) {
+                $notifications > 0 => ' Les notifications de résultats sont en cours d’envoi.',
+                ! in_array(true, AdmissionResultDiffusion::channels(\App\Models\ConfigApp::query()->first()), true) => ' Aucune notification programmée : l’e-mail et le SMS sont désactivés (Configurations système › Notifications).',
+                default => ' Aucune notification programmée : l’envoi des messages concernés est désactivé (Paramétrage › Configuration des messages).',
+            });
     }
 
     /**
