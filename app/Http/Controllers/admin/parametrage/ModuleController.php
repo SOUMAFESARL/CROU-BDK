@@ -18,7 +18,7 @@ class ModuleController extends Controller
     public const ACTIONS = [
         'view'=>'Consulter','create'=>'Créer','update'=>'Modifier','delete'=>'Supprimer',
         'validate'=>'Valider','assign'=>'Affecter','export'=>'Exporter','configure'=>'Configurer',
-        'transmit'=>'Transmettre','close'=>'Clôturer',
+        'transmit'=>'Transmettre','close'=>'Clôturer','traiter'=>'Traiter',
         'personal'=>'Consulter les informations personnelles',
         'documents'=>'Consulter les pièces justificatives',
         'history'=>'Consulter l’historique',

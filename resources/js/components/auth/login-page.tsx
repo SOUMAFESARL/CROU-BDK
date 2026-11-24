@@ -1,6 +1,6 @@
 import { usePage } from '@inertiajs/react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Eye, EyeOff, FilePlus2, KeyRound, Loader2, Lock, LogIn, Mail, RefreshCw } from 'lucide-react';
+import { Eye, EyeOff, FilePlus2, KeyRound, Loader2, Lock, LogIn, Mail, MessageSquareWarning, RefreshCw } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
@@ -16,6 +16,8 @@ export type LoginPageProps = {
     forgotUrl?: string | null;
     /** Lien vers le formulaire de demande d'hébergement (null hors campagne ouverte). */
     registerUrl?: string | null;
+    /** Lien vers le formulaire de réclamation (null hors période de réclamation ouverte). */
+    reclamationUrl?: string | null;
     csrfToken: string;
     oldEmail: string | null;
     logoUrl: string;
@@ -69,6 +71,7 @@ export function LoginPage({
     loginUrl,
     forgotUrl,
     registerUrl,
+    reclamationUrl,
     csrfToken,
     oldEmail,
     logoUrl,
@@ -257,6 +260,16 @@ export function LoginPage({
                     <a href={registerUrl} className="mt-1 inline-flex items-center gap-1.5 font-semibold text-primary hover:underline">
                         <FilePlus2 className="size-4" />
                         Faire une demande d'hébergement
+                    </a>
+                </div>
+            )}
+
+            {reclamationUrl && (
+                <div className="mt-6 rounded-brand border border-dashed border-secondary bg-soft px-4 py-3 text-center text-sm">
+                    <p className="text-muted">Une campagne de réclamation est en cours.</p>
+                    <a href={reclamationUrl} className="mt-1 inline-flex items-center gap-1.5 font-semibold text-primary hover:underline">
+                        <MessageSquareWarning className="size-4" />
+                        Faire une réclamation
                     </a>
                 </div>
             )}

@@ -13,6 +13,7 @@ return [
     'admissions.personal' => ['hebergement.admissions.personal'],
     'admissions.documents' => ['hebergement.admissions.documents'],
     'admissions.history' => ['hebergement.admissions.history'],
+    'admissions.reclamations' => ['hebergement.reclamations.view'],
     'admissions.eligibility' => ['all' => ['hebergement.admissions.personal', 'hebergement.admissions.documents', 'hebergement.admissions.history']],
     'users.personal' => ['utilisateurs.personal'],
     'roles.assignments' => ['parametrage.roles.assign', 'utilisateurs.view'],

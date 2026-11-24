@@ -48,6 +48,7 @@ export const ACTION_COLORS: Record<string, string> = {
     configure: 'border-slate-300 bg-slate-100 text-slate-700',
     transmit: 'border-cyan-200 bg-cyan-50 text-cyan-800',
     close: 'border-rose-200 bg-rose-50 text-rose-800',
+    traiter: 'border-teal-200 bg-teal-50 text-teal-800',
 };
 
 /** Case cochée dans la teinte de son action (mêmes regroupements que ACTION_COLORS). */
@@ -65,6 +66,7 @@ const ACTION_CHECKBOX_COLORS: Record<string, string> = {
     configure: 'data-[state=checked]:border-slate-600 data-[state=checked]:bg-slate-600',
     transmit: 'data-[state=checked]:border-cyan-600 data-[state=checked]:bg-cyan-600',
     close: 'data-[state=checked]:border-rose-600 data-[state=checked]:bg-rose-600',
+    traiter: 'data-[state=checked]:border-teal-600 data-[state=checked]:bg-teal-600',
 };
 
 /** Toutes les permissions d'un nœud et de ses descendants, dans l'ordre d'affichage. */

@@ -148,7 +148,7 @@ function AvantDeCommencer({ documents, onCommencer }: { documents: DocumentDeman
             ) : (
                 <Notice icone={Info}>Aucun document n’est demandé pour cette campagne.</Notice>
             )}
-            <p className="mt-3 text-sm text-muted">Votre e-mail, votre numéro de téléphone, votre pièce d’identité et, s’il est renseigné, votre matricule doivent être uniques : si vous avez déjà un compte, connectez-vous pour faire une réadmission.</p>
+            <p className="mt-3 text-sm text-muted">Votre e-mail, votre numéro de téléphone, votre pièce d’identité et votre matricule doivent être uniques : si vous avez déjà un compte, connectez-vous pour faire une réadmission.</p>
 
             <label htmlFor="dh-pret" className="mt-4 flex cursor-pointer items-center gap-3 rounded-brand border border-gray-300 p-3 text-sm text-gray-900 hover:bg-surface">
                 <Checkbox id="dh-pret" checked={pret} onCheckedChange={(valeur) => setPret(valeur === true)} />
@@ -402,7 +402,7 @@ function Formulaire({
                                 </Field>
                             )}
                             {parcours === 'etudiant' && (
-                                <Field id="dh-matricule" label="Matricule universitaire" error={errors.matricule?.message} hint="Facultatif · à renseigner si vous en avez déjà un.">
+                                <Field id="dh-matricule" label="Matricule universitaire" required error={errors.matricule?.message}>
                                     <Input id="dh-matricule" placeholder="Matricule universitaire" invalid={!!errors.matricule} {...register('matricule')} />
                                 </Field>
                             )}

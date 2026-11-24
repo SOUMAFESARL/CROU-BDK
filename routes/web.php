@@ -5,6 +5,7 @@ use App\Http\Controllers\admin\auth\AuthController;
 //use App\Http\Controllers\web\contact\ContactController;
 use App\Http\Controllers\web\frontedController;
 use App\Http\Controllers\web\EtudiantPasswordResetController;
+use App\Http\Controllers\web\ReclamationPubliqueController;
 use App\Http\Controllers\MapController;
 // Routes d'authentification admin
 Route::get('/admin/login', [AuthController::class, 'index'])->name('login');
@@ -47,6 +48,12 @@ Route::controller(frontedController::class)->group(function () {
     Route::post('/register', 'postRegister')->name('register.post');
     Route::post('/login-etudiant', 'authenticateEtudiant')->name('login.etudiant');
 
+});
+
+// Réclamation sur une demande d'hébergement (pendant une période de réclamation ouverte)
+Route::controller(ReclamationPubliqueController::class)->group(function () {
+    Route::get('/reclamation', 'create')->name('etudiant.reclamation');
+    Route::post('/reclamation', 'store')->middleware('throttle:10,1')->name('etudiant.reclamation.store');
 });
 
 // Mot de passe oublié (étudiants)

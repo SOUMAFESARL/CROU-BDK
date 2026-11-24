@@ -170,7 +170,7 @@ class DemandeHebergementPageTest extends TestCase
             ->assertSessionDoesntHaveErrors('cmu');
     }
 
-    public function test_matricule_facultatif_ville_du_bac_obligatoire_et_terminale_exclue_du_niveau_actuel(): void
+    public function test_matricule_ou_numero_de_table_obligatoire_et_terminale_exclue_du_niveau_actuel(): void
     {
         $this->campagneOuverte();
         DB::table('niveau_etude')->insert(['id_niveau_etude' => 'tle', 'name' => 'Terminale', 'ordre' => 1]);
@@ -201,10 +201,12 @@ class DemandeHebergementPageTest extends TestCase
             ])
             ->assertSessionDoesntHaveErrors(['matricule', 'niveau_precedent', 'credit_valider']);
 
-        // Hors Terminale : ville du bac non demandée, moyenne sur 20.
+        // Hors Terminale : matricule obligatoire, ville du bac non demandée, moyenne sur 20.
         $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'niveau_precedent' => 'l1', 'niveau' => 'l1', 'moyenne' => '25'])
-            ->assertSessionHasErrors(['moyenne' => 'La moyenne doit être comprise entre 1 et 20.'])
-            ->assertSessionDoesntHaveErrors(['niveau', 'ville_bac', 'num_table_bac', 'matricule']);
+            ->assertSessionHasErrors(['moyenne' => 'La moyenne doit être comprise entre 1 et 20.', 'matricule' => 'Le matricule universitaire est obligatoire.'])
+            ->assertSessionDoesntHaveErrors(['niveau', 'ville_bac', 'num_table_bac']);
+        $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'niveau_precedent' => 'l1', 'niveau' => 'l1', 'matricule' => 'MAT-9'])
+            ->assertSessionDoesntHaveErrors(['matricule']);
 
         // Après la Terminale : note au bac sur 400, ramenée sur 20 ; ni crédits ni matricule, ville du bac écartée sinon.
         $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'niveau_precedent' => 'tle', 'niveau' => 'l1', 'moyenne' => '450'])

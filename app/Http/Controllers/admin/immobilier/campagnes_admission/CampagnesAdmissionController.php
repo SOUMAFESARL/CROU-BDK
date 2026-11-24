@@ -286,7 +286,13 @@ class CampagnesAdmissionController extends Controller
             $voirAdmissions = ($scope && $permissions->allows($admin, $scope))
                 || ($classe === \App\Http\Services\Eligibilite\RecevabiliteDemandes::RECEVABLE && $permissions->allows($admin, 'recevables_demandes'));
         }
-        abort_unless($voirAdmissions || $admin->hasPermission('hebergement.residents.view') || $admin->hasPermission('hebergement.attributions.view'), 403);
+        // Réclamations de l'étudiant (motif sous « Documents fournis ») : leur droit de consultation ouvre aussi la fiche,
+        // sans donner les blocs personnels, documents et historique ni la dérogation.
+        $reclamationService = app(\App\Http\Services\ReclamationService::class);
+        $reclamations = $vues->allows($admin, 'admissions.reclamations') && $reclamationService->disponible()
+            ? \App\Models\Reclamation::with('campagne')->where('etudiant_id', $etudiant->getKey())->orderByDesc('created_at')->get()
+            : collect();
+        abort_unless($voirAdmissions || $reclamations->isNotEmpty() || $admin->hasPermission('hebergement.residents.view') || $admin->hasPermission('hebergement.attributions.view'), 403);
         // Bouton « Déroger » : demande des listes « Demandes irrecevables » ou « Demandes refusées », tant que la liste
         // des demandes validées de son volet n'est pas approuvée en commission (`AdmissionDerogationService::obstacle`).
         $routeDeroger = 'admin.hebergement.campagnes_admission.derogations.store';
@@ -346,6 +352,8 @@ class CampagnesAdmissionController extends Controller
                 'rejeter' => !in_array($document['statut'], ['valide', 'rejete'], true)
                     ? $url('admin.hebergement.campagnes_admission.validate_document', ['documentId' => $document['id_document'], 'statut' => 'rejete']) : null,
             ])->values() : null,
+            // Réclamations déposées par l'étudiant (toutes campagnes), de la plus récente à la plus ancienne.
+            'reclamations' => $reclamations->map(fn ($reclamation) => $reclamationService->presenter($reclamation, $admin))->values(),
             'profil' => $personnel ? $this->profilDemande($etudiant, $derniere) : null,
             // Toutes les demandes de l'étudiant, toutes campagnes confondues.
             'historique' => $historique ? $etudiant->demandes->sortByDesc('created_at')->values()->map(fn ($item) => [
@@ -359,6 +367,9 @@ class CampagnesAdmissionController extends Controller
             'urls' => [
                 'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
                 'deroger' => $deroger,
+                // Fiche ouverte depuis la liste des réclamations : retour à cette liste.
+                'reclamations' => $request->query('origine') === 'reclamations' && $vues->allows($admin, 'admissions.reclamations')
+                    ? $url('admin.hebergement.reclamations.liste') : null,
             ],
         ]);
     }
@@ -1701,6 +1712,7 @@ class CampagnesAdmissionController extends Controller
     /** Enregistre les modifications d'une campagne. */
     public function updateCampagne(CampagneRequest $request, string $id): RedirectResponse
     {
+        app(\App\Http\Services\ReclamationService::class)->verifierFinCampagne($id, $request->validated('periode_fin'));
         $this->campagneService->updateCampagne($id, $request->validated());
 
         return redirect()

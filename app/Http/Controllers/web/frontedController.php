@@ -82,6 +82,8 @@ class  frontedController extends Controller
             'forgotUrl' => route('etudiant.password.request'),
             // Lien vers le formulaire de demande, proposé uniquement pendant une période d'admission ouverte.
             'registerUrl' => Campagne::admissionsOuvertes()->exists() ? route('etudiant.register') : null,
+            // Lien vers le formulaire de réclamation, proposé uniquement pendant une période de réclamation ouverte.
+            'reclamationUrl' => app(\App\Http\Services\ReclamationService::class)->periodeOuverte() ? route('etudiant.reclamation') : null,
             'csrfToken' => csrf_token(),
             'oldEmail' => old('email'),
             'logoUrl' => systemLogo('admin/assets/images/logos/crou_bdk.jpeg'),

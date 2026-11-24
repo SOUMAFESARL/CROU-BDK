@@ -13,6 +13,8 @@ import {
     Info,
     ListChecks,
     Loader2,
+    MessageSquareWarning,
+    PenLine,
     Scale,
     ShieldAlert,
     TriangleAlert,
@@ -23,6 +25,7 @@ import { ETATS_SANS_BADGE, EtatDossierBadge } from '@/components/dossier/etat-do
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
+import { StatutReclamationBadge, TraiterReclamationDialog, type Reclamation } from '@/components/reclamations/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
@@ -104,13 +107,15 @@ type Props = {
     /** Score du barème de scoring actif (seul score comparé au minimum de la décision automatique). */
     bareme: Bareme | null;
     documents: Document[] | null;
+    /** Réclamations de l'étudiant, de la plus récente à la plus ancienne (vide sans le droit de les consulter). */
+    reclamations: Reclamation[];
     profil: ProfilDemande | null;
     historique: { id: string; numero: string | null; campagne_id: string | null; annee: string | null; date: string | null; etat: string | null }[] | null;
     /**
      * `deroger` : bouton « Déroger » (demande des listes « Demandes irrecevables » ou « Demandes refusées », liste des
      * demandes validées de son volet pas encore approuvée en commission) ; null sinon ou sans le droit de déroger.
      */
-    urls: { admissions: string | null; deroger: string | null };
+    urls: { admissions: string | null; deroger: string | null; reclamations: string | null };
 };
 
 const ETATS_REGLE = {
@@ -135,7 +140,8 @@ const STATUTS_INSCRIPTION: Record<string, [string, 'success' | 'warning' | 'info
 
 /** Traitement d'un dossier de candidature (remplace `admission/traiter-demande.blade.php`, `derogations.blade.php` et le mode admin de `dossier-cycle`). */
 export default function AdmissionShow(props: Props) {
-    const { etudiant, demande, discipline, eligibilite, rejets, bareme, documents, profil, historique, urls } = props;
+    const { etudiant, demande, discipline, eligibilite, rejets, bareme, documents, reclamations, profil, historique, urls } = props;
+    const retour = urls.reclamations ?? urls.admissions;
     const [aDeroger, setADeroger] = useState(false);
 
     return (
@@ -157,14 +163,14 @@ export default function AdmissionShow(props: Props) {
                     </div>
                 }
                 actions={
-                    (urls.admissions || urls.deroger) && (
+                    (retour || urls.deroger) && (
                         <>
-                            {urls.admissions && (
+                            {retour && (
                                 <Link
-                                    href={urls.admissions}
+                                    href={retour}
                                     className="inline-flex h-10 items-center gap-2 rounded-brand border border-gray-300 bg-white px-4 text-sm font-medium text-muted hover:bg-surface hover:text-primary"
                                 >
-                                    <ArrowLeft {...ICON} aria-hidden /> Retour aux admissions
+                                    <ArrowLeft {...ICON} aria-hidden /> {urls.reclamations ? 'Retour aux réclamations' : 'Retour aux admissions'}
                                 </Link>
                             )}
                             {urls.deroger && (
@@ -191,6 +197,7 @@ export default function AdmissionShow(props: Props) {
                     {bareme && <ScoreBareme {...bareme} />}
                     {eligibilite && <Eligibilite {...eligibilite} />}
                     {documents && <Documents documents={documents} />}
+                    {reclamations.length > 0 && <MotifsReclamation reclamations={reclamations} />}
                     {eligibilite?.derogation && <MotifDerogation {...eligibilite.derogation} />}
                     {rejets.length > 0 && <MotifsRejet rejets={rejets} />}
                 </div>
@@ -458,6 +465,51 @@ function Documents({ documents }: { documents: Document[] }) {
                 processing={enCours !== null}
                 onConfirm={() => aRejeter?.rejeter && appliquer(aRejeter.rejeter, aRejeter.id, () => setARejeter(null))}
             />
+        </Carte>
+    );
+}
+
+/** Motifs des réclamations de l'étudiant, affichés sous « Documents fournis », avec leur statut. */
+function MotifsReclamation({ reclamations }: { reclamations: Reclamation[] }) {
+    const [aTraiter, setATraiter] = useState<Reclamation | null>(null);
+
+    return (
+        <Carte
+            id="motif-reclamation"
+            icone={<MessageSquareWarning size={18} strokeWidth={1.25} />}
+            teinte="bg-[#FFF4DB] text-[#8A5A00]"
+            titre="Motif de la réclamation"
+            meta={`${reclamations.length} réclamation${reclamations.length > 1 ? 's' : ''}`}
+        >
+            <ul className="divide-y">
+                {reclamations.map((reclamation) => (
+                    <li key={reclamation.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs text-muted">
+                                {[
+                                    reclamation.numero,
+                                    reclamation.type_demande === 'readmission' ? 'Réadmission' : 'Admission',
+                                    reclamation.campagne,
+                                    reclamation.date ? `déposée le ${dateFr(reclamation.date)}` : null,
+                                    reclamation.num_bac_matricule ? `n° table bac / matricule : ${reclamation.num_bac_matricule}` : null,
+                                ]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <StatutReclamationBadge statut={reclamation.statut} />
+                                {reclamation.url_traiter && (
+                                    <Button variant="secondary" size="sm" onClick={() => setATraiter(reclamation)}>
+                                        <PenLine className="size-4" aria-hidden /> Traiter
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                        <p className="text-sm break-words whitespace-pre-line text-gray-900">{reclamation.motif}</p>
+                    </li>
+                ))}
+            </ul>
+            <TraiterReclamationDialog reclamation={aTraiter} onClose={() => setATraiter(null)} />
         </Carte>
     );
 }

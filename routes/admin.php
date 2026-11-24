@@ -44,6 +44,7 @@ use App\Http\Controllers\admin\Etudiant\etudiantController;
 use App\Http\Controllers\admin\immobilier\residents_contrat\ResidentContratControler;
 use App\Http\Controllers\admin\immobilier\residents_contrat\AllocationChambreController;
 use App\Http\Controllers\admin\immobilier\ReportingHebergementController;
+use App\Http\Controllers\admin\immobilier\reclamations\ReclamationController;
 use App\Http\Controllers\MapController;
 use App\Http\Controllers\admin\ActivityLogController;
 
@@ -278,6 +279,20 @@ Route::middleware(['admin'])->group(function () {
         });
 
 
+
+    // Réclamations des étudiants sur leur demande : liste par statut, traitement, configuration des périodes.
+    Route::prefix('gestion-hebergement/reclamations')
+        ->name('hebergement.reclamations.')
+        ->controller(ReclamationController::class)
+        ->group(function () {
+            Route::get('/', 'index')->name('index');
+            Route::get('/liste', 'liste')->name('liste');
+            Route::get('/configuration', 'configuration')->name('configuration');
+            Route::post('/configuration/periodes', 'storePeriode')->name('periodes.store');
+            Route::put('/configuration/periodes/{periode}', 'updatePeriode')->name('periodes.update');
+            Route::delete('/configuration/periodes/{periode}', 'destroyPeriode')->name('periodes.destroy');
+            Route::put('/{reclamation}/traitement', 'traiter')->name('traiter');
+        });
 
     // Actions sur un jeu de critères d'une campagne (paramétrage général, admission, réadmission) : définis dans la page « Critères de la campagne ».
     Route::prefix('gestion-hebergement/campagnes/{campagne}/criteres/{volet}')

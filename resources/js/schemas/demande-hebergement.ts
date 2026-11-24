@@ -47,7 +47,7 @@ const nombreValide = (valeur: string, min: number, max: number) => {
 
 /**
  * `terminales` : identifiants des niveaux « Terminale ». Niveau précédent = Terminale → note au bac sur 400, ville et numéro
- * de table du bac obligatoires ; sinon moyenne générale sur 20 (la ville du bac n'est pas demandée).
+ * de table du bac obligatoires ; sinon matricule obligatoire et moyenne générale sur 20 (la ville du bac n'est pas demandée).
  */
 export const demandeHebergementSchema = (documents: DocumentDemande[], terminales: string[] = [], ordreNiveaux: string[] = []) =>
     z.object({
@@ -100,6 +100,9 @@ export const demandeHebergementSchema = (documents: DocumentDemande[], terminale
             ctx.addIssue({ code: 'custom', path: ['moyenne'], message: 'Ce champ est obligatoire.' });
         } else if (!nombreValide(donnees.moyenne, 1, max)) {
             ctx.addIssue({ code: 'custom', path: ['moyenne'], message });
+        }
+        if (!apresTerminale && donnees.matricule === '') {
+            ctx.addIssue({ code: 'custom', path: ['matricule'], message: 'Le matricule universitaire est obligatoire.' });
         }
         if (apresTerminale && donnees.ville_bac === '') {
             ctx.addIssue({ code: 'custom', path: ['ville_bac'], message: 'La ville/commune d’obtention du bac est obligatoire.' });

@@ -35,6 +35,15 @@ Les décisions disciplinaires (rapports d’incident, sanctions directes) garden
 
 La migration `2026_11_23_000003_add_types_paiement_permissions.php` ajoute le module **« Types de paiement »** (`hebergement.types-paiement`) et ses droits `.view`, `.create`, `.update`, `.delete` pour la page du même nom (paramétrage hébergement, rubrique « Parc immobilier », voir `docs/types-paiement.md`). Ils sont accordés au rôle 1, et repris des droits `hebergement.parametrage.view` (→ `view`) et `.configure` (→ `create`, `update`, `delete`) pour les rôles qui les avaient.
 
+La migration `2026_11_24_000006_add_reclamations_permissions.php` ajoute le module **« Réclamations »** (`hebergement.reclamations`) et ses droits `.view`, `.traiter` (nommé `.update` avant la migration `2026_11_24_000009`) et `.configure` (périodes), accordés au seul rôle 1 (voir `docs/reclamations.md`). `.view` ouvre aussi la fiche de la demande des étudiants qui ont déposé une réclamation ; ses blocs personnels, documents et historique gardent leurs droits.
+
+| Route | Permission(s) |
+| --- | --- |
+| `admin.hebergement.reclamations.index` (cartes) | `hebergement.reclamations.view` ou `.configure` ; chaque carte suit le droit de sa page |
+| `admin.hebergement.reclamations.liste` | `hebergement.reclamations.view` |
+| `admin.hebergement.reclamations.configuration`, `.periodes.store`, `.periodes.update`, `.periodes.destroy` | `hebergement.reclamations.configure` |
+| `admin.hebergement.reclamations.traiter` | `hebergement.reclamations.traiter` |
+
 Attribuer les droits nécessaires dans **Paramètres → Rôles et permissions**. Créer un utilisateur exige `utilisateurs.create` et `parametrage.roles.assign`. Modifier son rôle exige aussi `parametrage.roles.assign`. Seul le rôle 1 peut affecter le rôle 1 ou modifier un compte qui le possède.
 
 Validation ciblée :

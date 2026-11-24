@@ -87,8 +87,9 @@ class DemandeHebergementRequest extends EtudiantRequest
     public function rules()
     {
         $rules = parent::rules();
-        // Matricule universitaire facultatif (un nouveau bachelier n'en a pas encore) ; unique s'il est saisi.
-        $rules['matricule'] = ['nullable', 'string', 'max:50', 'unique:etudiants,matricule'];
+        // Matricule universitaire obligatoire, sauf après la Terminale (un nouveau bachelier n'en a pas encore : numéro de table au bac).
+        // Le champ n'est affiché qu'une fois le niveau précédent choisi.
+        $rules['matricule'] = [$this->filled('niveau_precedent') && ! $this->apresTerminale() ? 'required' : 'nullable', 'string', 'max:50', 'unique:etudiants,matricule'];
         // La Terminale n'est pas un niveau d'études « actuel » possible, et le niveau actuel ne peut pas être inférieur au précédent.
         $rules['niveau'] = ['required', function ($attribut, $valeur, $echec) {
             if (self::estTerminale((string) $valeur)) {
@@ -147,6 +148,7 @@ class DemandeHebergementRequest extends EtudiantRequest
             'ville_bac.max' => 'La ville/commune d’obtention du bac ne doit pas dépasser 150 caractères.',
             'num_table_bac.required' => 'Le numéro de table au bac est obligatoire.',
             'num_table_bac.max' => 'Le numéro de table au bac ne doit pas dépasser 50 caractères.',
+            'matricule.required' => 'Le matricule universitaire est obligatoire.',
             'matricule.max' => 'Le matricule ne doit pas dépasser 50 caractères.',
             'moyenne.numeric' => 'La note doit être un nombre.',
             'moyenne.min' => $this->apresTerminale() ? 'La note au bac doit être comprise entre 1 et '.self::NOTE_BAC_MAX.'.' : 'La moyenne doit être comprise entre 1 et 20.',
