@@ -115,16 +115,22 @@ export type Classement = {
      */
     exports: { excel: string; pdf: string } | null;
     /**
-     * Listes définitives : publication de l'onglet ouvert (type de demande filtré). `url` : bouton « Publier » (null une
-     * fois publiée ou sans droit) ; `date` : date de publication (Y-m-d H:i) ; `nombre` : demandes de l'onglet. Null ailleurs.
+     * Listes définitives : publication de l'onglet ouvert (type de demande filtré), `date` : date de publication
+     * (Y-m-d H:i). `url` : bouton « Publier » des deux onglets, sur « Demandes validées » seulement (null une fois tout
+     * publié ou sans droit) ; `validees` / `attente` : demandes restant à publier dans chaque onglet. Null ailleurs.
      */
-    publication: { publiee: boolean; date: string | null; url: string | null; nombre: number } | null;
+    publication: { publiee: boolean; date: string | null; url: string | null; validees: number; attente: number } | null;
     /**
-     * « Approuver » l'onglet ouvert de la décision de la commission (`liste`) : ses `nombre` demandes passent dans le
-     * même onglet des listes définitives — celles de la file d'attente sont d'abord validées (dossier « Recevable ») ; null ailleurs ou
-     * sans droit.
+     * « Approuver » les demandes validées et la file d'attente, depuis l'onglet « Demandes validées » de la décision de
+     * la commission : elles passent dans l'onglet correspondant des listes définitives — celles de la file d'attente
+     * sont d'abord validées (dossier « Recevable ») ; null ailleurs ou sans droit.
      */
-    approbation: { url: string; liste: 'validees' | 'attente'; nombre: number } | null;
+    approbation: { url: string; validees: number; attente: number } | null;
+    /**
+     * « Tout valider » la liste provisoire des admissions : ses `nombre` demandes sont partagées entre les demandes
+     * validées (places libres) et la file d'attente (`validees` / `attente` null : places non renseignées). Null ailleurs ou sans droit.
+     */
+    validationGroupee: { url: string; nombre: number; validees: number | null; attente: number | null } | null;
 };
 
 const ONGLETS: { cle: Exclude<ListeRecevables, 'toutes'>; label: string }[] = [

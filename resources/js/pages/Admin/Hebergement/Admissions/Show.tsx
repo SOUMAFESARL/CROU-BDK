@@ -95,6 +95,8 @@ type Props = {
         score: number;
         lien: string | null;
         /** Demande dérogée (bouton « Déroger ») : irrecevable ou refusée, elle est rendue recevable. */
+        /** Demande conforme, mais classée au-delà de la liste élargie : irrecevable. */
+        hors_liste: boolean;
         derogation: { auteur: string | null; date: string | null; motif: string | null } | null;
     } | null;
     /** Rejets de la demande courante (passages en « Refusé »), du plus récent au plus ancien. */
@@ -282,7 +284,7 @@ function ScoreBareme({ score, minimum, volets, erreur, score_decision }: Bareme)
     );
 }
 
-function Eligibilite({ volet_libelle, campagne, origine, regles, conformes, non_conformes, score, lien, derogation }: NonNullable<Props['eligibilite']>) {
+function Eligibilite({ volet_libelle, campagne, origine, regles, conformes, non_conformes, score, lien, hors_liste, derogation }: NonNullable<Props['eligibilite']>) {
     const couleur = non_conformes > 0 ? '#B42318' : score === 100 ? '#067647' : '#B54708';
     const circonference = 2 * Math.PI * 26;
     const aVerifier = regles.length - conformes - non_conformes;
@@ -332,7 +334,9 @@ function Eligibilite({ volet_libelle, campagne, origine, regles, conformes, non_
                             ? `${non_conformes} critère${non_conformes > 1 ? 's' : ''} non conforme${non_conformes > 1 ? 's' : ''} : ${derogation ? 'la demande est rendue recevable par dérogation.' : 'la demande est irrecevable.'}`
                             : aVerifier > 0
                               ? 'Aucun critère non conforme, mais des informations sont manquantes ou à vérifier.'
-                              : 'Tous les critères de recevabilité sont conformes : la demande est recevable.'}
+                              : hors_liste
+                                ? 'Tous les critères de recevabilité sont conformes, mais la liste élargie est complète : la demande est irrecevable.'
+                                : 'Tous les critères de recevabilité sont conformes : la demande est recevable.'}
                     </p>
                     <p className="text-sm text-muted">
                         {conformes} critère(s) conforme(s) sur {regles.length}.

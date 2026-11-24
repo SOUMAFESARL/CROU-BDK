@@ -27,7 +27,8 @@ use Illuminate\Support\Str;
  *   saisies : leurs candidats figurent en C6. Le départage « excellence » n'a pas encore de donnée et est ignoré.
  *
  * En dernier recours, la demande déposée la première passe devant. Le classement est indicatif : il ne change pas
- * l'état du dossier (`DossierWorkflow`) et ne tient pas encore compte des places par cité.
+ * l'état du dossier (`DossierWorkflow`). La longueur de la liste de chaque volet est limitée (`capaciteListe`) sur le total
+ * des places du volet, sans répartition par cité.
  */
 class ClassementProvisoire
 {
@@ -54,6 +55,30 @@ class ClassementProvisoire
         }
 
         return $resultat;
+    }
+
+    /**
+     * Nombre de lignes de la liste provisoire d'un volet : places du volet (critères en vigueur, toutes cités) ×
+     * coefficient de la liste élargie ; null si aucune place n'est renseignée (liste non limitée).
+     */
+    public function capaciteListe(Campagne $campagne, string $volet): ?int
+    {
+        $places = $this->places($campagne, $volet);
+        if ($places === null) {
+            return null;
+        }
+        $regles = $this->regles($campagne, $volet);
+
+        return $places * max(1, (int) ($regles['classement']['k_liste_elargie'] ?? 1));
+    }
+
+    /** Places du volet (critères en vigueur, toutes cités) ; null si aucune place n'est renseignée. */
+    public function places(Campagne $campagne, string $volet): ?int
+    {
+        $vigueur = Schema::hasTable('campagne_regles') ? $this->criteres->enVigueur($campagne, $volet) : null;
+        $places = collect($vigueur?->places ?? [])->pluck('places')->filter(fn ($nombre) => $nombre !== null && $nombre !== '');
+
+        return $places->isEmpty() ? null : (int) $places->sum();
     }
 
     /** Admission : boursiers (si prioritaires), mérite (en % du maximum), puis départage paramétré. */

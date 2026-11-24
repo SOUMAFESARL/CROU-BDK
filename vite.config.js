@@ -15,6 +15,12 @@ export default defineConfig({
         react(),
         tailwindcss(),
     ],
+    server: {
+        cors: {
+            // Développement : autorise localhost et les adresses du réseau local (DHCP), quel que soit le port.
+            origin: /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|[\w-]+\.test|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2})(:\d+)?$/,
+        },
+    },
     resolve: {
         alias: {
             '@': fileURLToPath(new URL('./resources/js', import.meta.url)),

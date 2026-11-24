@@ -243,24 +243,24 @@ Route::middleware(['admin'])->group(function () {
             Route::get('/liste-provisoire/{volet}/{format}', 'exportListeProvisoire')
                 ->whereIn('volet', ['admission', 'readmission'])->whereIn('format', ['excel', 'pdf'])
                 ->name('liste_provisoire_export');
+            // « Tout valider » : partage de la liste provisoire entre les demandes validées (places libres) et la file d'attente.
+            Route::post('/liste-provisoire/{volet}/valider', 'validerListeProvisoire')
+                ->whereIn('volet', ['admission'])
+                ->name('liste_provisoire_valider');
             // Téléchargement d'une liste définitive (demandes validées ou file d'attente approuvées ; les deux volets, ou un type de demande).
             Route::get('/liste-definitive/{liste}/{volet}/{format}', 'exportListeDefinitive')
                 ->whereIn('liste', ['validees', 'attente'])->whereIn('volet', ['toutes', 'admission', 'readmission'])->whereIn('format', ['excel', 'pdf'])
                 ->name('liste_definitive_export');
-            // Publication d'une liste définitive (demandes validées ou file d'attente ; les deux volets, ou un type de demande) : elle peut alors être téléchargée.
-            Route::post('/liste-definitive/{liste}/{volet}/publier', 'publierListeDefinitive')
-                ->whereIn('liste', ['validees', 'attente'])->whereIn('volet', ['toutes', 'admission', 'readmission'])
+            // Publication des listes définitives (demandes validées et file d'attente ; les deux volets, ou un type de demande) : elles peuvent alors être téléchargées.
+            Route::post('/liste-definitive/{volet}/publier', 'publierListeDefinitive')
+                ->whereIn('volet', ['toutes', 'admission', 'readmission'])
                 ->name('liste_definitive_publier');
             // Mise en attente par la commission d'une demande d'une liste provisoire (elle passe dans la décision de la commission).
             Route::post('/demandes/{demande}/attente', 'mettreEnAttente')->name('mettre_en_attente');
-            // Approbation en commission des demandes validées de la décision de la commission (les deux volets, ou un type de demande) : elles passent dans la liste définitive.
+            // Approbation en commission des demandes validées et de la file d'attente (les deux volets, ou un type de demande) : elles passent dans les listes définitives.
             Route::post('/liste-validee/{volet}/approuver', 'approuverListeValidee')
                 ->whereIn('volet', ['toutes', 'admission', 'readmission'])
                 ->name('liste_validee_approuver');
-            // Approbation en commission de la file d'attente : ses demandes sont validées puis passent dans la liste définitive.
-            Route::post('/file-attente/{volet}/approuver', 'approuverFileAttente')
-                ->whereIn('volet', ['toutes', 'admission', 'readmission'])
-                ->name('file_attente_approuver');
             Route::get('/campagnes/nouvelle', 'createCampagne')->name('create_campagne');
             Route::get('/campagnes/{etat?}', 'campagnes')->name('campagnes');
             Route::post('/campagnes', 'storeCampagne')->name('post_campagnes');

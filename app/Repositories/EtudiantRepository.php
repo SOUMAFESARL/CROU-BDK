@@ -209,9 +209,9 @@ class EtudiantRepository implements EtudiantRepositoryInterface
     /**
      * `$recherche` : nom, matricule, téléphone, numéro de demande ou numéro de chambre (affectation confirmée).
      * `$etatDossier` : état (`Demande.etat_dossier`) de la dernière demande de l'étudiant.
-     * `$etudiants` : limite la liste à ces étudiants (identifiants), par exemple les demandes recevables.
+     * `$etudiants` : limite la liste à ces étudiants (identifiants), par exemple les demandes recevables ; `$ordreDonne` : dans cet ordre.
      */
-    public function getAdmissionsPage(?string $etat = null, int $parPage = 25, ?string $recherche = null, ?string $etatDossier = null, ?array $etudiants = null, ?string $campagneId = null): \Illuminate\Pagination\LengthAwarePaginator
+    public function getAdmissionsPage(?string $etat = null, int $parPage = 25, ?string $recherche = null, ?string $etatDossier = null, ?array $etudiants = null, ?string $campagneId = null, bool $ordreDonne = false): \Illuminate\Pagination\LengthAwarePaginator
     {
         $recherche = trim((string) $recherche);
         $etatDossier = trim((string) $etatDossier);
@@ -232,6 +232,10 @@ class EtudiantRepository implements EtudiantRepositoryInterface
                         ->whereHas('chambre', fn ($c) => $c->where('numero_chambre', 'like', $motif))));
             })
             ->when($etatDossier !== '', fn ($query) => $query->whereHas('derniereDemande', fn ($d) => $d->where('etat_dossier', $etatDossier)))
+            ->when($ordreDonne && $etudiants, fn ($query) => $query->orderByRaw(
+                'CASE id_etudiant '.implode(' ', array_map(fn (int $rang) => "WHEN ? THEN {$rang}", array_keys(array_values($etudiants)))).' END',
+                array_values($etudiants),
+            ))
             ->orderByDesc('date_inscription')->orderByDesc('id_etudiant')
             ->paginate($parPage)->withQueryString();
     }

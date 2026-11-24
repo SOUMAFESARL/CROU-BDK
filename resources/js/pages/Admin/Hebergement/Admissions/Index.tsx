@@ -24,7 +24,7 @@ import type { Paginated } from '@/types/global';
 
 /**
  * Toutes les demandes, demandes recevables (tous les critères conformes), demandes irrecevables (au moins un critère
- * non conforme), demandes refusées (refusées ou annulées par l'administration pendant la validation), la décision de la
+ * non conforme, ou demande classée au-delà de la liste élargie), demandes refusées (refusées ou annulées par l'administration pendant la validation), la décision de la
  * commission (onglet à part, `validees` : onglets « Demandes validées » et « File d’attente ») et la liste
  * définitive (onglet à part : demandes validées approuvées en commission).
  */
@@ -42,6 +42,10 @@ type Dossier = {
     personnel: { region: string | null; ville: string | null } | null;
     demandes: number | null;
     url: string | null;
+    /** Demandes irrecevables : rang dans le volet (admission ou réadmission). */
+    rang: number | null;
+    /** Demandes irrecevables : demande conforme, écartée car la liste élargie est complète. */
+    hors_liste: boolean;
     /** Refusé par le barème de scoring : peut être rendu éligible en un clic. */
     refus_automatique: boolean;
 };
@@ -104,6 +108,10 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
     const [aPublier, setAPublier] = useState(false);
     const [publication, setPublication] = useState(false);
     const [erreurPublication, setErreurPublication] = useState<string | null>(null);
+    /** « Tout valider » la liste provisoire des admissions : fenêtre de confirmation. */
+    const [aValider, setAValider] = useState(false);
+    const [validation, setValidation] = useState(false);
+    const [erreurValidation, setErreurValidation] = useState<string | null>(null);
     /** Onglet « Liste provisoire » ouvert (admission ou réadmission), décision de la commission ou listes définitives : le classement remplace la liste des demandes. */
     const listeProvisoire = classement !== null && classement.liste !== 'demandes';
     const [recherche, setRecherche] = useState(filters.q);
@@ -167,6 +175,13 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
         setApprobation(false);
         if (ok) setAApprouver(false);
     };
+    const toutValider = async () => {
+        if (!classement?.validationGroupee) return;
+        setValidation(true);
+        const ok = await envoyer(classement.validationGroupee.url, {}, { onError: (retour) => setErreurValidation(retour.validation ?? Object.values(retour)[0] ?? null) });
+        setValidation(false);
+        if (ok) setAValider(false);
+    };
     const premierRendu = useRef(true);
 
     // Recherche et filtre côté serveur (retour en page 1, onglet KPI conservé par l'URL).
@@ -220,7 +235,9 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                   },
               ]
             : []),
-        { key: 'num', header: '#', headClassName: 'w-12', className: 'text-muted tabular-nums', cell: (d) => (dossiers.from ?? 1) + dossiers.data.indexOf(d) },
+        etat === 'rejetees'
+            ? { key: 'rang', header: 'Rang', headClassName: 'w-16', className: 'font-medium tabular-nums', cell: (d) => vide(d.rang === null ? null : String(d.rang)) }
+            : { key: 'num', header: '#', headClassName: 'w-12', className: 'text-muted tabular-nums', cell: (d) => (dossiers.from ?? 1) + dossiers.data.indexOf(d) },
         {
             key: 'etudiant',
             header: 'Étudiant',
@@ -274,6 +291,15 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                     vide(null)
                 ),
         },
+        ...(etat === 'rejetees'
+            ? ([
+                  {
+                      key: 'motif',
+                      header: 'Motif',
+                      cell: (d) => <Badge variant={d.hors_liste ? 'warning' : 'danger'}>{d.hors_liste ? 'Liste élargie complète' : 'Critère non conforme'}</Badge>,
+                  },
+              ] satisfies DataTableColumn<Dossier>[])
+            : []),
         {
             key: 'actions',
             header: <span className="sr-only">Actions</span>,
@@ -360,7 +386,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                     items={([
                         { key: 'toutes', label: 'Toutes les demandes', value: nombre(stats.toutes), tone: 'blue', href: urls.filtres.toutes ?? undefined, extra: 'Demandes reçues' },
                         { key: 'recevables', label: 'Demandes recevables', value: nombre(stats.recevables), tone: 'green', href: urls.filtres.recevables ?? undefined, extra: 'Tous les critères conformes' },
-                        { key: 'rejetees', label: 'Demandes irrecevables', value: nombre(stats.rejetees), tone: 'plum', href: urls.filtres.rejetees ?? undefined, extra: 'Au moins un critère non conforme' },
+                        { key: 'rejetees', label: 'Demandes irrecevables', value: nombre(stats.rejetees), tone: 'plum', href: urls.filtres.rejetees ?? undefined, extra: 'Critère non conforme ou liste élargie complète' },
                         { key: 'refusees', label: 'Demandes refusées', value: nombre(stats.refusees), tone: 'red', href: urls.filtres.refusees ?? undefined, extra: 'Par l’administration' },
                     ] satisfies KpiFilter[]).filter((item) => item.href)}
                 />
@@ -440,35 +466,48 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                                         Réinitialiser
                                     </Button>
                                 )}
+                                {classement.validationGroupee && (
+                                    <Button
+                                        className="h-10 sm:ml-auto"
+                                        disabled={classement.validationGroupee.nombre === 0}
+                                        onClick={() => {
+                                            setErreurValidation(null);
+                                            setAValider(true);
+                                        }}
+                                    >
+                                        <ListChecks {...ICON} aria-hidden />
+                                        Tout valider
+                                    </Button>
+                                )}
                                 {classement.approbation && (
                                     <Button
                                         className="h-10 sm:ml-auto"
-                                        disabled={classement.approbation.nombre === 0}
+                                        disabled={classement.approbation.validees + classement.approbation.attente === 0}
                                         onClick={() => {
                                             setErreurApprobation(null);
                                             setAApprouver(true);
                                         }}
                                     >
                                         <ListChecks className="size-4" aria-hidden />
-                                        {classement.approbation.liste === 'attente' ? 'Approuver la file d’attente' : 'Approuver la liste'}
+                                        Approuver la liste
                                     </Button>
                                 )}
                                 {classement.publication?.url && (
                                     // Listes définitives : « Publier » avant de pouvoir télécharger.
                                     <Button
                                         className="h-10 sm:ml-auto"
-                                        disabled={classement.publication.nombre === 0}
+                                        disabled={classement.publication.validees + classement.publication.attente === 0}
                                         onClick={() => {
                                             setErreurPublication(null);
                                             setAPublier(true);
                                         }}
                                     >
                                         <Send className="size-4" aria-hidden />
-                                        {classement.liste === 'attente' ? 'Publier la file d’attente' : 'Publier la liste'}
+                                        Publier les listes
                                     </Button>
                                 )}
                                 {classement.publication?.publiee && classement.publication.date && (
-                                    <span className="inline-flex h-10 items-center gap-1.5 text-sm text-muted sm:ml-auto">
+                                    <span className={cn('inline-flex h-10 items-center gap-1.5 text-sm text-muted', !classement.publication.url && 'sm:ml-auto')}>
                                         <CircleCheck className="size-4 text-[#006400]" aria-hidden />
                                         Publiée le {dateFr(classement.publication.date)} à {classement.publication.date.slice(11, 16)}
                                     </span>
@@ -476,7 +515,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                                 {classement.exports && (
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
-                                            <Button variant="secondary" className={cn('h-10', !classement.publication?.date && 'sm:ml-auto')} disabled={classement.compteurs[classement.liste] === 0}>
+                                            <Button variant="secondary" className={cn('h-10', !classement.publication?.date && !classement.validationGroupee && 'sm:ml-auto')} disabled={classement.compteurs[classement.liste] === 0}>
                                                 <Download className="size-4" aria-hidden />
                                                 Télécharger
                                             </Button>
@@ -584,28 +623,57 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                 </div>
             </section>
 
+            {classement?.validationGroupee && (
+                <ConfirmDialog
+                    open={aValider}
+                    onOpenChange={(ouvert) => !ouvert && setAValider(false)}
+                    title="Valider toute la liste provisoire ?"
+                    description={
+                        <>
+                            {classement.validationGroupee.validees === null
+                                ? 'Le nombre de places n’est pas renseigné dans les critères de la campagne : renseignez-le avant de valider toute la liste.'
+                                : `Selon le classement et les places disponibles, sur ${nombre(classement.validationGroupee.nombre)} demande(s) : ${nombre(
+                                      classement.validationGroupee.validees,
+                                  )} dans « Demandes validées » et ${nombre(
+                                      classement.validationGroupee.attente ?? 0,
+                                  )} dans « File d’attente ». Chaque dossier validé passe en « Recevable » et l’étudiant reçoit ses accès.`}
+                            {erreurValidation && (
+                                <p role="alert" className="mt-2 text-xs font-medium text-red-600">
+                                    {erreurValidation}
+                                </p>
+                            )}
+                        </>
+                    }
+                    confirmLabel="Tout valider"
+                    confirmIcon={<ListChecks {...ICON} aria-hidden />}
+                    processing={validation}
+                    onConfirm={toutValider}
+                />
+            )}
+
             {classement?.approbation && (
                 <ConfirmDialog
                     open={aApprouver}
                     onOpenChange={(ouvert) => !ouvert && setAApprouver(false)}
-                    title={classement.approbation.liste === 'attente' ? 'Approuver la file d’attente ?' : 'Approuver les demandes validées ?'}
+                    title={classement.approbation.attente > 0 ? 'Approuver les demandes validées et la file d’attente ?' : 'Approuver les demandes validées ?'}
                     description={
                         <>
-                            {classement.approbation.liste === 'attente'
-                                ? `${
-                                      classement.approbation.nombre > 1 ? `Les ${nombre(classement.approbation.nombre)} demandes de la file d’attente` : 'La demande de la file d’attente'
-                                  } ${classement.volet === 'readmission' ? 'de réadmission ' : classement.volet === 'admission' ? 'd’admission ' : '(admissions et réadmissions) '}${classement.campagne ? `de la campagne ${classement.campagne} ` : ''}${
-                                      classement.approbation.nombre > 1 ? 'seront validées et passeront' : 'sera validée et passera'
-                                  } dans la liste définitive (classées dans son onglet) : chaque dossier passe en « Recevable », l’étudiant reçoit ses accès et doit confirmer sa demande.`
-                                : `${
-                                      classement.approbation.nombre > 1 ? `Les ${nombre(classement.approbation.nombre)} demandes validées` : 'La demande validée'
-                                  } ${classement.volet === 'readmission' ? 'de réadmission' : classement.volet === 'admission' ? 'd’admission' : '(admissions et réadmissions)'}${classement.campagne ? ` de la campagne ${classement.campagne}` : ''} ${
-                                      classement.approbation.nombre > 1 ? 'seront approuvées et passeront' : 'sera approuvée et passera'
-                                  } dans la liste définitive (classées dans son onglet).${
-                                      classement.compteurs.attente > 0
-                                          ? ` ${classement.compteurs.attente > 1 ? `Les ${nombre(classement.compteurs.attente)} demandes en attente restent` : 'La demande en attente reste'} dans la file d’attente.`
-                                          : ''
-                                  }`}
+                            {`${[
+                                classement.approbation.validees > 0 &&
+                                    (classement.approbation.validees > 1 ? `${nombre(classement.approbation.validees)} demandes validées` : '1 demande validée'),
+                                classement.approbation.attente > 0 &&
+                                    (classement.approbation.attente > 1
+                                        ? `${nombre(classement.approbation.attente)} demandes de la file d’attente`
+                                        : '1 demande de la file d’attente'),
+                            ]
+                                .filter(Boolean)
+                                .join(' et ')} ${classement.volet === 'readmission' ? 'de réadmission' : classement.volet === 'admission' ? 'd’admission' : '(admissions et réadmissions)'}${classement.campagne ? ` de la campagne ${classement.campagne}` : ''} ${
+                                classement.approbation.validees + classement.approbation.attente > 1 ? 'seront approuvées et passeront' : 'sera approuvée et passera'
+                            } dans les listes définitives (classées dans leur onglet).${
+                                classement.approbation.attente > 0
+                                    ? ' Les dossiers de la file d’attente passent en « Recevable » : les étudiants reçoivent leurs accès et doivent confirmer leur demande.'
+                                    : ''
+                            }`}
                             {erreurApprobation && (
                                 <p role="alert" className="mt-2 text-xs font-medium text-red-600">
                                     {erreurApprobation}
@@ -613,7 +681,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                             )}
                         </>
                     }
-                    confirmLabel={classement.approbation.liste === 'attente' ? 'Approuver la file d’attente' : 'Approuver la liste'}
+                    confirmLabel="Approuver la liste"
                     confirmIcon={<ListChecks className="size-4" aria-hidden />}
                     processing={approbation}
                     onConfirm={approuver}
@@ -624,12 +692,30 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                 <ConfirmDialog
                     open={aPublier}
                     onOpenChange={(ouvert) => !ouvert && setAPublier(false)}
-                    title={classement.liste === 'attente' ? 'Publier la file d’attente ?' : 'Publier la liste des demandes validées ?'}
+                    title={
+                        classement.publication.attente === 0
+                            ? 'Publier la liste des demandes validées ?'
+                            : classement.publication.validees === 0
+                              ? 'Publier la file d’attente ?'
+                              : 'Publier les listes définitives ?'
+                    }
                     description={
                         <>
-                            {`${classement.liste === 'attente' ? 'La file d’attente' : 'La liste des demandes validées'} ${
-                                classement.volet === 'readmission' ? 'de réadmission ' : classement.volet === 'admission' ? 'd’admission ' : '(admissions et réadmissions) '
-                            }${classement.campagne ? `de la campagne ${classement.campagne} ` : ''}(${nombre(classement.publication.nombre)} demande${classement.publication.nombre > 1 ? 's' : ''}) sera publiée : elle pourra ensuite être téléchargée en Excel ou en PDF.`}
+                            {`${[
+                                classement.publication.validees > 0 &&
+                                    `la liste des demandes validées (${nombre(classement.publication.validees)} demande${classement.publication.validees > 1 ? 's' : ''})`,
+                                classement.publication.attente > 0 &&
+                                    `la file d’attente (${nombre(classement.publication.attente)} demande${classement.publication.attente > 1 ? 's' : ''})`,
+                            ]
+                                .filter(Boolean)
+                                .join(' et ')
+                                .replace(/^l/, 'L')}${
+                                classement.volet === 'readmission' ? ' de réadmission' : classement.volet === 'admission' ? ' d’admission' : ', admissions et réadmissions,'
+                            }${classement.campagne ? ` de la campagne ${classement.campagne}` : ''} ${
+                                classement.publication.validees > 0 && classement.publication.attente > 0
+                                    ? 'seront publiées : elles pourront ensuite être téléchargées'
+                                    : 'sera publiée : elle pourra ensuite être téléchargée'
+                            } en Excel ou en PDF. Les étudiants concernés seront notifiés de leur résultat.`}
                             {erreurPublication && (
                                 <p role="alert" className="mt-2 text-xs font-medium text-red-600">
                                     {erreurPublication}
@@ -637,7 +723,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                             )}
                         </>
                     }
-                    confirmLabel={classement.liste === 'attente' ? 'Publier la file d’attente' : 'Publier la liste'}
+                    confirmLabel="Publier"
                     confirmIcon={<Send className="size-4" aria-hidden />}
                     processing={publication}
                     onConfirm={publier}

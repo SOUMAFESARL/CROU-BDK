@@ -62,7 +62,7 @@ export function OngletsCampagnesAdmissions({ actif, urls, aside }: { actif: Ongl
 
     return (
         <div className="mb-6 flex w-full flex-wrap items-center gap-x-4 border-b">
-            <nav ref={navRef} aria-label="Campagnes et admissions" className="relative flex min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <nav ref={navRef} aria-label="Campagnes et admissions" className="relative flex min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]! [&::-webkit-scrollbar]:hidden!">
                 {visibles.map(({ cle, label, icone: Icone }) => {
                     const courant = cle === vise;
                     const classes = cn(

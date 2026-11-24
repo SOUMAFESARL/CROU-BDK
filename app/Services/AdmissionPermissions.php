@@ -20,10 +20,10 @@ final class AdmissionPermissions
         'refusees' => ['Demandes refusées', ['view', 'lever_refus']],
         'commission' => ['Décision de la commission', ['view']],
         'commission_validees' => ['Commission / Demandes validées', ['view', 'refuser', 'attente', 'approuver']],
-        'commission_attente' => ['Commission / File d’attente', ['view', 'valider', 'refuser', 'approuver']],
+        'commission_attente' => ['Commission / File d’attente', ['view', 'valider', 'refuser']],
         'definitives' => ['Listes définitives', ['view']],
         'definitive_validees' => ['Liste définitive / Demandes validées', ['view', 'publier', 'export']],
-        'definitive_attente' => ['Liste définitive / File d’attente', ['view', 'publier', 'export']],
+        'definitive_attente' => ['Liste définitive / File d’attente', ['view', 'export']],
         'dossier' => ['Dossier de candidature', ['lever_refus', 'traiter', 'document', 'decision']],
     ];
 

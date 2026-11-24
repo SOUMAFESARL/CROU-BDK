@@ -17,6 +17,8 @@ class VerrouListeProvisoire
 {
     public const MESSAGE = 'La liste des demandes validées a déjà été approuvée en commission : aucune autre demande de la liste provisoire ne peut être validée.';
 
+    public const MESSAGE_HORS_LISTE = 'La liste élargie est complète : cette demande est irrecevable. Elle ne peut être validée qu’après une dérogation.';
+
     /** @var array<string, list<string>> volets clôturés par campagne (cache de la requête) */
     private array $volets = [];
 
@@ -66,11 +68,15 @@ class VerrouListeProvisoire
         return in_array($this->criteres->voletsDemandes([$etudiant->derniereDemande])[(string) $etudiant->getKey()] ?? null, $clotures, true);
     }
 
-    /** Refuse la validation d'une demande d'une liste provisoire clôturée. */
+    /** Refuse la validation d'une demande d'une liste provisoire clôturée, ou classée au-delà de la liste élargie. */
     public function verifier(DemandeEtudiant $demande): void
     {
         if ($this->bloque($demande)) {
             throw ValidationException::withMessages(['etat' => self::MESSAGE]);
+        }
+        $etudiant = $demande->etudiant;
+        if ($etudiant && (string) $etudiant->derniereDemande?->getKey() === (string) $demande->getKey() && $this->recevabilite->horsListeElargie($etudiant)) {
+            throw ValidationException::withMessages(['etat' => self::MESSAGE_HORS_LISTE]);
         }
     }
 }
