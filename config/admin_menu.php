@@ -79,7 +79,7 @@ return [
             ['label' => 'Filières', 'icon' => 'book-open', 'route' => 'admin.parametrage.filiere.index', 'active' => ['admin.parametrage.filiere.*'], 'color' => 'green', 'description' => 'Filières d’études'],
             ['label' => 'Départements', 'icon' => 'layers', 'route' => 'admin.parametrage.departement.index', 'active' => ['admin.parametrage.departement.*'], 'color' => 'amber', 'description' => 'Départements académiques'],
             ['label' => 'Configurations système', 'icon' => 'settings', 'route' => 'admin.parametrage.configuration.index', 'active' => ['admin.parametrage.configuration.*'], 'color' => 'purple', 'description' => 'Réglages généraux'],
-            ['label' => 'Configuration des SMS', 'icon' => 'settings', 'route' => 'admin.parametrage.admission-sms.index', 'active' => ['admin.parametrage.admission-sms.*'], 'color' => 'green', 'description' => 'Modèles de SMS des résultats d’admission'],
+            ['label' => 'Configuration des messages', 'icon' => 'settings', 'route' => 'admin.parametrage.configuration-messages.index', 'active' => ['admin.parametrage.configuration-messages.*'], 'color' => 'green', 'description' => 'Modèles de SMS des résultats d’admission'],
             ['label' => 'Types d’utilisateurs', 'icon' => 'user-cog', 'route' => 'admin.parametrage.type-utilisateur.index', 'active' => ['admin.parametrage.type-utilisateur.*'], 'color' => 'red', 'description' => 'Profils des utilisateurs'],
         ],
     ],

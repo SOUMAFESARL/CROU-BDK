@@ -60,8 +60,11 @@ class CampagnesAdmissionController extends Controller
      */
     private const FILTRES_ADMISSION = ['toutes', 'recevables', 'rejetees', 'refusees', 'validees', 'definitives'];
 
-    /** Filtres de la « Liste des demandes » : demandes de la campagne choisie dans le bandeau (`?campagne=`). */
-    private const FILTRES_PAR_CAMPAGNE = ['toutes', 'recevables', 'rejetees', 'refusees'];
+    /**
+     * Filtres de la « Liste des demandes » et « Décision de la commission » : demandes de la campagne choisie dans le
+     * bandeau (`?campagne=`, par défaut la campagne active, sinon la plus récente).
+     */
+    private const FILTRES_PAR_CAMPAGNE = ['toutes', 'recevables', 'rejetees', 'refusees', 'validees'];
 
     /** Anciens filtres (liens enregistrés) : nouvelles demandes, en attente, rejetées. */
     private const FILTRES_ADMISSION_ANCIENS = ['nouvelles_demandes' => 'toutes', 'en_attente' => 'recevables', 'annuler' => 'rejetees'];
@@ -109,8 +112,8 @@ class CampagnesAdmissionController extends Controller
         $typeDemande = array_key_exists($typeDemande, \App\Http\Services\Eligibilite\CriteresCampagne::VOLETS) ? $typeDemande : '';
         $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
         $repository = app(\App\Repositories\EtudiantRepository::class);
-        // Liste des demandes (toutes, recevables, irrecevables, refusées) : demandes de la campagne choisie dans le
-        // bandeau (`?campagne=`, par défaut la campagne active). Décision de la commission et listes définitives : campagne
+        // Liste des demandes (toutes, recevables, irrecevables, refusées) et décision de la commission : demandes de la
+        // campagne choisie dans le bandeau (`?campagne=`, par défaut la campagne active). Listes définitives : campagne
         // active, sur toutes les demandes.
         $parCampagne = in_array($etat, self::FILTRES_PAR_CAMPAGNE, true);
         $campagnes = $parCampagne ? Campagne::query()->orderByDesc('created_at')->get() : null;
@@ -485,7 +488,8 @@ class CampagnesAdmissionController extends Controller
         $routeApprobation = $liste === 'attente' ? 'admin.hebergement.campagnes_admission.file_attente_approuver' : 'admin.hebergement.campagnes_admission.liste_validee_approuver';
         $approbation = $type === 'validee' && $volets !== [] && $access->allows($admin, $routeApprobation)
             ? [
-                'url' => route($routeApprobation, ['volet' => $voletFiltre ?? 'toutes']),
+                // La campagne choisie dans le bandeau est approuvée (celle affichée).
+                'url' => route($routeApprobation, ['volet' => $voletFiltre ?? 'toutes'] + $choixCampagne),
                 'liste' => $liste,
                 'nombre' => $lignesVolets->where('commission', $decisionFiltre)->count(),
             ]
@@ -1032,9 +1036,7 @@ class CampagnesAdmissionController extends Controller
     public function approuverListeValidee(Request $request, string $volet)
     {
         $admin = $request->user('admin');
-        $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes();
-        $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
-        [, $volets, $listes] = $this->listesProvisoires($population, $classement, $this->campagneActive());
+        [$volets, $listes] = $this->listesCommission($request);
         $approuves = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
         if ($approuves === []) {
             throw ValidationException::withMessages(['approbation' => 'Cette liste n’est pas disponible pour la campagne.']);
@@ -1066,9 +1068,7 @@ class CampagnesAdmissionController extends Controller
     public function approuverFileAttente(Request $request, string $volet)
     {
         $admin = $request->user('admin');
-        $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes();
-        $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
-        [, $volets, $listes] = $this->listesProvisoires($population, $classement, $this->campagneActive());
+        [$volets, $listes] = $this->listesCommission($request);
         $approuves = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
         if ($approuves === []) {
             throw ValidationException::withMessages(['approbation' => 'Cette liste n’est pas disponible pour la campagne.']);
@@ -1109,6 +1109,23 @@ class CampagnesAdmissionController extends Controller
         // Onglet « File d'attente » des listes définitives.
         return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives', 'liste' => 'attente'] + (count($approuves) === 1 ? ['type' => $approuves[0]] : []))
             ->with('success', $message);
+    }
+
+    /**
+     * Volets ouverts et listes de la décision de la commission pour la campagne choisie dans le bandeau (`?campagne=`,
+     * par défaut la campagne active, sinon la plus récente) : mêmes demandes que celles affichées, classement recalculé
+     * côté serveur.
+     *
+     * @return array{0: list<string>, 1: array<'provisoires'|'validees'|'definitives', array{admission: array, readmission: array}>}
+     */
+    private function listesCommission(Request $request): array
+    {
+        $campagne = $this->campagneSelectionnee($request);
+        $population = $this->populationCampagne(app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes(), $campagne);
+        $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
+        [, $volets, $listes] = $this->listesProvisoires($population, $classement, $campagne);
+
+        return [$volets, $listes];
     }
 
     /**

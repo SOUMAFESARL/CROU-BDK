@@ -14,10 +14,6 @@ return [
     |
     */
 
-    'tinymce' => [
-        'license_key' => env('TINYMCE_LICENSE_KEY', env('APP_ENV') === 'local' ? 'gpl' : null),
-    ],
-
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

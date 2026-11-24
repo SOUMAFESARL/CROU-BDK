@@ -122,18 +122,19 @@ export default function CampagnesIndex({ campagnes, stats, etat, filters, annees
 
     return (
         <AdminLayout title="Campagnes">
-            <PageHeader title="Campagnes" description="Planifiez les campagnes d’admission et de réadmission, leurs critères et les résidences ouvertes." />
+            <PageHeader
+                title="Campagnes"
+                aside={
+                    urls.create && (
+                        <Link href={urls.create} className={cn(buttonVariants({ size: 'sm' }), 'h-10 px-4')}>
+                            <Plus {...ICON} aria-hidden />
+                            Nouvelle campagne
+                        </Link>
+                    )
+                }
+            />
 
             <OngletsCampagnesAdmissions actif="campagnes" urls={{ campagnes: urls.filtres.tous, admissions: urls.admissions, validees: urls.validees, definitives: urls.definitives }} />
-
-            {urls.create && (
-                <div className="mb-6 flex flex-wrap items-center justify-end gap-2">
-                    <Link href={urls.create} className={cn(buttonVariants({ size: 'sm' }), 'h-10 px-4')}>
-                        <Plus {...ICON} aria-hidden />
-                        Nouvelle campagne
-                    </Link>
-                </div>
-            )}
 
             {/* Indicateurs par statut, qui servent aussi de filtres. */}
             <nav aria-label="Filtrer les campagnes par statut" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">

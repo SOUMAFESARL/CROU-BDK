@@ -134,9 +134,14 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame(['student'], collect($props['dossiers']['data'])->pluck('id')->all());
         $this->assertSame(1, $props['stats']['toutes']);
         $this->assertStringContainsString('campagne=ancienne', $props['urls']['filtres']['rejetees']);
-        // Décision de la commission et listes définitives : pas de choix de campagne.
-        $this->assertStringNotContainsString('campagne=', $props['urls']['filtres']['validees']);
-        $this->assertSame([], $this->page('liste', ['etat' => 'validees'], query: ['campagne' => 'ancienne'])['props']['campagnes']);
+        // Décision de la commission : même choix de campagne ; listes définitives : pas de choix de campagne.
+        $this->assertStringContainsString('campagne=ancienne', $props['urls']['filtres']['validees']);
+        $validees = $this->page('liste', ['etat' => 'validees'], query: ['campagne' => 'ancienne'])['props'];
+        $this->assertSame(['campaign', 'ancienne'], array_column($validees['campagnes'], 'id'));
+        $this->assertSame('ancienne', $validees['campagneActive']['id']);
+        $this->assertSame('campaign', $this->page('liste', ['etat' => 'validees'])['props']['campagneActive']['id']);
+        $this->assertStringNotContainsString('campagne=', $props['urls']['filtres']['definitives']);
+        $this->assertSame([], $this->page('liste', ['etat' => 'definitives'], query: ['campagne' => 'ancienne'])['props']['campagnes']);
 
         // Identifiant inconnu : campagne active.
         $this->assertSame('campaign', $this->page('liste', ['etat' => 'toutes'], query: ['campagne' => 'pirate'])['props']['campagneActive']['id']);

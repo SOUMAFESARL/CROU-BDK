@@ -57,7 +57,7 @@ type Props = {
     /** États possibles de `Demande.etat_dossier` (`DossierWorkflow::LABELS`). */
     etatsDossier: { value: string; label: string }[];
     colonnes: { personnel: boolean; historique: boolean };
-    /** Liste des demandes : campagnes proposées dans le bandeau, la plus récente d'abord (vide sur les autres onglets). */
+    /** Liste des demandes et décision de la commission : campagnes proposées dans le bandeau, la plus récente d'abord (vide sur les listes définitives). */
     campagnes: CampagneOption[];
     /** Liste des demandes : campagne choisie (par défaut la campagne active) ; autres onglets : campagne active. */
     campagneActive: (CampagneOption & { echeance: string | null; moyenne_min: number | string | null; distance_min: number | string | null }) | null;
@@ -303,8 +303,9 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                 aside={
                     // Campagne affichée : en haut, à l’opposé du titre.
                     campagneActive &&
-                    (ongletMenu === 'admissions' && campagnes.length > 0 ? (
-                                // Liste des demandes : les indicateurs et les listes suivent la campagne choisie (libellé + année).
+                    (ongletMenu !== 'definitives' && campagnes.length > 0 ? (
+                                // Liste des demandes et décision de la commission : les indicateurs et les listes suivent la
+                                // campagne choisie (libellé + année ; par défaut la campagne active, sinon la plus récente).
                                 <Select value={campagneActive.id} onValueChange={(id) => appliquer({ q: recherche, etat_dossier: filters.etat_dossier, type: filters.type, campagne: id })}>
                                     <SelectTrigger aria-label="Campagne affichée" className="h-9 w-full border-[#C6E3A6] bg-soft text-[#004D00] sm:w-72">
                                         <span className="flex min-w-0 items-center gap-1.5">

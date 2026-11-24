@@ -562,7 +562,7 @@ Route::middleware(['admin'])->group(function () {
 
 
             Route::controller(\App\Http\Controllers\admin\parametrage\AdmissionSmsController::class)
-                ->prefix('configuration-sms')->name('admission-sms.')->group(function () {
+                ->prefix('configuration-messages')->name('configuration-messages.')->group(function () {
                     Route::get('/', 'index')->name('index');
                     Route::put('/', 'update')->name('update');
                 });

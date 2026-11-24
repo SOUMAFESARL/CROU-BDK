@@ -8,20 +8,26 @@ use App\Services\AdminAccess;
 use App\Services\AdmissionSmsTemplates;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class AdmissionSmsController extends Controller
 {
     public function __construct(private ConfigAppRepositoryInterface $config) {}
 
-    public function index(Request $request, AdminAccess $access): View
+    /** Modèles de SMS des résultats d'admission (page React `Admin/Parametrage/ConfigurationMessages`). */
+    public function index(Request $request, AdminAccess $access): Response
     {
         $saved = $this->config->getConfig()?->admission_sms_templates ?? [];
-        return view('admin.parametrage.admission-sms', [
+        $canEdit = $access->allows($request->user('admin'), 'admin.parametrage.configuration-messages.update');
+
+        return Inertia::render('Admin/Parametrage/ConfigurationMessages', [
             'labels' => AdmissionSmsTemplates::LABELS,
             'messages' => AdmissionSmsTemplates::resolve($saved),
-            'formatted' => $saved['formatted'] ?? [],
-            'canEdit' => $access->allows($request->user('admin'), 'admin.parametrage.admission-sms.update'),
+            'defaults' => AdmissionSmsTemplates::resolve([]),
+            'urls' => [
+                'update' => $canEdit ? route('admin.parametrage.configuration-messages.update') : null,
+            ],
         ]);
     }
 
@@ -31,7 +37,7 @@ class AdmissionSmsController extends Controller
         $rules['formatted'] = 'sometimes|array:'.implode(',', array_keys(AdmissionSmsTemplates::LABELS));
         $attributes = [];
         foreach (AdmissionSmsTemplates::LABELS as $key => $label) {
-            $rules["messages.$key"] = 'required|string|max:480';
+            $rules["messages.$key"] = 'required|string';
             $attributes["messages.$key"] = $label;
             $rules["formatted.$key"] = 'nullable|string|max:12000';
             $attributes["formatted.$key"] = $label;
@@ -53,12 +59,12 @@ class AdmissionSmsController extends Controller
             'admission_sms_templates' => array_replace($saved, $data['messages'], ['formatted' => $formatted]),
         ]);
 
-        return to_route('admin.parametrage.admission-sms.index')->with('success', 'Les modèles de SMS ont été enregistrés.');
+        return to_route('admin.parametrage.configuration-messages.index')->with('success', 'Les modèles de SMS ont été enregistrés.');
     }
 
     private function cleanFormatting(string $html): string
     {
-        $document = new \DOMDocument();
+        $document = new \DOMDocument;
         $document->loadHTML('<!DOCTYPE html><meta charset="UTF-8"><body>'.$html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
 
         $render = function (\DOMNode $node) use (&$render): string {
@@ -66,7 +72,7 @@ class AdmissionSmsController extends Controller
                 return e($node->data);
             }
 
-            if (!$node instanceof \DOMElement || in_array($node->tagName, ['script', 'style'], true)) {
+            if (! $node instanceof \DOMElement || in_array($node->tagName, ['script', 'style'], true)) {
                 return '';
             }
 
