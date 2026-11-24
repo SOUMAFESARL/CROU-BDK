@@ -18,6 +18,7 @@ use App\Http\Services\CampagneValidationService;
 use App\Models\Campagne;
 use App\Services\AdminAccess;
 use App\Services\AdmissionResultDiffusion;
+use App\Services\AdmissionPermissions;
 use Illuminate\Support\Facades\DB;
 use App\Services\AdminViewAccess;
 use App\Http\Services\DossierWorkflow;
@@ -71,14 +72,34 @@ class CampagnesAdmissionController extends Controller
 
     public function liste(Request $request, ?string $etat = null)
     {
+        $permissions = app(AdmissionPermissions::class);
+        $admin = $request->user('admin');
+        $etat ??= $request->query('etat');
+        abort_unless($etat === null || is_string($etat), 403);
+        if (!$etat && !$request->wantsJson() && !$permissions->allows($admin, 'toutes')) {
+            $destination = $permissions->demandesUrl($admin) ?? $permissions->url($admin, 'validees') ?? $permissions->url($admin, 'definitives');
+            abort_unless($destination, 403);
+
+            return redirect($destination);
+        }
+
+        $filtre = self::FILTRES_ADMISSION_ANCIENS[(string) $etat] ?? $etat;
+        $filtre = in_array($filtre, self::FILTRES_ADMISSION, true) ? $filtre : 'toutes';
+        abort_unless($permissions->sections($admin, $filtre) !== [], 403);
+        if ($request->wantsJson()) {
+            abort_unless($permissions->allows($admin, 'toutes'), 403);
+        }
+
         try {
             if (!$request->wantsJson()) {
-                return $this->pageAdmissions($request, $etat ?? $request->get('etat'));
+                return $this->pageAdmissions($request, $filtre);
             }
             $result = $this->etudiantService->getListeEtudiantsWithStats($etat ?? $request->get('etat'));
             $result = app(\App\Services\AdminViewData::class)->filter($result, $request->user('admin'));
 
             return response()->json($result);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
         } catch (\Exception $e) {
             if ($request->wantsJson()) {
                 return response()->json([
@@ -95,15 +116,20 @@ class CampagnesAdmissionController extends Controller
      * Liste des dossiers de candidature (page React `Admin/Hebergement/Admissions/Index`).
      * Les colonnes personnelles et l'historique ne sont envoyés qu'avec les droits correspondants.
      */
-    private function pageAdmissions(Request $request, ?string $filtre)
+    private function pageAdmissions(Request $request, string $filtre)
     {
         $admin = $request->user('admin');
         $access = app(AdminAccess::class);
         $vues = app(AdminViewAccess::class);
         $personnel = $vues->allows($admin, 'admissions.personal');
         $historique = $vues->allows($admin, 'admissions.history');
-        $filtre = self::FILTRES_ADMISSION_ANCIENS[(string) $filtre] ?? $filtre;
-        $etat = in_array($filtre, self::FILTRES_ADMISSION, true) ? $filtre : 'toutes';
+        $etat = $filtre;
+        $permissions = app(AdmissionPermissions::class);
+        $sections = $permissions->sections($admin, $etat);
+        $requestedList = $request->query('liste');
+        abort_unless($requestedList === null || is_string($requestedList), 403);
+        $requestedList = $permissions->isListTab($etat, $requestedList) ? $requestedList : null;
+        abort_if($requestedList !== null && !isset($sections[$requestedList]), 403);
         $recherche = trim((string) $request->query('q', ''));
         $etatDossier = (string) $request->query('etat_dossier', '');
         $etatDossier = array_key_exists($etatDossier, DossierWorkflow::LABELS) ? $etatDossier : '';
@@ -125,6 +151,9 @@ class CampagnesAdmissionController extends Controller
         }
         // Campagne choisie conservée par les liens de la liste des demandes (indicateurs, onglets, téléchargements).
         $choixCampagne = $parCampagne && $campagne && $request->filled('campagne') ? ['campagne' => (string) $campagne->getKey()] : [];
+        $filtersUrls = collect(self::FILTRES_ADMISSION)->mapWithKeys(fn ($screen) => [
+            $screen => $permissions->url($admin, $screen, in_array($screen, self::FILTRES_PAR_CAMPAGNE, true) ? $choixCampagne : []),
+        ]);
         $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
         $criteres = app(\App\Http\Services\Eligibilite\CriteresCampagne::class);
         $etudiants = match ($etat) {
@@ -143,11 +172,14 @@ class CampagnesAdmissionController extends Controller
             $duType = array_keys(array_filter($volets, fn (string $volet) => $volet === $typeDemande));
             $etudiants = $etudiants === null ? $duType : array_values(array_intersect($etudiants, $duType));
         }
-        $dossiers = $repository->getAdmissionsPage('demandes', 10, $recherche, $etatDossier, $etudiants);
+        $rawList = in_array($etat, ['toutes', 'rejetees', 'refusees'], true)
+            || ($etat === 'recevables' && ($requestedList ?? array_key_first($sections)) === 'demandes');
+        $dossiers = $repository->getAdmissionsPage('demandes', 10, $recherche, $etatDossier, $rawList ? $etudiants : []);
         // Levée des refus automatiques (barème) : par dossier, ou pour les dossiers cochés dans la liste.
         $decision = app(DecisionAutomatiqueDossier::class);
-        $peutLever = $access->allows($admin, 'admin.hebergement.campagnes_admission.lever_refus_automatiques');
-        $refusAutomatiques = $peutLever
+        $scopeRefus = $etat === 'recevables' ? 'recevables_demandes' : $etat;
+        $peutLever = $permissions->allows($admin, $scopeRefus, 'lever_refus');
+        $refusAutomatiques = $rawList && $peutLever
             ? $decision->refusAutomatiques(collect($dossiers->items())->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande?->getKey())->all())
             : [];
         // Type de demande (admission / réadmission) : volet de l'étudiant dans la campagne de sa demande.
@@ -159,6 +191,16 @@ class CampagnesAdmissionController extends Controller
         $listesProvisoires = isset($typesListe[$etat])
             ? $this->classementProvisoire($request, $typesListe[$etat], $population, $classement, $campagne, $recherche, $typeDemande, $personnel, $vues->allows($admin, 'admissions.documents'), $url, $access, $admin, $choixCampagne)
             : null;
+
+        $commission = $permissions->sections($admin, 'validees');
+        $definitives = $permissions->sections($admin, 'definitives');
+        $nombreDefinitives = match (count($definitives)) {
+            0 => 0,
+            2 => count($classement['definitives']),
+            default => $population->whereIn('id_etudiant', $classement['definitives'])
+                ->filter(fn (Etudiant $student) => isset($definitives[$student->derniereDemande?->liste_approbation_commission === 'attente' ? 'attente' : 'validees']))
+                ->count(),
+        };
 
         return Inertia::render('Admin/Hebergement/Admissions/Index', [
             'dossiers' => $dossiers->through(fn (Etudiant $etudiant) => [
@@ -179,12 +221,13 @@ class CampagnesAdmissionController extends Controller
                 'refus_automatique' => in_array((string) $etudiant->derniereDemande?->getKey(), $refusAutomatiques, true),
             ]),
             'stats' => [
-                'toutes' => $population->count(),
-                'recevables' => count($classement['recevables']),
-                'rejetees' => count($classement['rejetees']),
-                'refusees' => count($classement['refusees']),
-                'validees' => count($classement['validees']) + count($classement['en_attente']),
-                'definitives' => count($classement['definitives']),
+                'toutes' => $filtersUrls['toutes'] ? $population->count() : 0,
+                'recevables' => $filtersUrls['recevables'] ? count($classement['recevables']) : 0,
+                'rejetees' => $filtersUrls['rejetees'] ? count($classement['rejetees']) : 0,
+                'refusees' => $filtersUrls['refusees'] ? count($classement['refusees']) : 0,
+                'validees' => (isset($commission['validees']) ? count($classement['validees']) : 0)
+                    + (isset($commission['attente']) ? count($classement['en_attente']) : 0),
+                'definitives' => $nombreDefinitives,
             ],
             'etat' => $etat,
             'classement' => $listesProvisoires,
@@ -208,11 +251,10 @@ class CampagnesAdmissionController extends Controller
                 'distance_min' => $campagne->distance_min,
             ] : null,
             'urls' => [
-                'campagnes' => $url('admin.hebergement.campagnes_admission.campagnes'),
-                'leverRefus' => $peutLever ? route('admin.hebergement.campagnes_admission.lever_refus_automatiques') : null,
-                'filtres' => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
-                    ? collect(self::FILTRES_ADMISSION)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.campagnes_admission.admission', ['etat' => $f] + (in_array($f, self::FILTRES_PAR_CAMPAGNE, true) ? $choixCampagne : []))])
-                    : null,
+                'campagnes' => $permissions->allows($admin, 'campagnes') ? $url('admin.hebergement.campagnes_admission.campagnes') : null,
+                'leverRefus' => $rawList && $peutLever ? route(AdmissionPermissions::ROUTE.'lever_refus_automatiques', ['scope' => $scopeRefus]) : null,
+                'admissions' => $permissions->demandesUrl($admin, $choixCampagne),
+                'filtres' => $filtersUrls,
             ],
         ]);
     }
@@ -226,7 +268,20 @@ class CampagnesAdmissionController extends Controller
         $etudiant = app(\App\Services\AdminStudentView::class)->find($id, $admin);
         $derniere = $etudiant->derniereDemande;
         $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
-        $voirAdmissions = $admin->hasPermission('hebergement.admissions.view');
+        $permissions = app(AdmissionPermissions::class);
+        $voirAdmissions = $permissions->allows($admin, 'toutes');
+        if (!$voirAdmissions && $derniere) {
+            $classe = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classe($etudiant);
+            $scope = match ($classe) {
+                \App\Http\Services\Eligibilite\RecevabiliteDemandes::REJETEE => 'rejetees',
+                \App\Http\Services\Eligibilite\RecevabiliteDemandes::REFUSEE => 'refusees',
+                \App\Http\Services\Eligibilite\RecevabiliteDemandes::DEFINITIVE => 'definitive_'.($derniere->liste_approbation_commission === 'attente' ? 'attente' : 'validees'),
+                default => $this->scopeDossier($etudiant, $classe),
+            };
+            $voirAdmissions = ($scope && $permissions->allows($admin, $scope))
+                || ($classe === \App\Http\Services\Eligibilite\RecevabiliteDemandes::RECEVABLE && $permissions->allows($admin, 'recevables_demandes'));
+        }
+        abort_unless($voirAdmissions || $admin->hasPermission('hebergement.residents.view') || $admin->hasPermission('hebergement.attributions.view'), 403);
         // Bouton « Déroger » : demande des listes « Demandes irrecevables » ou « Demandes refusées », tant que la liste
         // des demandes validées de son volet n'est pas approuvée en commission (`AdmissionDerogationService::obstacle`).
         $routeDeroger = 'admin.hebergement.campagnes_admission.derogations.store';
@@ -467,8 +522,18 @@ class CampagnesAdmissionController extends Controller
         // Onglets : sur les demandes recevables, une liste provisoire par volet ouvert par la campagne (admission seule →
         // pas de réadmission) ; sur la décision de la commission et les listes définitives, les demandes validées puis la
         // file d'attente.
-        $onglets = $provisoire ? ['demandes', ...$volets] : ['validees', 'attente'];
-        $liste = $onglets === [] ? 'toutes' : (in_array($request->query('liste'), $onglets, true) ? $request->query('liste') : $onglets[0]);
+        $etat = ['provisoire' => 'recevables', 'validee' => 'validees', 'definitive' => 'definitives'][$type];
+        $permissions = app(AdmissionPermissions::class);
+        $sections = $permissions->sections($admin, $etat);
+        $ouverts = $provisoire ? ['demandes', ...$volets] : ['validees', 'attente'];
+        $onglets = array_values(array_intersect($ouverts, array_keys($sections)));
+        if ($onglets === []) {
+            $onglets = array_keys($sections);
+        }
+        $liste = $request->query('liste');
+        $liste = in_array($liste, $onglets, true) ? $liste : $onglets[0];
+        $scope = $sections[$liste];
+        $peut = fn (string $action) => $permissions->allows($admin, $scope, $action);
         $voletFiltre = $unique && in_array($typeDemande, $volets, true) ? $typeDemande : null;
         // Décision de la commission / listes définitives : l'onglet ouvert retient les demandes validées ou la file
         // d'attente (listes définitives : liste d'origine de l'approbation).
@@ -478,7 +543,6 @@ class CampagnesAdmissionController extends Controller
             ->flatMap(fn (string $volet) => collect($listes[$volet] ?? [])->map(fn (array $ligne) => $ligne + ['volet' => $volet]))
             ->values();
         $source = $decisionFiltre ? $lignesVolets->where('commission', $decisionFiltre)->values() : $lignesVolets;
-        $etat = ['provisoire' => 'recevables', 'validee' => 'validees', 'definitive' => 'definitives'][$type];
         // Changer d'onglet de la décision de la commission ou des listes définitives conserve le type de demande filtré.
         $lien = fn (string $onglet) => $access->allows($admin, 'admin.hebergement.campagnes_admission.admission')
             ? route('admin.hebergement.campagnes_admission.admission', ['etat' => $etat] + ($onglet === 'demandes' ? [] : ['liste' => $onglet]) + ($voletFiltre ? ['type' => $voletFiltre] : []) + $choixCampagne)
@@ -486,7 +550,7 @@ class CampagnesAdmissionController extends Controller
         // Approbation en commission de l'onglet ouvert : les demandes validées (« Demandes validées »), ou la file
         // d'attente (validée puis approuvée) ; elles passent dans la liste définitive.
         $routeApprobation = $liste === 'attente' ? 'admin.hebergement.campagnes_admission.file_attente_approuver' : 'admin.hebergement.campagnes_admission.liste_validee_approuver';
-        $approbation = $type === 'validee' && $volets !== [] && $access->allows($admin, $routeApprobation)
+        $approbation = $type === 'validee' && $volets !== [] && $peut('approuver')
             ? [
                 // La campagne choisie dans le bandeau est approuvée (celle affichée).
                 'url' => route($routeApprobation, ['volet' => $voletFiltre ?? 'toutes'] + $choixCampagne),
@@ -500,7 +564,7 @@ class CampagnesAdmissionController extends Controller
         $publication = $etatPublication === null ? null : [
             'publiee' => $etatPublication['publiee'],
             'date' => $etatPublication['date'],
-            'url' => ! $etatPublication['publiee'] && $volets !== [] && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_definitive_publier')
+            'url' => ! $etatPublication['publiee'] && $volets !== [] && $peut('publier')
                 ? route('admin.hebergement.campagnes_admission.liste_definitive_publier', ['liste' => $liste, 'volet' => $voletFiltre ?? 'toutes'])
                 : null,
             'nombre' => $source->count(),
@@ -508,9 +572,9 @@ class CampagnesAdmissionController extends Controller
         // Téléchargement de la liste provisoire ou de la liste définitive ouverte, une fois publiée (Excel, PDF
         // imprimable) ; liste définitive : type de demande filtré.
         $exports = match (true) {
-            $provisoire && $liste !== 'demandes' && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_provisoire_export') => collect(['excel', 'pdf'])
+            $provisoire && $liste !== 'demandes' && $peut('export') => collect(['excel', 'pdf'])
                 ->mapWithKeys(fn ($format) => [$format => route('admin.hebergement.campagnes_admission.liste_provisoire_export', ['volet' => $liste, 'format' => $format] + $choixCampagne)])->all(),
-            $type === 'definitive' && $etatPublication['publiee'] && $access->allows($admin, 'admin.hebergement.campagnes_admission.liste_definitive_export') => collect(['excel', 'pdf'])
+            $type === 'definitive' && $etatPublication['publiee'] && $peut('export') => collect(['excel', 'pdf'])
                 ->mapWithKeys(fn ($format) => [$format => route('admin.hebergement.campagnes_admission.liste_definitive_export', ['liste' => $liste, 'volet' => $voletFiltre ?? 'toutes', 'format' => $format])])->all(),
             default => null,
         };
@@ -519,12 +583,12 @@ class CampagnesAdmissionController extends Controller
         $approuvees = $type === 'validee'
             ? collect($voletFiltre ? [$voletFiltre] : $volets)->flatMap(fn (string $volet) => $partage['definitives'][$volet] ?? [])
             : collect();
-        // Validation / rejet (transition `admin.dossiers.transition`) depuis la liste provisoire et pour une demande en
+        // Validation / rejet avec les droits de la liste courante depuis la liste provisoire et pour une demande en
         // attente, rejet seul pour une demande validée, aucune action sur la liste définitive ; mise en attente depuis la
         // liste provisoire et depuis les demandes validées (le dossier revient alors en « Soumis »).
-        $peutDecider = $type !== 'definitive' && $access->allows($admin, 'admin.dossiers.transition');
+        $decisionsAutorisees = array_keys(array_filter(['eligible' => $peut('valider'), 'refuse' => $peut('refuser')]));
         $peutMettreEnAttente = ($provisoire || ($type === 'validee' && $liste === 'validees'))
-            && $access->allows($admin, 'admin.hebergement.campagnes_admission.mettre_en_attente');
+            && $peut('attente');
         // Liste provisoire clôturée : la liste des demandes validées du volet a été approuvée en commission ; ses
         // demandes ne peuvent plus être validées ni mises en attente (seulement rejetées).
         $clotures = $provisoire ? app(\App\Http\Services\Eligibilite\VerrouListeProvisoire::class)->voletsClotures($campagne ? (string) $campagne->getKey() : null) : [];
@@ -549,15 +613,15 @@ class CampagnesAdmissionController extends Controller
             $lignes = (new LengthAwarePaginator($courantes, $filtrees->count(), 10, $page, [
                 'path' => $request->url(),
                 'query' => $request->query(),
-            ]))->through(function (array $ligne) use ($type, $personnel, $url, $pieces, $filieres, $peutDecider, $peutMettreEnAttente, $clotures) {
+            ]))->through(function (array $ligne) use ($type, $personnel, $url, $pieces, $filieres, $decisionsAutorisees, $peutMettreEnAttente, $clotures) {
                 $etudiant = $ligne['etudiant'];
                 $demande = $etudiant->derniereDemande;
                 // Listes définitives : `commission` est la liste d'origine de l'approbation (pas une décision en cours).
                 $commission = $type === 'validee' ? ($ligne['commission'] ?? null) : null;
                 $proposees = $commission === 'validee' || in_array($ligne['volet'], $clotures, true) ? ['refuse'] : ['eligible', 'refuse'];
                 // Un refus ne se lève pas depuis la liste : il passe par le réexamen sur la fiche du dossier.
-                $decisions = $peutDecider && $demande && $demande->etat_dossier !== 'refuse'
-                    ? array_values(array_intersect($proposees, DossierWorkflow::NEXT[$demande->etat_dossier] ?? []))
+                $decisions = $decisionsAutorisees && $demande && $demande->etat_dossier !== 'refuse'
+                    ? array_values(array_intersect($decisionsAutorisees, $proposees, DossierWorkflow::NEXT[$demande->etat_dossier] ?? []))
                     : [];
                 // Mise en attente : demande recevable encore à décider, ou demande validée (retour en « Soumis » permis).
                 $attente = $peutMettreEnAttente && $demande && ! in_array($ligne['volet'], $clotures, true) && ($commission === 'validee'
@@ -597,7 +661,7 @@ class CampagnesAdmissionController extends Controller
                         'date' => $commission === 'attente' && $demande?->date_attente_commission ? Carbon::parse($demande->date_attente_commission)->format('Y-m-d H:i') : null,
                     ] : null,
                     'decision' => $decisions || $attente ? [
-                        'url' => route('admin.dossiers.transition', $demande),
+                        'url' => route(AdmissionPermissions::ROUTE.'decision_liste', $demande),
                         'valider' => in_array('eligible', $decisions, true),
                         'rejeter' => in_array('refuse', $decisions, true),
                         'attente' => $attente,
@@ -616,20 +680,22 @@ class CampagnesAdmissionController extends Controller
             'decision' => $decisionFiltre,
             'campagne' => $campagne?->annee_campagne,
             'compteurs' => [
-                'demandes' => count($classement['recevables']),
-                'admission' => count($listes['admission']),
-                'readmission' => count($listes['readmission']),
-                'toutes' => count($listes['admission']) + count($listes['readmission']),
+                'demandes' => isset($sections['demandes']) ? count($classement['recevables']) : 0,
+                'admission' => isset($sections['admission']) ? count($listes['admission']) : 0,
+                'readmission' => isset($sections['readmission']) ? count($listes['readmission']) : 0,
+                'toutes' => $provisoire
+                    ? (isset($sections['admission']) ? count($listes['admission']) : 0) + (isset($sections['readmission']) ? count($listes['readmission']) : 0)
+                    : (isset($sections['validees'], $sections['attente']) ? count($listes['admission']) + count($listes['readmission']) : $source->count()),
                 // Onglets de la décision de la commission et des listes définitives : demandes validées / file d'attente
                 // (type de demande filtré).
-                'validees' => $lignesVolets->where('commission', 'validee')->count(),
-                'attente' => $lignesVolets->where('commission', 'attente')->count(),
+                'validees' => isset($sections['validees']) ? $lignesVolets->where('commission', 'validee')->count() : 0,
+                'attente' => isset($sections['attente']) ? $lignesVolets->where('commission', 'attente')->count() : 0,
             ],
             // Décision de la commission : demandes déjà approuvées pour la campagne depuis chaque onglet (type de demande
             // filtré) ; null ailleurs.
             'approuvees' => $type === 'validee' ? [
-                'validees' => $approuvees->where('commission', 'validee')->count(),
-                'attente' => $approuvees->where('commission', 'attente')->count(),
+                'validees' => isset($sections['validees']) ? $approuvees->where('commission', 'validee')->count() : 0,
+                'attente' => isset($sections['attente']) ? $approuvees->where('commission', 'attente')->count() : 0,
             ] : null,
             'lignes' => $lignes,
             'colonnes' => ['age' => $personnel],
@@ -683,6 +749,7 @@ class CampagnesAdmissionController extends Controller
      */
     public function publierListeDefinitive(Request $request, string $liste, string $volet, AdmissionResultDiffusion $diffusion)
     {
+        $this->autoriserListe($request, 'definitive_'.$liste, 'publier');
         if (! Schema::hasTable('publication_liste_definitive') || ! Schema::hasTable(AdmissionResultDiffusion::TABLE)) {
             throw ValidationException::withMessages(['publication' => 'La publication n’est pas encore disponible : la base de données doit être mise à jour.']);
         }
@@ -848,6 +915,7 @@ class CampagnesAdmissionController extends Controller
      */
     public function exportListeProvisoire(Request $request, string $volet, string $format)
     {
+        $this->autoriserListe($request, 'provisoire_'.$volet, 'export');
         $admin = $request->user('admin');
         $personnel = app(AdminViewAccess::class)->allows($admin, 'admissions.personal');
         // Demandes de la campagne choisie dans la liste des demandes (`?campagne=`, par défaut la campagne active).
@@ -881,6 +949,7 @@ class CampagnesAdmissionController extends Controller
      */
     public function exportListeDefinitive(Request $request, string $liste, string $volet, string $format)
     {
+        $this->autoriserListe($request, 'definitive_'.$liste, 'export');
         $admin = $request->user('admin');
         $personnel = app(AdminViewAccess::class)->allows($admin, 'admissions.personal');
         $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes();
@@ -1035,6 +1104,7 @@ class CampagnesAdmissionController extends Controller
      */
     public function approuverListeValidee(Request $request, string $volet)
     {
+        $this->autoriserListe($request, 'commission_validees', 'approuver');
         $admin = $request->user('admin');
         [$volets, $listes] = $this->listesCommission($request);
         $approuves = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
@@ -1067,6 +1137,7 @@ class CampagnesAdmissionController extends Controller
      */
     public function approuverFileAttente(Request $request, string $volet)
     {
+        $this->autoriserListe($request, 'commission_attente', 'approuver');
         $admin = $request->user('admin');
         [$volets, $listes] = $this->listesCommission($request);
         $approuves = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
@@ -1085,7 +1156,7 @@ class CampagnesAdmissionController extends Controller
         $echecs = [];
         foreach ($demandes as $id) {
             try {
-                $workflow->admin($id, 'eligible');
+                $workflow->admin($id, 'eligible', null, [], ['commission_attente', 'approuver']);
             } catch (ValidationException $exception) {
                 $echecs[$id] = (string) collect($exception->errors())->flatten()->first();
 
@@ -1145,6 +1216,38 @@ class CampagnesAdmissionController extends Controller
      * - depuis les « Demandes validées » (pas encore approuvées) : le dossier revient d'abord de « Recevable » à « Soumis »
      *   (transition `soumis` par `DossierWorkflow`, tracée dans l'historique), puis la demande est mise en attente.
      */
+    private function autoriserListe(Request $request, ?string $scope, string $action): void
+    {
+        abort_unless($scope && app(AdmissionPermissions::class)->allows($request->user('admin'), $scope, $action), 403);
+    }
+
+    private function scopeDossier(Etudiant $etudiant, ?string $classe): ?string
+    {
+        return match ($classe) {
+            \App\Http\Services\Eligibilite\RecevabiliteDemandes::RECEVABLE => 'provisoire_'.(
+                app(\App\Http\Services\Eligibilite\CriteresCampagne::class)->voletsDemandes([$etudiant->derniereDemande])[(string) $etudiant->getKey()] ?? ''
+            ),
+            \App\Http\Services\Eligibilite\RecevabiliteDemandes::VALIDEE => 'commission_validees',
+            \App\Http\Services\Eligibilite\RecevabiliteDemandes::EN_ATTENTE => 'commission_attente',
+            default => null,
+        };
+    }
+
+    public function deciderDansListe(Request $request, DemandeEtudiant $demande)
+    {
+        $data = $request->validate(['etat' => 'required|in:eligible,refuse', 'motif' => 'nullable|string|max:5000']);
+        $etudiant = Etudiant::with('derniereDemande.campagne')->findOrFail($demande->etudiant_id);
+        abort_unless((string) $etudiant->derniereDemande?->getKey() === (string) $demande->getKey(), 403);
+        $classe = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classe($etudiant);
+        $scope = $this->scopeDossier($etudiant, $classe);
+        $action = $data['etat'] === 'eligible' ? 'valider' : 'refuser';
+        $this->autoriserListe($request, $scope, $action);
+        $updated = app(DossierWorkflow::class)->admin($demande->getKey(), $data['etat'], $data['motif'] ?? null, [], [$scope, $action]);
+
+        return $request->expectsJson() ? response()->json(['data' => $updated->load('transitions')])
+            : back()->with('success', 'Dossier : '.DossierWorkflow::LABELS[$updated->etat_dossier].'.');
+    }
+
     public function mettreEnAttente(Request $request, string $demande)
     {
         $recevabilite = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class);
@@ -1159,13 +1262,16 @@ class CampagnesAdmissionController extends Controller
         }
         $classe = $recevabilite->classe($etudiant);
         if ($classe === $recevabilite::EN_ATTENTE) {
+            $this->autoriserListe($request, 'commission_attente', 'view');
             throw ValidationException::withMessages(['attente' => 'Cette demande est déjà en attente dans la décision de la commission.']);
         }
+        if (!in_array($classe, [$recevabilite::VALIDEE, $recevabilite::RECEVABLE], true)) {
+            throw ValidationException::withMessages(['attente' => 'Seule une demande recevable d’une liste provisoire ou une demande validée non approuvée peut être mise en attente.']);
+        }
+        $this->autoriserListe($request, $this->scopeDossier($etudiant, $classe), 'attente');
         if ($classe === $recevabilite::VALIDEE) {
             // Demande validée : retour en « Soumis » (le workflow vérifie la transition et la campagne active).
-            app(DossierWorkflow::class)->admin($dossier->getKey(), 'soumis', 'Mise en attente par la commission.');
-        } elseif ($classe !== $recevabilite::RECEVABLE) {
-            throw ValidationException::withMessages(['attente' => 'Seule une demande recevable d’une liste provisoire ou une demande validée non approuvée peut être mise en attente.']);
+            app(DossierWorkflow::class)->admin($dossier->getKey(), 'soumis', 'Mise en attente par la commission.', [], ['commission_validees', 'attente']);
         } elseif (app(\App\Http\Services\Eligibilite\VerrouListeProvisoire::class)->bloque($dossier)) {
             // Liste provisoire clôturée (liste des demandes validées approuvée en commission) : plus de mise en attente.
             throw ValidationException::withMessages(['attente' => 'La liste des demandes validées a déjà été approuvée en commission : cette demande ne peut plus être mise en attente.']);
@@ -1227,7 +1333,24 @@ class CampagnesAdmissionController extends Controller
             ['demandes' => 'required|array|min:1|max:500', 'demandes.*' => 'string|max:150', 'motif' => 'required|string|max:2000'],
             ['motif.required' => 'Le motif de la dérogation est obligatoire.', 'motif.max' => 'Le motif de la dérogation ne doit pas dépasser 2 000 caractères.'],
         );
-        $resultat = app(DecisionAutomatiqueDossier::class)->rendreEligibles($data['motif'], $data['demandes']);
+        $scope = $request->query('scope', 'dossier');
+        abort_unless(is_string($scope), 403);
+        $this->autoriserListe($request, $scope, 'lever_refus');
+        $ids = $data['demandes'];
+        $filtre = match ($scope) {
+            'recevables_demandes' => 'recevables',
+            'rejetees', 'refusees' => $scope,
+            default => null,
+        };
+        if ($filtre) {
+            $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes()
+                ->filter(fn (Etudiant $student) => in_array((string) $student->derniereDemande?->getKey(), $ids, true));
+            $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
+            $autorisations = $population->whereIn('id_etudiant', $classement[$filtre])
+                ->map(fn (Etudiant $student) => (string) $student->derniereDemande->getKey())->all();
+            abort_if(array_diff($ids, $autorisations) !== [], 403);
+        }
+        $resultat = app(DecisionAutomatiqueDossier::class)->rendreEligibles($data['motif'], $ids, $scope);
         if ($resultat['eligibles'] === 0 && !$resultat['echecs']) {
             return back()->with('error', 'Aucun dossier refusé automatiquement à rendre éligible.');
         }
@@ -1250,6 +1373,14 @@ class CampagnesAdmissionController extends Controller
      */
     public function campagnes(Request $request, AdminAccess $access, ?string $etat = null)
     {
+        $permissions = app(AdmissionPermissions::class);
+        $admin = $request->user('admin');
+        if (!$permissions->allows($admin, 'campagnes')) {
+            $destination = $permissions->demandesUrl($admin) ?? $permissions->url($admin, 'validees') ?? $permissions->url($admin, 'definitives');
+            abort_unless($destination, 403);
+
+            return redirect($destination);
+        }
         $etat = $etat ?? $request->get('etat');
         $etat = in_array($etat, self::FILTRES_CAMPAGNE, true) ? $etat : 'tous';
         $result = $this->campagneService->getListeCampagnesWithStats($etat === 'tous' ? null : $etat);
@@ -1307,9 +1438,9 @@ class CampagnesAdmissionController extends Controller
             'annees' => $annees,
             'urls' => [
                 'hebergement' => route('admin.hebergement.index'),
-                'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
-                'validees' => $url('admin.hebergement.campagnes_admission.admission', ['etat' => 'validees']),
-                'definitives' => $url('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives']),
+                'admissions' => $permissions->demandesUrl($admin),
+                'validees' => $permissions->url($admin, 'validees'),
+                'definitives' => $permissions->url($admin, 'definitives'),
                 'create' => $url('admin.hebergement.campagnes_admission.create_campagne'),
                 'filtres' => collect(self::FILTRES_CAMPAGNE)
                     // Changer de statut conserve la recherche et l'année universitaire en cours.

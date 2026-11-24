@@ -239,6 +239,7 @@ Route::middleware(['admin'])->group(function () {
         ->group(function () {
 
             Route::get('/liste/{etat?}', 'liste')->name('admission');
+            Route::post('/demandes/{demande}/decision-liste', 'deciderDansListe')->name('decision_liste');
             Route::get('/liste-provisoire/{volet}/{format}', 'exportListeProvisoire')
                 ->whereIn('volet', ['admission', 'readmission'])->whereIn('format', ['excel', 'pdf'])
                 ->name('liste_provisoire_export');

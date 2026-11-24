@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\admin\immobilier\campagnes_admission\CampagnesAdmissionController;
+use App\Services\AdmissionPermissions;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
             $t->boolean('is_rejet')->default(false);
         });
         $this->creerTablesEditionEtudiant();
+        (require database_path('migrations/2026_11_23_000002_create_admission_result_deliveries_table.php'))->up();
         Schema::table('admission_derogations', function (Blueprint $t) {
             $t->string('etudiant_id')->nullable();
             $t->string('campagne_id')->nullable();
@@ -40,10 +42,18 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
     }
 
     /** Admin qui voit les admissions sans les données personnelles ni les documents (et, par défaut, sans l'historique). */
-    private function agentLimite(array $permissions = []): void
+    private function agentLimite(array $permissions = [], bool $granular = false): void
     {
         $actor = Mockery::mock(\App\Models\User::class)->makePartial();
         $actor->fill(['id_user' => 'limite', 'name' => 'Agent']);
+        if (!$granular) {
+            $permissions = [...$permissions, ...AdmissionPermissions::slugs('view'), ...AdmissionPermissions::slugs('export')];
+        }
+        if (in_array('hebergement.admissions.validate', $permissions, true)) {
+            foreach (['valider', 'refuser', 'attente', 'approuver', 'publier', 'lever_refus', 'traiter', 'document', 'decision'] as $action) {
+                array_push($permissions, ...AdmissionPermissions::slugs($action));
+            }
+        }
         $actor->shouldReceive('hasPermission')->andReturnUsing(fn ($permission) => in_array($permission, ['hebergement.admissions.view', ...$permissions], true));
         $this->actingAs($actor, 'admin');
     }
@@ -57,6 +67,23 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
         return app()->call([app(CampagnesAdmissionController::class), $action], ['request' => $request, ...$parametres])
             ->toResponse($request)->getData(true);
+    }
+
+
+    public function test_les_permissions_distinguent_les_sous_onglets_et_leurs_actions(): void
+    {
+        $this->agentLimite([
+            AdmissionPermissions::slug('demandes'),
+            AdmissionPermissions::slug('recevables'),
+            AdmissionPermissions::slug('provisoire_admission'),
+        ], granular: true);
+
+        $page = $this->page('liste', ['etat' => 'recevables']);
+        $this->assertSame(['admission'], $page['props']['classement']['onglets']);
+        $this->assertNull($page['props']['classement']['exports']);
+        $this->assertNull($page['props']['urls']['filtres']['toutes']);
+        $this->get(route(AdmissionPermissions::ROUTE.'admission', ['etat' => 'recevables', 'liste' => 'readmission']))->assertForbidden();
+        $this->get(route(AdmissionPermissions::ROUTE.'liste_provisoire_export', ['volet' => 'admission', 'format' => 'excel']))->assertForbidden();
     }
 
     public function test_liste_des_dossiers_sans_donnees_personnelles(): void

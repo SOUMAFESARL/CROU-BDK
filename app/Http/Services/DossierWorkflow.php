@@ -62,9 +62,9 @@ class DossierWorkflow
         }
         return $evaluation;
     }
-    public function transition(string $id, string $to, string $kind, ?string $actorId, ?string $reason = null, array $details = []): DemandeEtudiant
+    public function transition(string $id, string $to, string $kind, ?string $actorId, ?string $reason = null, array $details = [], ?array $admissionPermission = null): DemandeEtudiant
     {
-        $result = DB::transaction(function() use($id,$to,$kind,$actorId,$reason,$details) {
+        $result = DB::transaction(function() use($id,$to,$kind,$actorId,$reason,$details,$admissionPermission) {
             $initial=DemandeEtudiant::findOrFail($id);
             $student=Etudiant::whereKey($initial->etudiant_id)->lockForUpdate()->firstOrFail();
             $request=DemandeEtudiant::whereKey($id)->lockForUpdate()->firstOrFail();
@@ -82,10 +82,13 @@ class DossierWorkflow
             } elseif ($kind==='admin') {
                 $actor=Auth::guard('admin')->user();
                 abort_unless($actor && (string)$actor->getKey()===(string)$actorId
-                    && ($actor->hasPermission('admissions.manage') || $actor->hasPermission('hebergement.admissions.validate')
-                        || $actor->hasPermission('hebergement.residents.update')
-                        || ($to==='eligible' && app(AdmissionDerogationService::class)->canApprove($actor)
-                            && AdmissionDerogation::where('demande_id',$id)->where('status','approved')->where('decided_by',$actorId)->exists())),403);
+                    && ($admissionPermission !== null
+                        ? app(\App\Services\AdmissionPermissions::class)->allows($actor, ...$admissionPermission)
+                        : ($actor->hasPermission('admissions.manage') || $actor->hasPermission('hebergement.admissions.validate')
+                            || $actor->hasPermission(\App\Services\AdmissionPermissions::slug('dossier', 'decision'))
+                            || $actor->hasPermission('hebergement.residents.update')
+                            || ($to==='eligible' && app(AdmissionDerogationService::class)->canApprove($actor)
+                                && AdmissionDerogation::where('demande_id',$id)->where('status','approved')->where('decided_by',$actorId)->exists()))),403);
                 // L'admin ne soumet pas à la place de l'étudiant : « Soumis » n'est qu'un retour en réexamen.
                 if ($to==='accepte' || ($to==='soumis' && !in_array($from,['eligible','confirme','refuse'],true))
                     || ($to==='confirme' && $from==='eligible')) abort(403);
@@ -197,9 +200,9 @@ class DossierWorkflow
         },3);
         return $to==='soumis' && DB::transactionLevel()===0 ? $result->fresh() : $result;
     }
-    public function admin(string $id,string $to,?string $reason=null,array $details=[]): DemandeEtudiant
+    public function admin(string $id,string $to,?string $reason=null,array $details=[],?array $admissionPermission=null): DemandeEtudiant
     {
-        return $this->transition($id,$to,'admin',Auth::guard('admin')->id(),$reason,$details);
+        return $this->transition($id,$to,'admin',Auth::guard('admin')->id(),$reason,$details,$admissionPermission);
     }
     public function legacy(string $id,string $status,?string $reason): void
     {

@@ -13,7 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { KpiFilters } from '@/components/ui/kpi-filters';
+import { KpiFilters, type KpiFilter } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -61,7 +61,7 @@ type Props = {
     campagnes: CampagneOption[];
     /** Liste des demandes : campagne choisie (par défaut la campagne active) ; autres onglets : campagne active. */
     campagneActive: (CampagneOption & { echeance: string | null; moyenne_min: number | string | null; distance_min: number | string | null }) | null;
-    urls: { campagnes: string | null; leverRefus: string | null; filtres: Record<Filtre, string> | null };
+    urls: { campagnes: string | null; admissions: string | null; leverRefus: string | null; filtres: Record<Filtre, string | null> };
 };
 
 type CampagneOption = { id: string; libelle: string | null; annee: string | null; active: boolean };
@@ -336,7 +336,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                 actif={ongletMenu}
                 urls={{
                     campagnes: urls.campagnes,
-                    admissions: urls.filtres?.toutes ?? null,
+                    admissions: urls.admissions,
                     validees: urls.filtres?.validees ?? null,
                     definitives: urls.filtres?.definitives ?? null,
                 }}
@@ -357,12 +357,12 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                 <KpiFilters
                     label="Filtrer les dossiers"
                     active={etat}
-                    items={[
-                        { key: 'toutes', label: 'Toutes les demandes', value: nombre(stats.toutes), tone: 'blue', href: urls.filtres.toutes, extra: 'Demandes reçues' },
-                        { key: 'recevables', label: 'Demandes recevables', value: nombre(stats.recevables), tone: 'green', href: urls.filtres.recevables, extra: 'Tous les critères conformes' },
-                        { key: 'rejetees', label: 'Demandes irrecevables', value: nombre(stats.rejetees), tone: 'plum', href: urls.filtres.rejetees, extra: 'Au moins un critère non conforme' },
-                        { key: 'refusees', label: 'Demandes refusées', value: nombre(stats.refusees), tone: 'red', href: urls.filtres.refusees, extra: 'Par l’administration' },
-                    ]}
+                    items={([
+                        { key: 'toutes', label: 'Toutes les demandes', value: nombre(stats.toutes), tone: 'blue', href: urls.filtres.toutes ?? undefined, extra: 'Demandes reçues' },
+                        { key: 'recevables', label: 'Demandes recevables', value: nombre(stats.recevables), tone: 'green', href: urls.filtres.recevables ?? undefined, extra: 'Tous les critères conformes' },
+                        { key: 'rejetees', label: 'Demandes irrecevables', value: nombre(stats.rejetees), tone: 'plum', href: urls.filtres.rejetees ?? undefined, extra: 'Au moins un critère non conforme' },
+                        { key: 'refusees', label: 'Demandes refusées', value: nombre(stats.refusees), tone: 'red', href: urls.filtres.refusees ?? undefined, extra: 'Par l’administration' },
+                    ] satisfies KpiFilter[]).filter((item) => item.href)}
                 />
             )}
 
