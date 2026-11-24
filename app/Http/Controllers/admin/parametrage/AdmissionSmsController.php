@@ -24,6 +24,7 @@ class AdmissionSmsController extends Controller
         return Inertia::render('Admin/Parametrage/ConfigurationMessages', [
             'labels' => AdmissionSmsTemplates::LABELS,
             'messages' => AdmissionSmsTemplates::resolve($saved),
+            'formatted' => (object) array_intersect_key($saved['formatted'] ?? [], AdmissionSmsTemplates::LABELS),
             'defaults' => AdmissionSmsTemplates::resolve([]),
             'urls' => [
                 'update' => $canEdit ? route('admin.parametrage.configuration-messages.update') : null,
@@ -39,7 +40,7 @@ class AdmissionSmsController extends Controller
         foreach (AdmissionSmsTemplates::LABELS as $key => $label) {
             $rules["messages.$key"] = 'required|string';
             $attributes["messages.$key"] = $label;
-            $rules["formatted.$key"] = 'nullable|string|max:12000';
+            $rules["formatted.$key"] = 'nullable|string';
             $attributes["formatted.$key"] = $label;
         }
 

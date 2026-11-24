@@ -84,6 +84,21 @@ class ConfigurationMessagesPageTest extends TestCase
         $this->assertSame($messages, $this->page()['props']['messages']);
     }
 
+    public function test_la_mise_en_forme_est_nettoyee_et_le_sms_reste_en_texte_brut(): void
+    {
+        $cle = AdmissionSmsTemplates::DEFINITIVE;
+        $messages = array_replace(AdmissionSmsTemplates::resolve([]), [$cle => 'Bravo à vous']);
+
+        $this->put(route('admin.parametrage.configuration-messages.update'), [
+            'messages' => $messages,
+            'formatted' => [$cle => '<p onclick="x()"><strong>Bravo</strong> à vous<script>alert(1)</script></p>'],
+        ])->assertSessionHasNoErrors();
+
+        $props = $this->page()['props'];
+        $this->assertSame('Bravo à vous', $props['messages'][$cle]);
+        $this->assertSame('<p><strong>Bravo</strong> à vous</p>', $props['formatted'][$cle]);
+    }
+
     public function test_un_message_vide_est_refuse_mais_pas_un_message_long(): void
     {
         $this->put(route('admin.parametrage.configuration-messages.update'), ['messages' => [

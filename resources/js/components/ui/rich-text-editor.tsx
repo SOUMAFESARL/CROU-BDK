@@ -12,6 +12,11 @@ const extensions = [
     }),
 ];
 
+/** Mise en forme simple (messages) : gras, italique, souligné et listes, sans titre, lien, citation ni code. */
+const extensionsSimples = [
+    StarterKit.configure({ heading: false, link: false, blockquote: false, code: false, codeBlock: false, strike: false, horizontalRule: false }),
+];
+
 const contenuClasses =
     'text-sm leading-relaxed text-gray-800 [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-3 [&_blockquote]:border-secondary [&_blockquote]:pl-3 [&_blockquote]:text-muted [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-medium [&_h3]:mt-2 [&_h3]:font-medium [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5';
 
@@ -47,6 +52,9 @@ const BOUTONS: Bouton[][] = [
     ],
 ];
 
+const LABELS_AVANCES = ['Titre', 'Citation', 'Lien'];
+const BOUTONS_SIMPLES = BOUTONS.map((groupe) => groupe.filter((bouton) => !LABELS_AVANCES.includes(bouton.label)));
+
 type RichTextEditorProps = {
     id?: string;
     value: string;
@@ -54,22 +62,33 @@ type RichTextEditorProps = {
     onBlur?: () => void;
     invalid?: boolean;
     placeholder?: string;
+    /** Limite la mise en forme à gras, italique, souligné et listes. */
+    simple?: boolean;
+    readOnly?: boolean;
+    'aria-labelledby'?: string;
+    'aria-describedby'?: string;
 };
 
 /** Texte vide pour Tiptap : un paragraphe sans contenu. */
 export const htmlVide = (html: string) => html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim() === '';
 
 /** Éditeur de texte riche Tiptap (remplace Summernote) ; la valeur échangée reste du HTML. */
-export function RichTextEditor({ id, value, onChange, onBlur, invalid, placeholder }: RichTextEditorProps) {
+export function RichTextEditor({ id, value, onChange, onBlur, invalid, placeholder, simple = false, readOnly = false, ...aria }: RichTextEditorProps) {
+    const boutons = simple ? BOUTONS_SIMPLES : BOUTONS;
     const editor = useEditor({
-        extensions,
+        extensions: simple ? extensionsSimples : extensions,
         content: value,
+        editable: !readOnly,
         immediatelyRender: false,
         editorProps: {
             attributes: {
                 ...(id ? { id } : {}),
                 'aria-multiline': 'true',
                 role: 'textbox',
+                'aria-readonly': String(readOnly),
+                'aria-invalid': String(Boolean(invalid)),
+                ...(aria['aria-labelledby'] ? { 'aria-labelledby': aria['aria-labelledby'] } : {}),
+                ...(aria['aria-describedby'] ? { 'aria-describedby': aria['aria-describedby'] } : {}),
                 ...(placeholder ? { 'aria-placeholder': placeholder } : {}),
                 class: cn('min-h-48 max-h-96 overflow-y-auto px-3 py-2.5 outline-none', contenuClasses),
             },
@@ -79,7 +98,7 @@ export function RichTextEditor({ id, value, onChange, onBlur, invalid, placehold
     });
     const etat = useEditorState({
         editor,
-        selector: ({ editor: courant }) => (courant ? BOUTONS.flat().map((bouton) => bouton.actif?.(courant) ?? false) : []),
+        selector: ({ editor: courant }) => (courant ? boutons.flat().map((bouton) => bouton.actif?.(courant) ?? false) : []),
     });
 
     // Valeur remplacée de l'extérieur (réinitialisation, modification d'une autre annonce).
@@ -98,8 +117,8 @@ export function RichTextEditor({ id, value, onChange, onBlur, invalid, placehold
                 invalid && 'border-red-500 focus-within:border-red-500 focus-within:ring-red-100',
             )}
         >
-            <div role="toolbar" aria-label="Mise en forme" className="flex flex-wrap items-center gap-0.5 border-b bg-surface px-1.5 py-1">
-                {BOUTONS.map((groupe, numero) => (
+            {!readOnly && <div role="toolbar" aria-label="Mise en forme" className="flex flex-wrap items-center gap-0.5 border-b bg-surface px-1.5 py-1">
+                {boutons.map((groupe, numero) => (
                     <div key={numero} className={cn('flex items-center gap-0.5', numero > 0 && 'border-l pl-1')}>
                         {groupe.map((bouton) => {
                             const actif = etat?.[index++] ?? false;
@@ -124,7 +143,7 @@ export function RichTextEditor({ id, value, onChange, onBlur, invalid, placehold
                         })}
                     </div>
                 ))}
-            </div>
+            </div>}
             <EditorContent editor={editor} />
         </div>
     );
