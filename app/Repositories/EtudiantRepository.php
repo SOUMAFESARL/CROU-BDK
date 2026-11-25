@@ -1,6 +1,7 @@
 <?php
 namespace App\Repositories;
 
+use App\Models\DemandeEtudiant;
 use App\Models\Etudiant;
 use App\Repositories\Interfaces\EtudiantRepositoryInterface;
 use App\Http\Services\Eligibilite\RecevabiliteDemandes;
@@ -233,13 +234,9 @@ class EtudiantRepository implements EtudiantRepositoryInterface
             ->when($etat === 'demandes', fn ($query) => $query->whereHas('derniereDemande'))
             ->when($etudiants !== null, fn ($query) => $query->whereIn('id_etudiant', $etudiants))
             ->when($recherche !== '', function ($query) use ($recherche) {
-                $motif = '%'.addcslashes($recherche, '%_\\').'%';
-                $query->where(fn ($q) => $q->where('name', 'like', $motif)
-                    ->orWhere('matricule', 'like', $motif)
-                    ->orWhere('telephone1', 'like', $motif)
-                    ->orWhereHas('demandes', fn ($d) => $d->where('numero_demande', 'like', $motif))
-                    ->orWhereHas('assignationsChambre', fn ($a) => $a->where('statut', 'confirmee')
-                        ->whereHas('chambre', fn ($c) => $c->where('numero_chambre', 'like', $motif))));
+                $motif = $this->motifRecherche($recherche);
+                $query->where(fn ($q) => $this->rechercherEtudiant($q, $motif)
+                    ->orWhereHas('demandes', fn ($d) => $d->where('numero_demande', 'like', $motif)));
             })
             ->when($etatDossier !== '', fn ($query) => $query->whereHas('derniereDemande', fn ($d) => $d->where('etat_dossier', $etatDossier)))
             ->when($ordreDonne && $etudiants, fn ($query) => $query->orderByRaw(
@@ -247,6 +244,52 @@ class EtudiantRepository implements EtudiantRepositoryInterface
                 array_values($etudiants),
             ))
             ->orderByDesc('date_inscription')->orderByDesc('id_etudiant')
+            ->paginate($parPage)->withQueryString();
+    }
+
+    private function motifRecherche(string $recherche): string
+    {
+        return '%'.addcslashes($recherche, '%_\\').'%';
+    }
+
+    /** Recherche d'un étudiant : nom, matricule, téléphone ou numéro de chambre (affectation confirmée). */
+    private function rechercherEtudiant($query, string $motif)
+    {
+        return $query->where('name', 'like', $motif)
+            ->orWhere('matricule', 'like', $motif)
+            ->orWhere('telephone1', 'like', $motif)
+            ->orWhereHas('assignationsChambre', fn ($a) => $a->where('statut', 'confirmee')
+                ->whereHas('chambre', fn ($c) => $c->where('numero_chambre', 'like', $motif)));
+    }
+
+    /**
+     * « Toutes les demandes » : historique des demandes déposées pour une campagne, quels que soient leur état et le statut
+     * actuel de l'étudiant (admis à loger, logé, archivé, nouvelle demande déposée pour une autre campagne…).
+     */
+    public function demandesCampagne(string $campagneId): Builder
+    {
+        return DemandeEtudiant::query()->where('campagne_id', $campagneId)->whereHas('etudiant');
+    }
+
+    /**
+     * Page de l'historique des demandes d'une campagne (`demandesCampagne`), la plus récente d'abord.
+     * `$recherche`, `$etatDossier` : comme `getAdmissionsPage`, sur la demande de la campagne ;
+     * `$etudiants` : limite la liste à ces étudiants (identifiants).
+     */
+    public function getDemandesCampagnePage(string $campagneId, int $parPage = 10, string $recherche = '', string $etatDossier = '', ?array $etudiants = null): \Illuminate\Pagination\LengthAwarePaginator
+    {
+        $recherche = trim($recherche);
+
+        return $this->demandesCampagne($campagneId)
+            ->with(['campagne', 'etudiant' => fn ($query) => $query->with(['region', 'ville', 'derniereDemande'])->withCount('demandes')])
+            ->when($etudiants !== null, fn ($query) => $query->whereIn('etudiant_id', $etudiants))
+            ->when($recherche !== '', function ($query) use ($recherche) {
+                $motif = $this->motifRecherche($recherche);
+                $query->where(fn ($q) => $q->where('numero_demande', 'like', $motif)
+                    ->orWhereHas('etudiant', fn ($e) => $e->where(fn ($w) => $this->rechercherEtudiant($w, $motif))));
+            })
+            ->when($etatDossier !== '', fn ($query) => $query->where('etat_dossier', $etatDossier))
+            ->orderByDesc('created_at')->orderByDesc('id_demande')
             ->paginate($parPage)->withQueryString();
     }
 

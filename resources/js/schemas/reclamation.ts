@@ -16,9 +16,9 @@ export const CHAMPS_ETAPE_RECLAMATION: (keyof SaisieReclamation)[][] = [
     ['type_demande', 'motif'],
 ];
 
-/** Traitement d'une réclamation : changement de statut. */
+/** Traitement d'une réclamation : décision. */
 export const traitementReclamationSchema = z.object({
-    statut: z.enum(['ouverte', 'en_attente', 'acceptee', 'rejetee'], 'Choisissez le statut de la réclamation.'),
+    statut: z.enum(['acceptee', 'rejetee'], 'Choisissez la décision.'),
 });
 
 export type TraitementReclamation = z.infer<typeof traitementReclamationSchema>;

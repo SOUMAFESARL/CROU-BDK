@@ -117,7 +117,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         foreach (['nimporte', 'residents', null] as $etat) {
             $props = $this->page('liste', ['etat' => $etat])['props'];
             $this->assertSame('toutes', $props['etat']);
-            // Les étudiants logés ne figurent pas dans la liste des demandes.
+            // « other », logé sans avoir déposé de demande, n'y figure pas.
             $this->assertSame(['student'], collect($props['dossiers']['data'])->pluck('id')->all());
         }
     }
@@ -175,6 +175,41 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
         // Identifiant inconnu : campagne active.
         $this->assertSame('campaign', $this->page('liste', ['etat' => 'toutes'], query: ['campagne' => 'pirate'])['props']['campagneActive']['id']);
+    }
+
+    public function test_toutes_les_demandes_garde_l_historique_de_la_campagne(): void
+    {
+        $this->agentLimite(['hebergement.admissions.history']);
+        DB::table('campagne')->where('id_campagne', 'campaign')->update(['created_at' => now()]);
+        DB::table('campagne')->insert(['id_campagne' => 'ancienne', 'statut' => 'cloturee', 'created_at' => now()->subYear()]);
+        $ancienne = DB::table('demande')->where('etudiant_id', 'student')->value('id_demande');
+        DB::table('demande')->where('id_demande', $ancienne)->update(['campagne_id' => 'ancienne', 'numero_demande' => 'D-ANC',
+            'etat_dossier' => 'cloture', 'created_at' => now()->subYear()]);
+        DB::table('resultats_admission')->insert(['id' => 'r', 'campagne_id' => 'ancienne', 'demande_id' => $ancienne, 'etudiant_id' => 'student',
+            'volet' => 'readmission', 'resultat' => 'admis', 'publie_at' => now()->subYear()]);
+        $lignes = fn (array $query) => collect($this->page('liste', ['etat' => 'toutes'], query: $query)['props']['dossiers']['data']);
+
+        // Admis à loger, logé ou archivé : la demande reste dans la liste de sa campagne.
+        foreach (['en_verification', 'residents', 'archivee', 'annuler'] as $statut) {
+            DB::table('etudiants')->where('id_etudiant', 'student')->update(['statut_inscription' => $statut]);
+            $this->assertSame(['D-ANC'], $lignes(['campagne' => 'ancienne'])->pluck('numero_demande')->all());
+        }
+
+        // Nouvelle demande pour une autre campagne : chaque campagne garde la sienne (état, date et type de l'époque).
+        DB::table('etudiants')->where('id_etudiant', 'student')->update(['statut_inscription' => 'demande']);
+        $this->dossier();
+        $ligne = $lignes(['campagne' => 'ancienne'])->sole();
+        $this->assertSame(['D-ANC', 'cloture', 'readmission', now()->subYear()->format('Y-m-d')],
+            [$ligne['numero_demande'], $ligne['etat_dossier'], $ligne['type_demande'], substr($ligne['date'], 0, 10)]);
+        $this->assertSame('soumis', $lignes([])->sole()['etat_dossier']);
+        $this->assertSame(1, $this->page('liste', ['etat' => 'recevables'], query: ['campagne' => 'ancienne'])['props']['stats']['toutes']);
+
+        // Recherche et filtres sur la demande de la campagne affichée.
+        $this->assertCount(1, $lignes(['campagne' => 'ancienne', 'q' => 'D-ANC', 'etat_dossier' => 'cloture', 'type' => 'readmission']));
+        $this->assertCount(1, $lignes(['campagne' => 'ancienne', 'q' => 'konan']));
+        $this->assertCount(0, $lignes(['q' => 'D-ANC']));
+        $this->assertCount(0, $lignes(['campagne' => 'ancienne', 'etat_dossier' => 'soumis']));
+        $this->assertCount(0, $lignes(['campagne' => 'ancienne', 'type' => 'admission']));
     }
 
     public function test_demandes_recevables_et_rejetees_selon_les_criteres_de_la_campagne(): void
@@ -1007,7 +1042,9 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame(['confirme'], DB::table('demande')->distinct()->pluck('etat_dossier')->all());
         $this->assertSame(['en_verification'], DB::table('etudiants')->distinct()->pluck('statut_inscription')->all());
         $this->assertSame([['other', 1], ['student', 2]], $rangs($liste('definitives')));
-        $this->assertSame(['toutes' => 0, 'definitives' => 2], array_intersect_key($liste('definitives')['stats'], ['toutes' => 0, 'definitives' => 0]));
+        // « Toutes les demandes » les garde aussi.
+        $this->assertSame(['toutes' => 2, 'definitives' => 2], array_intersect_key($liste('definitives')['stats'], ['toutes' => 0, 'definitives' => 0]));
+        $this->assertSame(['other', 'student'], collect($liste('toutes')['dossiers']['data'])->pluck('id')->sort()->values()->all());
         $this->assertSame(['admis' => 2], DB::table('resultats_admission')->get()->countBy('resultat')->all());
         // Une publication par volet ayant des demandes approuvées (ici les admissions seules).
         $this->assertSame(['admission'], DB::table('publication_liste_definitive')->pluck('volet')->all());

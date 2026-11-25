@@ -20,7 +20,7 @@ use Illuminate\Validation\ValidationException;
  * Les étudiants consultent ensuite leur résultat sur `/resultats` (numéro de table au bac ou matricule).
  *
  * - `admis` : demande de la liste définitive publiée (onglet « Demandes validées »), ou de sa file d'attente admise
- *   ensuite à loger par un agent (`admettre`) ;
+ *   ensuite à loger par un agent (`admettre`), ou dont la réclamation est favorable (`admettreReclamation`) ;
  * - `recevable_non_admis` : demande recevable non retenue (file d'attente, demande recevable non validée) ;
  * - `non_recevable` : demande irrecevable, refusée, ou dont la recevabilité n'a pas pu être établie.
  *
@@ -159,6 +159,57 @@ class ResultatsAdmission
 
             return $demande->etudiant;
         }, 3);
+    }
+
+    /**
+     * Effet d'une réclamation favorable sur la demande, selon son résultat publié et l'état de son dossier : `admettre`
+     * (« Admis à loger »), `aucun` (déjà admise) ou `bloque`.
+     *
+     * @param  bool  $droit  l'agent a le droit « Valider une demande »
+     * @return array{effet: 'admettre'|'aucun'|'bloque', message: string}
+     */
+    public function effetReclamation(?string $resultat, ?string $etatDossier, bool $droit): array
+    {
+        $effet = fn (string $effet, string $message) => ['effet' => $effet, 'message' => $message];
+
+        return match (true) {
+            $etatDossier === null => $effet('bloque', 'La demande a été supprimée : elle ne peut pas être admise à loger.'),
+            in_array($etatDossier, RecevabiliteDemandes::ETATS_ADMIS, true) => $effet('aucun', 'La demande est déjà admise à loger : elle ne change pas.'),
+            $resultat === null => $effet('bloque', 'Le résultat de cette demande n’est pas encore publié.'),
+            ! isset(DossierWorkflow::CHEMINS_RECLAMATION[$etatDossier]) => $effet('bloque', 'Le dossier est « '.(DossierWorkflow::LABELS[$etatDossier] ?? $etatDossier).' » : il ne peut plus être admis à loger.'),
+            ! $droit => $effet('bloque', 'Admettre à loger exige aussi le droit « Valider une demande » (Résultats d’admission).'),
+            default => $effet('admettre', 'La demande passe dans « Admis à loger » : paiement, puis attribution d’une chambre.'),
+        };
+    }
+
+    /**
+     * Admet à loger la demande d'une réclamation favorable : le dossier (`DossierWorkflow::admettreReclamation`) et le
+     * résultat consulté par l'étudiant changent ensemble. À appeler dans une transaction.
+     *
+     * @return bool faux : la demande était déjà admise à loger
+     */
+    public function admettreReclamation(string $demandeId, bool $droit, string $motif): bool
+    {
+        $refuser = fn (string $message) => throw ValidationException::withMessages(['statut' => $message]);
+        $demande = DemandeEtudiant::with(['campagne', 'etudiant.derniereDemande'])->whereKey($demandeId)->lockForUpdate()->first();
+        $ligne = $this->disponible() ? DB::table(self::TABLE)->where('demande_id', $demandeId)->lockForUpdate()->first() : null;
+        ['effet' => $effet, 'message' => $message] = $this->effetReclamation($ligne?->resultat, $demande?->etat_dossier, $droit);
+        if ($effet === 'bloque') {
+            $refuser($message);
+        }
+        if ($effet === 'aucun') {
+            return false;
+        }
+        if (! $demande->campagne) {
+            $refuser('La campagne de cette demande a été supprimée : la situation de la demande ne peut plus changer.');
+        }
+        if ((string) $demande->etudiant?->derniereDemande?->getKey() !== $demandeId) {
+            $refuser('L’étudiant a déposé une demande plus récente : la situation de celle-ci ne peut plus changer.');
+        }
+        $this->workflow->admettreReclamation($demandeId, $motif);
+        DB::table(self::TABLE)->where('demande_id', $demandeId)->update(['resultat' => self::ADMIS, 'updated_at' => now()]);
+
+        return true;
     }
 
     /**
@@ -306,6 +357,11 @@ class ResultatsAdmission
         // Demande non déposée, retirée par l'étudiant ou expirée.
         if (in_array($demande->etat_dossier, ['brouillon', 'annule', 'expire'], true)) {
             return null;
+        }
+
+        // Réclamation favorable : admise à loger sans figurer sur la liste définitive, une nouvelle publication garde son admission.
+        if ($classe !== 'definitives' && in_array($demande->etat_dossier, RecevabiliteDemandes::ETATS_ADMIS, true)) {
+            return self::ADMIS;
         }
 
         return match ($classe) {

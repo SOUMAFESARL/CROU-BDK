@@ -42,7 +42,7 @@ La migration `2026_11_24_000006_add_reclamations_permissions.php` ajoute le modu
 | `admin.hebergement.reclamations.index` (cartes) | `hebergement.reclamations.view` ou `.configure` ; chaque carte suit le droit de sa page |
 | `admin.hebergement.reclamations.liste` | `hebergement.reclamations.view` |
 | `admin.hebergement.reclamations.configuration`, `.periodes.store`, `.periodes.update`, `.periodes.destroy` | `hebergement.reclamations.configure` |
-| `admin.hebergement.reclamations.traiter` | `hebergement.reclamations.traiter` |
+| `admin.hebergement.reclamations.traiter` | `hebergement.reclamations.traiter` (« Favorable » : et `hebergement.resultats.admettre`) |
 
 La migration `2026_11_25_000004_add_resultats_permissions.php` ajoute le module **« Résultats d'admission »** (`hebergement.resultats`) et ses droits `.view`, `.publier` et `.export`, accordés au seul rôle 1 (libellé du module : `2026_11_25_000005` ; droit `.admettre` : `2026_11_25_000007` ; voir `docs/resultats-admission.md`). Publier, admettre et exporter exigent aussi `.view`.
 

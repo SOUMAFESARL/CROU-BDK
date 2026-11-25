@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Http\Services\Eligibilite\ResultatsAdmission;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /** Réclamation d'un étudiant sur sa demande d'hébergement (formulaire public ouvert pendant une `ReclamationPeriode`). */
@@ -11,21 +13,18 @@ class Reclamation extends Model
 {
     public const EN_ATTENTE = 'en_attente';
 
-    public const OUVERTE = 'ouverte';
-
     public const ACCEPTEE = 'acceptee';
 
     public const REJETEE = 'rejetee';
 
     public const STATUTS = [
         self::EN_ATTENTE => 'En attente',
-        self::OUVERTE => 'Ouverte',
-        self::ACCEPTEE => 'Acceptée',
-        self::REJETEE => 'Rejetée',
+        self::ACCEPTEE => 'Favorable',
+        self::REJETEE => 'Non recevable',
     ];
 
-    /** Statuts choisis par l'administration (« En attente » est aussi le statut de dépôt). */
-    public const STATUTS_TRAITEMENT = [self::OUVERTE, self::EN_ATTENTE, self::ACCEPTEE, self::REJETEE];
+    /** Décisions de l'administration (« En attente », statut de dépôt, reste tant qu'aucune n'est prise). */
+    public const STATUTS_TRAITEMENT = [self::ACCEPTEE, self::REJETEE];
 
     /** Types de demande (volets d'une campagne, `CriteresCampagne::VOLETS`). */
     public const TYPES = ['admission' => 'Admission', 'readmission' => 'Réadmission'];
@@ -79,9 +78,18 @@ class Reclamation extends Model
         return $this->belongsTo(Etudiant::class, 'etudiant_id', 'id_etudiant');
     }
 
+    /** Avec le résultat publié de la demande (`resultat_demande`, null s'il n'est pas publié). */
+    public function scopeAvecResultat($query)
+    {
+        return app(ResultatsAdmission::class)->disponible()
+            ? $query->addSelect(['reclamations.*', 'resultat_demande' => DB::table(ResultatsAdmission::TABLE)->select('resultat')
+                ->whereColumn(ResultatsAdmission::TABLE.'.demande_id', 'reclamations.demande_id')->limit(1)])
+            : $query;
+    }
+
     /** Réclamations pas encore tranchées. */
     public function scopeNonTraitees($query)
     {
-        return $query->whereIn('statut', [self::EN_ATTENTE, self::OUVERTE]);
+        return $query->where('statut', self::EN_ATTENTE);
     }
 }

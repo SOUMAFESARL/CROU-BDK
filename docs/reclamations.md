@@ -31,9 +31,22 @@ Un numéro `REC-AAAA-00000` est donné à l'étudiant.
 
 ## Traitement
 
-La liste (Réclamations › Liste des réclamations) a un onglet par statut : `en_attente` (statut de dépôt, que l'agent peut aussi choisir), `ouverte` (non traitée, comme `en_attente`), `acceptee`, `rejetee`. Recherche par nom, numéro de table au bac ou matricule saisi, numéro de réclamation ou de demande ; filtres par campagne et type. La colonne « Demande » n'affiche que le numéro et le type ; le motif n'est pas dans le tableau (fiche de la demande ou fenêtre « Traiter »). Traiter une réclamation = choisir son statut ; la saisie et l'affichage d'une réponse sont retirés pour l'instant (la colonne `reclamations.reponse` et les réponses déjà enregistrées sont conservées).
+La liste (Réclamations › Liste des réclamations) a un onglet par statut : `en_attente` (statut de dépôt, gardé tant qu'aucune décision n'est prise), `acceptee` (« Favorable »), `rejetee` (« Non recevable »). Recherche par nom, numéro de table au bac ou matricule saisi, numéro de réclamation ou de demande ; filtres par campagne et type. La colonne « Demande » n'affiche que le numéro et le type ; le motif n'est pas dans le tableau (fiche de la demande ou fenêtre « Traiter »). Traiter une réclamation = choisir la décision, « Favorable » ou « Non recevable » (aucune n'est présélectionnée) ; la saisie et l'affichage d'une réponse sont retirés pour l'instant (la colonne `reclamations.reponse` et les réponses déjà enregistrées sont conservées).
 
-Une réclamation ne change jamais l'état du dossier : la décision se prend sur la fiche de la demande (dérogation, transitions de `DossierWorkflow`).
+Depuis le 25/11/2026, une réclamation favorable admet la demande à loger ; les autres statuts ne changent jamais la demande. Dans la fenêtre « Traiter », « Favorable » est grisé, avec la raison, s'il est impossible. La décision « Ouverte » est retirée (migration `2026_11_25_000009` : les réclamations ouvertes redeviennent « En attente »).
+
+| Statut | Effet sur la demande |
+| --- | --- |
+| En attente | Aucun |
+| Favorable | Passe dans « Admis à loger » : dossier `confirme`, résultat `admis` (paiement puis attribution d'une chambre) ; aucun si elle est déjà admise ou logée |
+| Non recevable | Aucun : la demande garde sa situation de départ (une demande de la file d'attente y garde sa place) |
+
+- « Favorable » exige les droits `hebergement.reclamations.traiter` **et** `hebergement.resultats.admettre` (« Valider une demande ») ; possible après la clôture de la campagne, sans passage en commission ni contrôle du nombre de places. Chaque étape (par exemple `refuse → soumis → eligible → confirme`) est dans l'historique du dossier, avec le numéro de la réclamation en motif.
+- « Favorable » est refusé (message sous le choix, rien n'est modifié) si le résultat n'est pas publié, si la demande est annulée ou expirée, en cas de sanction disciplinaire bloquante, si l'étudiant a une demande plus récente ou si la campagne est supprimée.
+- Une réclamation favorable dont la demande est admise à loger n'est plus modifiable (plus de bouton « Traiter ») : l'admission se remet en cause sur la fiche de la demande. Une réclamation non recevable peut encore devenir favorable.
+- Les listes définitives déjà publiées ne changent pas ; une nouvelle publication garde l'admission.
+
+Code : `ReclamationService::traiter`, `ResultatsAdmission::effetReclamation` et `admettreReclamation`, `DossierWorkflow::admettreReclamation` (`CHEMINS_RECLAMATION`).
 
 L'œil (ou un clic sur la ligne) ouvre la fiche de la demande (`campagnes_admissions/{etudiant}?origine=reclamations`) : elle affiche « Motif de la réclamation » sous « Documents fournis », avec le statut et le bouton « Traiter ».
 
@@ -42,7 +55,7 @@ L'œil (ou un clic sur la ligne) ouvre la fiche de la demande (`campagnes_admiss
 | Permission | Usage |
 | --- | --- |
 | `hebergement.reclamations.view` | Liste, motif sur la fiche, ouverture de la fiche des étudiants qui ont une réclamation |
-| `hebergement.reclamations.traiter` | Traiter (statut) |
+| `hebergement.reclamations.traiter` | Traiter (statut) ; « Favorable » exige en plus `hebergement.resultats.admettre` |
 | `hebergement.reclamations.configure` | Périodes de réclamation |
 
 Les blocs de la fiche gardent leurs propres droits : `hebergement.admissions.personal`, `.documents` et `.history` (les trois pour les critères d'éligibilité).

@@ -29,6 +29,11 @@ class DossierWorkflow
         // Un refus automatique (barème de scoring) peut être levé directement en « Éligible » par l'admin.
         'attribue_definitif'=>['cloture'], 'refuse'=>['soumis','eligible'], 'annule'=>[], 'expire'=>[], 'cloture'=>[],
     ];
+    /** Étapes de l'admission à loger d'une réclamation favorable, selon l'état du dossier (état absent : impossible). */
+    public const CHEMINS_RECLAMATION = [
+        'soumis'=>['eligible','confirme'], 'en_etude'=>['eligible','confirme'], 'eligible'=>['confirme'],
+        'incomplet'=>['soumis','eligible','confirme'], 'refuse'=>['soumis','eligible','confirme'],
+    ];
     public function current(string $studentId, string $campaignId): DemandeEtudiant
     {
         return DemandeEtudiant::where('etudiant_id',$studentId)->where('campagne_id',$campaignId)
@@ -62,9 +67,9 @@ class DossierWorkflow
         }
         return $evaluation;
     }
-    public function transition(string $id, string $to, string $kind, ?string $actorId, ?string $reason = null, array $details = [], ?array $admissionPermission = null, bool $fileAttente = false): DemandeEtudiant
+    public function transition(string $id, string $to, string $kind, ?string $actorId, ?string $reason = null, array $details = [], ?array $admissionPermission = null, bool $fileAttente = false, bool $reclamation = false): DemandeEtudiant
     {
-        $result = DB::transaction(function() use($id,$to,$kind,$actorId,$reason,$details,$admissionPermission,$fileAttente) {
+        $result = DB::transaction(function() use($id,$to,$kind,$actorId,$reason,$details,$admissionPermission,$fileAttente,$reclamation) {
             $initial=DemandeEtudiant::findOrFail($id);
             $student=Etudiant::whereKey($initial->etudiant_id)->lockForUpdate()->firstOrFail();
             $request=DemandeEtudiant::whereKey($id)->lockForUpdate()->firstOrFail();
@@ -74,6 +79,8 @@ class DossierWorkflow
             }
             // Admission à loger depuis la file d'attente publiée : réservée à `admettreFileAttente()`.
             abort_if($fileAttente && !($kind==='admin' && $from==='eligible' && $to==='confirme'),403);
+            // Réclamation favorable : réservée à `admettreReclamation()`.
+            abort_if($reclamation && !($kind==='admin' && in_array($to,['soumis','eligible','confirme'],true)),403);
             if ($kind==='etudiant') {
                 abort_unless((string)$actorId===(string)$student->getKey(),403);
                 if ($to==='confirme') $this->invalid('Vous n’avez plus à confirmer votre demande : consultez votre résultat après la publication de la liste définitive.');
@@ -84,16 +91,17 @@ class DossierWorkflow
             } elseif ($kind==='admin') {
                 $actor=Auth::guard('admin')->user();
                 abort_unless($actor && (string)$actor->getKey()===(string)$actorId
-                    && ($fileAttente ? $actor->hasPermission('hebergement.resultats.admettre') : ($admissionPermission !== null
+                    && ($fileAttente ? $actor->hasPermission('hebergement.resultats.admettre') : ($reclamation
+                        ? $actor->hasPermission('hebergement.reclamations.traiter') && $actor->hasPermission('hebergement.resultats.admettre') : ($admissionPermission !== null
                         ? app(\App\Services\AdmissionPermissions::class)->allows($actor, ...$admissionPermission)
                         : ($actor->hasPermission('admissions.manage') || $actor->hasPermission('hebergement.admissions.validate')
                             || $actor->hasPermission(\App\Services\AdmissionPermissions::slug('dossier', 'decision'))
                             || $actor->hasPermission('hebergement.residents.update')
                             || ($to==='eligible' && app(AdmissionDerogationService::class)->canApprove($actor)
-                                && AdmissionDerogation::where('demande_id',$id)->where('status','approved')->where('decided_by',$actorId)->exists())))),403);
+                                && AdmissionDerogation::where('demande_id',$id)->where('status','approved')->where('decided_by',$actorId)->exists()))))),403);
                 // L'admin ne soumet pas à la place de l'étudiant : « Soumis » n'est qu'un retour en réexamen.
-                if ($to==='accepte' || ($to==='soumis' && !in_array($from,['eligible','confirme','refuse'],true))
-                    || ($to==='confirme' && $from==='eligible' && !$fileAttente)) abort(403);
+                if ($to==='accepte' || ($to==='soumis' && !in_array($from,['eligible','confirme','refuse',...($reclamation ? ['incomplet'] : [])],true))
+                    || ($to==='confirme' && $from==='eligible' && !$fileAttente && !$reclamation)) abort(403);
                 if ($to==='eligible' && $from==='refuse') {
                     if (!app(DecisionAutomatiqueDossier::class)->estRefusAutomatique($id)) {
                         $this->invalid('Seul un refus automatique peut être levé directement : réexaminez d’abord le dossier (retour à « Soumis »).');
@@ -115,9 +123,9 @@ class DossierWorkflow
             }
             if (in_array($to,['soumis','en_etude','eligible','confirme','pre_attribue','accepte','attribue_definitif'],true)) {
                 $campaign=Campagne::findOrFail($request->campagne_id);
-                // La liste définitive peut être publiée, un étudiant de sa file d'attente admis à loger, et une chambre
-                // attribuée à un étudiant admis à loger, après la clôture de la campagne.
-                $horsCampagne=($to==='confirme' && $kind==='systeme') || $fileAttente
+                // La liste définitive peut être publiée, un étudiant de sa file d'attente admis à loger, une demande
+                // dont la réclamation est favorable, et une chambre attribuée à un étudiant admis à loger, après la clôture de la campagne.
+                $horsCampagne=($to==='confirme' && $kind==='systeme') || $fileAttente || $reclamation
                     || ($to==='attribue_definitif' && $from==='confirme' && $kind==='admin');
                 if ($campaign->statut!=='active' && !$horsCampagne) $this->invalid('La campagne n’est plus active.');
                 if ($to==='soumis' && $kind!=='admin' && $campaign->date_echeance_demande
@@ -211,6 +219,24 @@ class DossierWorkflow
     public function admettreFileAttente(string $id): DemandeEtudiant
     {
         return $this->transition($id,'confirme','admin',Auth::guard('admin')->id(),'Admis à loger depuis la file d’attente.',['file_attente'=>true],null,true);
+    }
+    /**
+     * Admission à loger d'une demande dont la réclamation est favorable (contrôles : `ResultatsAdmission::admettreReclamation`) :
+     * chaque étape jusqu'à « Admis à loger » est tracée dans l'historique du dossier, avec la réclamation en motif.
+     */
+    public function admettreReclamation(string $id, string $motif): DemandeEtudiant
+    {
+        return DB::transaction(function () use ($id, $motif) {
+            $request = DemandeEtudiant::whereKey($id)->lockForUpdate()->firstOrFail();
+            $etapes = self::CHEMINS_RECLAMATION[$request->etat_dossier] ?? null;
+            if ($etapes === null) {
+                $this->invalid('Le dossier est « '.(self::LABELS[$request->etat_dossier] ?? $request->etat_dossier).' » : il ne peut pas être admis à loger.');
+            }
+            foreach ($etapes as $etape) {
+                $request = $this->transition($id, $etape, 'admin', Auth::guard('admin')->id(), $motif, ['reclamation' => true], null, false, true);
+            }
+            return $request;
+        }, 3);
     }
     public function legacy(string $id,string $status,?string $reason): void
     {

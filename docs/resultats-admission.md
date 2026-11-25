@@ -14,7 +14,7 @@ Les étudiants admis restent dans la liste définitive, avec leur rang, y compri
 | Résultat | Demandes |
 | --- | --- |
 | `admis` | Liste définitive, onglet « Demandes validées », approuvées avant la publication de leur volet |
-| `admis` (ensuite) | Demande de la file d'attente admise à loger par un agent (voir plus bas) |
+| `admis` (ensuite) | Demande de la file d'attente admise à loger par un agent (voir plus bas), ou dont la réclamation est favorable (`docs/reclamations.md`) |
 | `recevable_non_admis` | File d'attente ; demandes recevables non validées |
 | `non_recevable` | Demandes irrecevables (dont celles écartées par la liste élargie), refusées, ou dont une information manquante empêche d'établir la recevabilité |
 | aucun | Demande validée pas encore approuvée ; brouillon ; demande annulée par l'étudiant ou expirée ; volet non publié |

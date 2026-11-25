@@ -45,9 +45,8 @@ const TOUS = 'tous';
 const ONGLETS: { cle: StatutReclamation | ''; label: string }[] = [
     { cle: '', label: 'Toutes' },
     { cle: 'en_attente', label: STATUTS_RECLAMATION.en_attente.label },
-    { cle: 'ouverte', label: 'Ouvertes' },
-    { cle: 'acceptee', label: 'Acceptées' },
-    { cle: 'rejetee', label: 'Rejetées' },
+    { cle: 'acceptee', label: 'Favorables' },
+    { cle: 'rejetee', label: 'Non recevables' },
 ];
 
 /** Réclamations des étudiants sur leur demande d'hébergement : un onglet par statut. */

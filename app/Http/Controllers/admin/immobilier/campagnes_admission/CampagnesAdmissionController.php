@@ -165,28 +165,41 @@ class CampagnesAdmissionController extends Controller
             // Décision de la commission : demandes validées et demandes mises en attente.
             'validees' => [...$classement['validees'], ...$classement['en_attente']],
             'definitives' => $classement['definitives'],
-            // Toutes les demandes : celles de la campagne choisie.
-            default => $parCampagne ? $population->map(fn (Etudiant $etudiant) => (string) $etudiant->getKey())->all() : null,
+            // Toutes les demandes : historique de la campagne choisie (`getDemandesCampagnePage`).
+            default => null,
         };
+        // « Toutes les demandes » garde toutes les demandes de la campagne, même après la publication des listes.
+        $historiqueCampagne = $etat === 'toutes' && $campagne !== null ? (string) $campagne->getKey() : null;
         if ($typeDemande !== '') {
             // Le type n'est pas stocké : il se calcule sur la population des demandes, puis restreint la liste.
-            $volets = $criteres->voletsDemandes($population->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande));
+            $volets = $historiqueCampagne !== null
+                ? $this->voletsHistorique($repository->demandesCampagne($historiqueCampagne)->with('campagne')->get(['id_demande', 'etudiant_id', 'campagne_id']))
+                : $criteres->voletsDemandes($population->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande));
             $duType = array_keys(array_filter($volets, fn (string $volet) => $volet === $typeDemande));
             $etudiants = $etudiants === null ? $duType : array_values(array_intersect($etudiants, $duType));
         }
         $rawList = in_array($etat, ['toutes', 'rejetees', 'refusees'], true)
             || ($etat === 'recevables' && ($requestedList ?? array_key_first($sections)) === 'demandes');
-        $dossiers = $repository->getAdmissionsPage('demandes', 10, $recherche, $etatDossier, $rawList ? $etudiants : [], null, $etat === 'rejetees');
+        // Chaque ligne : l'étudiant et sa demande (historique : celle de la campagne choisie ; sinon sa dernière demande).
+        $dossiers = $historiqueCampagne !== null
+            ? $repository->getDemandesCampagnePage($historiqueCampagne, 10, $recherche, $etatDossier, $etudiants)
+                ->through(fn (DemandeEtudiant $demande) => [$demande->etudiant, $demande])
+            : tap($repository->getAdmissionsPage('demandes', 10, $recherche, $etatDossier, $rawList ? $etudiants : [], null, $etat === 'rejetees'),
+                fn ($page) => $page->getCollection()->load('derniereDemande.campagne'))
+                ->through(fn (Etudiant $etudiant) => [$etudiant, $etudiant->derniereDemande]);
+        $lignes = collect($dossiers->items());
         // Levée des refus automatiques (barème) : par dossier, ou pour les dossiers cochés dans la liste.
         $decision = app(DecisionAutomatiqueDossier::class);
         $scopeRefus = $etat === 'recevables' ? 'recevables_demandes' : $etat;
         $peutLever = $permissions->allows($admin, 'derogations', 'deroger');
+        // Seule la demande en cours de l'étudiant peut être rendue éligible (pas une demande remplacée depuis).
         $refusAutomatiques = $rawList && $peutLever
-            ? $decision->refusAutomatiques(collect($dossiers->items())->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande?->getKey())->all())
+            ? $decision->refusAutomatiques($lignes->filter(fn (array $ligne) => $ligne[1]?->getKey() === $ligne[0]->derniereDemande?->getKey())
+                ->map(fn (array $ligne) => $ligne[1]?->getKey())->all())
             : [];
         // Type de demande (admission / réadmission) : volet de l'étudiant dans la campagne de sa demande.
-        $dossiers->getCollection()->load('derniereDemande.campagne');
-        $types = $criteres->voletsDemandes(collect($dossiers->items())->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande));
+        $demandesPage = $lignes->map(fn (array $ligne) => $ligne[1]);
+        $types = $historiqueCampagne !== null ? $this->voletsHistorique($demandesPage) : $criteres->voletsDemandes($demandesPage);
         // Demandes recevables : listes provisoires ; décision de la commission : demandes validées ou mises en attente
         // depuis ces listes ; liste définitive : demandes approuvées en commission (mêmes rangs).
         $typesListe = ['recevables' => 'provisoire', 'validees' => 'validee', 'definitives' => 'definitive'];
@@ -205,14 +218,14 @@ class CampagnesAdmissionController extends Controller
         };
 
         return Inertia::render('Admin/Hebergement/Admissions/Index', [
-            'dossiers' => $dossiers->through(fn (Etudiant $etudiant) => [
-                'id' => (string) $etudiant->id_etudiant,
+            'dossiers' => $dossiers->through(fn (array $ligne) => [
+                'id' => (string) ($etudiant = $ligne[0])->id_etudiant,
                 'name' => $etudiant->name,
-                'numero_demande' => $etudiant->derniereDemande?->numero_demande,
-                'demande_id' => $etudiant->derniereDemande ? (string) $etudiant->derniereDemande->getKey() : null,
+                'numero_demande' => ($demande = $ligne[1])?->numero_demande,
+                'demande_id' => $demande ? (string) $demande->getKey() : null,
                 'type_demande' => $types[(string) $etudiant->id_etudiant] ?? null,
-                'etat_dossier' => $etudiant->derniereDemande?->etat_dossier,
-                'date' => $etudiant->created_at?->format('Y-m-d H:i'),
+                'etat_dossier' => $demande?->etat_dossier,
+                'date' => ($historiqueCampagne !== null ? $demande : $etudiant)?->created_at?->format('Y-m-d H:i'),
                 // Téléphone, adresse et date de naissance : consultables sur la fiche du dossier (liste sans défilement horizontal).
                 'personnel' => $personnel ? [
                     'region' => $etudiant->region?->name,
@@ -223,11 +236,11 @@ class CampagnesAdmissionController extends Controller
                 // Demandes irrecevables : rang dans le volet, et demande conforme écartée par la liste élargie.
                 'rang' => $rangsIrrecevables[(string) $etudiant->id_etudiant] ?? null,
                 'hors_liste' => $etat === 'rejetees' && in_array((string) $etudiant->id_etudiant, $classement['hors_liste'], true),
-                'refus_automatique' => in_array((string) $etudiant->derniereDemande?->getKey(), $refusAutomatiques, true),
+                'refus_automatique' => in_array((string) $demande?->getKey(), $refusAutomatiques, true),
             ]),
             'stats' => [
                 'toutes' => $filtersUrls['toutes']
-                    ? $population->filter(fn (Etudiant $etudiant) => in_array(Str::lower((string) $etudiant->statut_inscription), \App\Repositories\EtudiantRepository::STATUTS_DEMANDES, true))->count() : 0,
+                    ? ($campagne ? $repository->demandesCampagne((string) $campagne->getKey())->count() : $population->count()) : 0,
                 'recevables' => $filtersUrls['recevables'] ? count($classement['recevables']) : 0,
                 'rejetees' => $filtersUrls['rejetees'] ? count($classement['rejetees']) : 0,
                 'refusees' => $filtersUrls['refusees'] ? count($classement['refusees']) : 0,
@@ -1328,7 +1341,7 @@ class CampagnesAdmissionController extends Controller
     private function reclamationsVisibles($admin, Etudiant $etudiant): \Illuminate\Support\Collection
     {
         return app(AdminViewAccess::class)->allows($admin, 'admissions.reclamations') && app(\App\Http\Services\ReclamationService::class)->disponible()
-            ? \App\Models\Reclamation::with('campagne')->where('etudiant_id', $etudiant->getKey())->orderByDesc('created_at')->get()
+            ? \App\Models\Reclamation::query()->avecResultat()->with(['campagne', 'demande'])->where('etudiant_id', $etudiant->getKey())->orderByDesc('created_at')->get()
             : collect();
     }
 
@@ -1539,6 +1552,29 @@ class CampagnesAdmissionController extends Controller
         return ($id !== '' ? Campagne::find($id) : null)
             ?? $this->campagneActive()
             ?? Campagne::query()->orderByDesc('created_at')->first();
+    }
+
+    /**
+     * Type (volet) par étudiant des demandes d'une campagne affichées dans l'historique « Toutes les demandes » : celui de
+     * la publication quand le résultat est figé (une chambre reçue depuis ne change pas le type), sinon le volet calculé.
+     *
+     * @param  iterable<DemandeEtudiant>  $demandes  demandes d'une même campagne, avec `campagne` chargée
+     * @return array<string, string>
+     */
+    private function voletsHistorique(iterable $demandes): array
+    {
+        $demandes = collect($demandes)->filter();
+        $volets = app(\App\Http\Services\Eligibilite\CriteresCampagne::class)->voletsDemandes($demandes);
+        if (! Schema::hasTable('resultats_admission')) {
+            return $volets;
+        }
+        foreach ($demandes->map(fn (DemandeEtudiant $demande) => (string) $demande->getKey())->chunk(500) as $lot) {
+            foreach (DB::table('resultats_admission')->whereIn('demande_id', $lot->all())->pluck('volet', 'etudiant_id') as $etudiant => $volet) {
+                $volets[(string) $etudiant] = $volet;
+            }
+        }
+
+        return $volets;
     }
 
     /** Étudiants dont la demande en cours (dernière demande) a été déposée pour la campagne ; sans campagne, tous. */

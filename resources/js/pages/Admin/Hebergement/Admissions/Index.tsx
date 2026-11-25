@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
 
 /**
- * Toutes les demandes, demandes recevables (tous les critères conformes), demandes irrecevables (au moins un critère
+ * Toutes les demandes (historique de la campagne, conservé après la publication), demandes recevables (tous les critères conformes), demandes irrecevables (au moins un critère
  * non conforme, ou demande classée au-delà de la liste élargie), demandes refusées (refusées ou annulées par l'administration pendant la validation), la décision de la
  * commission (onglet à part, `validees` : onglets « Demandes validées » et « File d’attente ») et la liste
  * définitive (onglet à part : demandes validées approuvées en commission).
@@ -543,7 +543,8 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                 <DataTable
                     columns={colonnesTableau}
                     data={dossiers}
-                    rowKey={(d) => d.id}
+                    // Historique d’une campagne : un étudiant peut y avoir plusieurs demandes.
+                    rowKey={(d) => d.demande_id ?? d.id}
                     // Clic sur la ligne = « Suivre le dossier ».
                     rowHref={(d) => d.url}
                     toolbar={

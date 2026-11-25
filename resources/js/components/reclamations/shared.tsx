@@ -9,7 +9,7 @@ import { ChoixCarte } from '@/components/vie-residentielle/shared';
 import { envoyer } from '@/lib/inertia-form';
 import { traitementReclamationSchema, type TraitementReclamation } from '@/schemas/reclamation';
 
-export type StatutReclamation = 'en_attente' | 'ouverte' | 'acceptee' | 'rejetee';
+export type StatutReclamation = 'en_attente' | 'acceptee' | 'rejetee';
 
 /** Réclamation présentée par `ReclamationService::presenter` (liste et fiche de la demande). */
 export type Reclamation = {
@@ -25,15 +25,16 @@ export type Reclamation = {
     date: string | null;
     traite_par: string | null;
     traite_at: string | null;
-    /** Null sans le droit de traiter les réclamations. */
+    /** Effet d'une décision favorable sur la demande (null si la réclamation ne peut pas être traitée). */
+    effet_favorable: { effet: 'admettre' | 'aucun' | 'bloque'; message: string } | null;
+    /** Null sans le droit de traiter les réclamations, ou si la décision n'est plus modifiable. */
     url_traiter: string | null;
 };
 
-export const STATUTS_RECLAMATION: Record<StatutReclamation, { label: string; variante: 'warning' | 'neutral' | 'success' | 'danger' }> = {
+export const STATUTS_RECLAMATION: Record<StatutReclamation, { label: string; variante: 'warning' | 'success' | 'danger' }> = {
     en_attente: { label: 'En attente', variante: 'warning' },
-    ouverte: { label: 'Ouverte', variante: 'neutral' },
-    acceptee: { label: 'Acceptée', variante: 'success' },
-    rejetee: { label: 'Rejetée', variante: 'danger' },
+    acceptee: { label: 'Favorable', variante: 'success' },
+    rejetee: { label: 'Non recevable', variante: 'danger' },
 };
 
 export function StatutReclamationBadge({ statut }: { statut: StatutReclamation }) {
@@ -41,13 +42,11 @@ export function StatutReclamationBadge({ statut }: { statut: StatutReclamation }
 }
 
 const CHOIX = [
-    { value: 'ouverte', label: 'Ouverte' },
-    { value: 'en_attente', label: 'En attente' },
-    { value: 'acceptee', label: 'Acceptée' },
-    { value: 'rejetee', label: 'Rejetée' },
+    { value: 'acceptee', label: 'Favorable : admis à loger' },
+    { value: 'rejetee', label: 'Non recevable' },
 ] as const;
 
-/** Fenêtre de traitement d'une réclamation (liste et fiche de la demande) : choix du statut. */
+/** Fenêtre de traitement d'une réclamation (liste et fiche de la demande) : choix de la décision. */
 export function TraiterReclamationDialog({ reclamation, onClose }: { reclamation: Reclamation | null; onClose: () => void }) {
     const {
         control,
@@ -56,11 +55,15 @@ export function TraiterReclamationDialog({ reclamation, onClose }: { reclamation
         setValue,
         setError,
         formState: { errors, isSubmitting },
-    } = useForm<TraitementReclamation>({ resolver: zodResolver(traitementReclamationSchema), mode: 'onTouched', defaultValues: { statut: 'en_attente' } });
+    } = useForm<TraitementReclamation>({ resolver: zodResolver(traitementReclamationSchema), mode: 'onTouched' });
     const statut = useWatch({ control, name: 'statut' });
 
+    // Motif qui empêche une décision favorable (droit manquant, résultat non publié…).
+    const favorableBloque = reclamation?.effet_favorable?.effet === 'bloque' ? reclamation.effet_favorable.message : null;
+
     useEffect(() => {
-        if (reclamation) reset({ statut: reclamation.statut });
+        // Aucune décision présélectionnée tant que la réclamation est en attente.
+        if (reclamation) reset({ statut: reclamation.statut === 'en_attente' ? undefined : reclamation.statut });
     }, [reclamation, reset]);
 
     const onSubmit = async (valeurs: TraitementReclamation) => {
@@ -84,18 +87,20 @@ export function TraiterReclamationDialog({ reclamation, onClose }: { reclamation
                         </div>
                         <fieldset>
                             <legend className="mb-2 text-sm font-medium text-gray-800">
-                                Statut <span className="text-red-600">*</span>
+                                Décision <span className="text-red-600">*</span>
                             </legend>
-                            <div role="radiogroup" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                 {CHOIX.map((option) => (
                                     <ChoixCarte
                                         key={option.value}
                                         actif={statut === option.value}
+                                        disabled={option.value === 'acceptee' && favorableBloque !== null}
                                         onClick={() => setValue('statut', option.value, { shouldValidate: true })}
                                         titre={option.label}
                                     />
                                 ))}
                             </div>
+                            {favorableBloque && <p className="mt-1.5 text-xs text-muted">Décision favorable impossible. {favorableBloque}</p>}
                             {errors.statut?.message && <p className="mt-1.5 text-xs font-medium text-red-600">{errors.statut.message}</p>}
                         </fieldset>
                     </DialogBody>

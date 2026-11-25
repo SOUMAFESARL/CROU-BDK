@@ -3,6 +3,8 @@
 namespace App\Http\Services;
 
 use App\Http\Services\Eligibilite\CriteresCampagne;
+use App\Http\Services\Eligibilite\RecevabiliteDemandes;
+use App\Http\Services\Eligibilite\ResultatsAdmission;
 use App\Models\Campagne;
 use App\Models\DemandeEtudiant;
 use App\Models\Etudiant;
@@ -18,12 +20,12 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Réclamations sur les demandes d'hébergement (docs/reclamations.md) : dépôt public pendant une période ouverte,
- * rattachement à la demande de l'étudiant, traitement par l'administration. Une réclamation ne modifie jamais l'état
- * du dossier : la décision reste prise sur la fiche de la demande (`DossierWorkflow`, dérogation…).
+ * rattachement à la demande de l'étudiant, traitement par l'administration. Une réclamation favorable fait passer la
+ * demande dans « Admis à loger » (`ResultatsAdmission`) ; une réclamation non recevable ne change pas la demande.
  */
 class ReclamationService
 {
-    public function __construct(private CriteresCampagne $criteres) {}
+    public function __construct(private CriteresCampagne $criteres, private ResultatsAdmission $resultats) {}
 
     /** Les tables existent (migration passée). */
     public function disponible(): bool
@@ -81,17 +83,49 @@ class ReclamationService
         });
     }
 
-    /** Change le statut d'une réclamation. La réponse (colonne `reponse`) n'est plus saisie pour l'instant ; les anciennes sont conservées. */
-    public function traiter(Reclamation $reclamation, string $statut, ?User $admin): Reclamation
+    /**
+     * Change le statut d'une réclamation ; favorable, elle admet la demande à loger (droit « Valider une demande » en plus).
+     * Les autres statuts ne changent pas la demande. La réponse (colonne `reponse`) n'est plus saisie pour l'instant ; les
+     * anciennes sont conservées.
+     *
+     * @return bool la demande vient d'être admise à loger
+     */
+    public function traiter(Reclamation $reclamation, string $statut, ?User $admin): bool
     {
-        $reclamation->update([
-            'statut' => $statut,
-            'traite_par' => $admin?->id_user,
-            'traite_par_nom' => $admin?->nom_affichage ?? $admin?->name,
-            'traite_at' => now(),
-        ]);
+        try {
+            return DB::transaction(function () use ($reclamation, $statut, $admin) {
+                $reclamation = Reclamation::whereKey($reclamation->getKey())->lockForUpdate()->firstOrFail();
+                if ($statut !== Reclamation::ACCEPTEE && $this->verrouillee($reclamation)) {
+                    $this->invalide('statut', 'Cette réclamation est favorable et la demande est admise à loger : la décision ne peut plus être changée ici.');
+                }
+                $admise = $statut === Reclamation::ACCEPTEE && $this->resultats->admettreReclamation(
+                    (string) $reclamation->demande_id, $this->peutAdmettre($admin), "Réclamation {$reclamation->numero} favorable : admis à loger.");
+                $reclamation->update([
+                    'statut' => $statut,
+                    'traite_par' => $admin?->id_user,
+                    'traite_par_nom' => $admin?->nom_affichage ?? $admin?->name,
+                    'traite_at' => now(),
+                ]);
 
-        return $reclamation;
+                return $admise;
+            });
+        } catch (ValidationException $e) {
+            // Refus du dossier (sanction bloquante, transition interdite…) : affiché sous le choix du statut.
+            $this->invalide('statut', (string) collect($e->errors())->flatten()->first());
+        }
+    }
+
+    /** Droit « Valider une demande » des résultats d'admission, exigé en plus de celui de traiter les réclamations. */
+    private function peutAdmettre(?User $admin): bool
+    {
+        return app(AdminAccess::class)->allows($admin, 'admin.hebergement.resultats.admettre');
+    }
+
+    /** Réclamation favorable dont la demande est admise à loger : l'admission se remet en cause sur la fiche, pas ici. */
+    private function verrouillee(Reclamation $reclamation): bool
+    {
+        return $reclamation->statut === Reclamation::ACCEPTEE
+            && in_array($reclamation->demande?->etat_dossier, RecevabiliteDemandes::ETATS_ADMIS, true);
     }
 
     /**
@@ -149,9 +183,14 @@ class ReclamationService
         $periode->delete();
     }
 
-    /** Réclamation telle qu'affichée (liste et fiche de la demande) ; le lien de traitement suit les droits de l'agent. */
+    /**
+     * Réclamation telle qu'affichée (liste et fiche de la demande), chargée avec `avecResultat()` ; le lien de traitement
+     * suit les droits de l'agent et disparaît quand la décision n'est plus modifiable.
+     */
     public function presenter(Reclamation $reclamation, ?User $admin): array
     {
+        $traitable = app(AdminAccess::class)->allows($admin, 'admin.hebergement.reclamations.traiter') && ! $this->verrouillee($reclamation);
+
         return [
             'id' => (string) $reclamation->getKey(),
             'numero' => $reclamation->numero,
@@ -164,8 +203,9 @@ class ReclamationService
             'date' => $reclamation->created_at?->format('Y-m-d H:i'),
             'traite_par' => $reclamation->traite_par_nom,
             'traite_at' => $reclamation->traite_at?->format('Y-m-d H:i'),
-            'url_traiter' => app(AdminAccess::class)->allows($admin, 'admin.hebergement.reclamations.traiter')
-                ? route('admin.hebergement.reclamations.traiter', ['reclamation' => $reclamation->getKey()]) : null,
+            // Effet d'une décision favorable sur la demande (la fenêtre de traitement bloque ce choix s'il est impossible).
+            'effet_favorable' => $traitable ? $this->resultats->effetReclamation($reclamation->resultat_demande, $reclamation->demande?->etat_dossier, $this->peutAdmettre($admin)) : null,
+            'url_traiter' => $traitable ? route('admin.hebergement.reclamations.traiter', ['reclamation' => $reclamation->getKey()]) : null,
         ];
     }
 

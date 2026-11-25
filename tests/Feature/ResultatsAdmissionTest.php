@@ -126,6 +126,17 @@ class ResultatsAdmissionTest extends \Tests\Support\DossierTestCase
         $this->assertDatabaseHas('resultats_admission', ['etudiant_id' => 'other', 'resultat' => 'admis']);
     }
 
+    public function test_une_nouvelle_publication_garde_l_admission_par_reclamation(): void
+    {
+        $this->publier();
+        DB::table('demande')->where('etudiant_id', 'other')->update(['etat_dossier' => 'confirme']);
+        foreach (['recevables', 'rejetees'] as $classe) {
+            app(ResultatsAdmission::class)->publier(Campagne::findOrFail('campaign'), ['admission'],
+                Etudiant::with('derniereDemande.campagne')->get(), [$classe => ['other'], 'definitives' => ['student']] + self::CLASSES);
+            $this->assertDatabaseHas('resultats_admission', ['etudiant_id' => 'other', 'resultat' => 'admis']);
+        }
+    }
+
     public function test_un_volet_non_publie_et_une_approbation_posterieure_ne_donnent_pas_d_admission(): void
     {
         $this->enregistrerPublication();

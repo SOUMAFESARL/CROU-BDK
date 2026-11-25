@@ -151,6 +151,7 @@ export function ChoixCarte({
     description,
     icone,
     role = 'radio',
+    disabled = false,
 }: {
     actif: boolean;
     onClick: () => void;
@@ -158,16 +159,19 @@ export function ChoixCarte({
     description?: string;
     icone?: ReactNode;
     role?: 'radio' | 'checkbox';
+    disabled?: boolean;
 }) {
     return (
         <button
             type="button"
             role={role}
             aria-checked={actif}
+            disabled={disabled}
             onClick={onClick}
             className={cn(
                 'flex w-full cursor-pointer items-start gap-3 rounded-brand border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-secondary focus-visible:outline-none',
                 actif ? 'border-primary bg-soft' : 'border-gray-300 bg-white hover:border-secondary',
+                disabled && 'cursor-not-allowed opacity-60 hover:border-gray-300',
             )}
         >
             {icone && <span className={cn('mt-0.5 shrink-0', actif ? 'text-primary' : 'text-muted')}>{icone}</span>}

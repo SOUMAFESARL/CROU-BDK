@@ -22,6 +22,8 @@ class ReclamationsTest extends \Tests\Support\DossierTestCase
 
     private const DROITS = ['hebergement.reclamations.view', 'hebergement.reclamations.traiter', 'hebergement.reclamations.configure'];
 
+    private const DROITS_ADMETTRE = [...self::DROITS, 'hebergement.resultats.view', 'hebergement.resultats.admettre'];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -213,7 +215,7 @@ class ReclamationsTest extends \Tests\Support\DossierTestCase
 
         $page = $this->page(route(self::ROUTE.'liste'));
         $this->assertSame('Admin/Hebergement/Reclamations/Liste', $page['component']);
-        $this->assertSame(['' => 2, 'en_attente' => 1, 'ouverte' => 0, 'acceptee' => 1, 'rejetee' => 0], $page['props']['compteurs']);
+        $this->assertSame(['' => 2, 'en_attente' => 1, 'acceptee' => 1, 'rejetee' => 0], $page['props']['compteurs']);
         $this->assertSame(2, $page['props']['reclamations']['total']);
 
         $props = $this->page(route(self::ROUTE.'liste', ['statut' => 'en_attente', 'q' => 'awa']))['props'];
@@ -231,30 +233,163 @@ class ReclamationsTest extends \Tests\Support\DossierTestCase
         $this->assertSame(0, $this->page(route(self::ROUTE.'liste', ['type' => 'readmission']))['props']['reclamations']['total']);
     }
 
-    public function test_traitement_change_le_statut(): void
+    /** Réclamation déposée par « student », résultat publié de sa demande et état de son dossier. */
+    private function reclamationPubliee(string $resultat, string $etat): Reclamation
     {
+        (require database_path('migrations/2026_11_25_000002_create_resultats_admission_table.php'))->up();
         $this->periode();
-        $this->post('/reclamation', $this->saisie());
+        $this->post('/reclamation', $this->saisie())->assertSessionHasNoErrors();
         $reclamation = Reclamation::sole();
-        $url = route(self::ROUTE.'traiter', $reclamation->getKey());
+        DB::table('demande')->where('id_demande', $reclamation->demande_id)->update(['etat_dossier' => $etat]);
+        DB::table('resultats_admission')->insert(['id' => 'r1', 'campagne_id' => 'campaign', 'demande_id' => $reclamation->demande_id, 'etudiant_id' => 'student',
+            'volet' => 'admission', 'resultat' => $resultat, 'publie_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+        // Les réclamations se traitent après la clôture de la campagne.
+        DB::table('campagne')->update(['statut' => 'terminer']);
+
+        return $reclamation;
+    }
+
+    private function traiter(Reclamation $reclamation, string $statut): \Illuminate\Testing\TestResponse
+    {
+        return $this->put(route(self::ROUTE.'traiter', $reclamation->getKey()), ['statut' => $statut]);
+    }
+
+    /** @return array{0: string, 1: string, 2: string} statut de la réclamation, état du dossier, résultat publié */
+    private function situation(Reclamation $reclamation): array
+    {
+        return [$reclamation->refresh()->statut, DB::table('demande')->where('id_demande', $reclamation->demande_id)->value('etat_dossier'),
+            DB::table('resultats_admission')->value('resultat')];
+    }
+
+    public function test_une_reclamation_sans_decision_reste_en_attente(): void
+    {
+        $reclamation = $this->reclamationPubliee('non_recevable', 'soumis');
         $this->agent(self::DROITS);
 
-        $this->put($url, ['statut' => 'en_cours'])->assertSessionHasErrors('statut');
-        // Ouverte : choisie par l'agent, encore non traitée (pas de seconde réclamation).
-        $this->put($url, ['statut' => 'ouverte'])->assertSessionHasNoErrors();
-        $this->assertSame(1, $this->page(route(self::ROUTE.'liste', ['statut' => 'ouverte']))['props']['compteurs']['ouverte']);
+        $this->traiter($reclamation, 'en_cours')->assertSessionHasErrors('statut');
+        // « En attente » n'est pas une décision ; « Ouverte » est retirée (redevient « en attente »).
+        foreach (['en_attente', 'ouverte', ''] as $statut) {
+            $this->traiter($reclamation, $statut)->assertSessionHasErrors('statut');
+        }
+        $reclamation->update(['statut' => 'ouverte']);
+        (require database_path('migrations/2026_11_25_000009_remettre_reclamations_ouvertes_en_attente.php'))->up();
+        $this->assertSame('en_attente', $reclamation->refresh()->statut);
         $this->from('/reclamation')->post('/reclamation', $this->saisie())->assertSessionHasErrors('motif');
-        $this->put($url, ['statut' => 'en_attente'])->assertSessionHasNoErrors();
-        $reclamation->update(['reponse' => 'Ancienne réponse.']);
-        $this->put($url, ['statut' => 'acceptee'])->assertSessionHasNoErrors();
-
-        $reclamation->refresh();
-        $this->assertSame(['acceptee', 'Ancienne réponse.', 'agent-rec'], [$reclamation->statut, $reclamation->reponse, $reclamation->traite_par]);
-        $this->assertNotNull($reclamation->traite_at);
+        $this->assertSame(['en_attente', 'soumis', 'non_recevable'], $this->situation($reclamation));
+        $this->assertNull($reclamation->traite_at);
 
         $this->agent(['hebergement.reclamations.view']);
-        $this->put($url, ['statut' => 'rejetee'])->assertForbidden();
+        $this->traiter($reclamation, 'rejetee')->assertForbidden();
+        $ligne = $this->page(route(self::ROUTE.'liste'))['props']['reclamations']['data'][0];
+        $this->assertSame([null, null], [$ligne['url_traiter'], $ligne['effet_favorable']]);
+    }
+
+    public function test_reclamation_favorable_admet_la_demande_a_loger(): void
+    {
+        $reclamation = $this->reclamationPubliee('non_recevable', 'refuse');
+        $reclamation->update(['reponse' => 'Ancienne réponse.']);
+        $this->agent(self::DROITS_ADMETTRE);
+        $this->assertSame('admettre', $this->page(route(self::ROUTE.'liste'))['props']['reclamations']['data'][0]['effet_favorable']['effet']);
+
+        $this->traiter($reclamation, 'acceptee')->assertSessionHasNoErrors()->assertSessionHas('success');
+        $this->assertSame(['acceptee', 'confirme', 'admis'], $this->situation($reclamation));
+        $this->assertSame(['Ancienne réponse.', 'agent-rec'], [$reclamation->reponse, $reclamation->traite_par]);
+        $this->assertNotNull($reclamation->traite_at);
+        $this->assertTrue(app(\App\Http\Services\Eligibilite\ListeDefinitivePubliee::class)->figure('student'));
+        // Chaque étape est tracée, avec la réclamation en motif.
+        $etapes = DB::table('dossier_transitions')->where('demande_id', $reclamation->demande_id)->where('motif', 'like', "%{$reclamation->numero}%")->orderBy('id');
+        $this->assertSame(['soumis', 'eligible', 'confirme'], (clone $etapes)->pluck('nouvel_etat')->all());
+        $this->assertSame(['agent-rec'], (clone $etapes)->pluck('acteur_id')->unique()->all());
+
+        // Décision acquise : elle ne se change plus depuis la réclamation.
+        $this->traiter($reclamation, 'rejetee')->assertSessionHasErrors('statut');
+        $this->assertSame(['acceptee', 'confirme', 'admis'], $this->situation($reclamation));
         $this->assertNull($this->page(route(self::ROUTE.'liste'))['props']['reclamations']['data'][0]['url_traiter']);
+    }
+
+    public function test_reclamation_favorable_selon_l_etat_du_dossier(): void
+    {
+        $reclamation = $this->reclamationPubliee('recevable_non_admis', 'soumis');
+        $this->agent(self::DROITS_ADMETTRE);
+        foreach (['soumis', 'en_etude', 'incomplet', 'eligible'] as $etat) {
+            DB::table('demande')->update(['etat_dossier' => $etat]);
+            DB::table('resultats_admission')->update(['resultat' => 'recevable_non_admis']);
+            $reclamation->update(['statut' => 'en_attente']);
+            $this->traiter($reclamation, 'acceptee')->assertSessionHasNoErrors();
+            $this->assertSame(['acceptee', 'confirme', 'admis'], $this->situation($reclamation), $etat);
+        }
+
+        foreach (['annule', 'expire'] as $etat) {
+            DB::table('demande')->update(['etat_dossier' => $etat]);
+            $reclamation->update(['statut' => 'en_attente']);
+            $this->traiter($reclamation, 'acceptee')->assertSessionHasErrors('statut');
+            $this->assertSame('en_attente', $reclamation->refresh()->statut);
+        }
+    }
+
+    public function test_reclamation_non_recevable_ne_change_pas_la_demande(): void
+    {
+        $reclamation = $this->reclamationPubliee('recevable_non_admis', 'eligible');
+        $this->agent(self::DROITS);
+        // File d'attente (place conservée), non recevable, étudiant déjà logé : la demande garde sa situation.
+        foreach ([['eligible', 'recevable_non_admis'], ['soumis', 'non_recevable'], ['attribue_definitif', 'admis']] as [$etat, $resultat]) {
+            DB::table('demande')->update(['etat_dossier' => $etat]);
+            DB::table('resultats_admission')->update(['resultat' => $resultat]);
+            $reclamation->update(['statut' => 'en_attente']);
+            $this->traiter($reclamation, 'rejetee')->assertSessionHasNoErrors();
+            $this->assertSame(['rejetee', $etat, $resultat], $this->situation($reclamation));
+        }
+        $this->assertSame(0, DB::table('dossier_transitions')->where('motif', 'like', '%'.$reclamation->numero.'%')->count());
+
+        // Erreur de décision : elle peut encore devenir favorable.
+        DB::table('demande')->update(['etat_dossier' => 'eligible']);
+        DB::table('resultats_admission')->update(['resultat' => 'recevable_non_admis']);
+        $this->agent(self::DROITS_ADMETTRE);
+        $this->traiter($reclamation, 'acceptee')->assertSessionHasNoErrors();
+        $this->assertSame(['acceptee', 'confirme', 'admis'], $this->situation($reclamation));
+    }
+
+    public function test_favorable_exige_le_droit_de_valider_une_demande(): void
+    {
+        $reclamation = $this->reclamationPubliee('recevable_non_admis', 'eligible');
+        $this->agent(self::DROITS);
+        $ligne = $this->page(route(self::ROUTE.'liste'))['props']['reclamations']['data'][0];
+        $this->assertSame('bloque', $ligne['effet_favorable']['effet']);
+        $this->assertNotNull($ligne['url_traiter']);
+        $this->traiter($reclamation, 'acceptee')->assertSessionHasErrors('statut');
+        $this->assertSame(['en_attente', 'eligible', 'recevable_non_admis'], $this->situation($reclamation));
+
+        // Sans le droit de traiter les réclamations.
+        $this->agent(['hebergement.reclamations.view', 'hebergement.resultats.admettre']);
+        $this->traiter($reclamation, 'acceptee')->assertForbidden();
+    }
+
+    public function test_decision_refusee_rien_ne_change(): void
+    {
+        $reclamation = $this->reclamationPubliee('non_recevable', 'refuse');
+        $this->agent(self::DROITS_ADMETTRE);
+
+        DB::table('sanctions')->insert(['id_sanction' => 's1', 'numero_sanction' => 'S-1', 'date_decision' => today()->toDateString(), 'scope_type' => 'etudiant', 'etudiant_id' => 'student', 'type' => 'expulsion', 'statut' => 'active', 'motif' => 'Test']);
+        $this->traiter($reclamation, 'acceptee')->assertSessionHasErrors('statut');
+        $this->assertSame(['en_attente', 'refuse', 'non_recevable'], $this->situation($reclamation));
+        DB::table('sanctions')->delete();
+
+        // Demande plus récente de l'étudiant.
+        $recente = (array) DB::table('demande')->where('id_demande', $reclamation->demande_id)->first();
+        DB::table('demande')->insert(['id_demande' => 'recente', 'created_at' => now()->addDay()] + $recente);
+        $this->traiter($reclamation, 'acceptee')->assertSessionHasErrors('statut');
+        DB::table('demande')->where('id_demande', 'recente')->delete();
+
+        // Campagne supprimée.
+        DB::table('campagne')->update(['deleted_at' => now()]);
+        $this->traiter($reclamation, 'acceptee')->assertSessionHasErrors('statut');
+        DB::table('campagne')->update(['deleted_at' => null]);
+
+        // Résultat pas encore publié.
+        DB::table('resultats_admission')->delete();
+        $this->traiter($reclamation, 'acceptee')->assertSessionHasErrors(['statut' => 'Le résultat de cette demande n’est pas encore publié.']);
+        $this->assertSame('en_attente', $reclamation->refresh()->statut);
+        $this->assertSame(0, DB::table('dossier_transitions')->where('motif', 'like', '%'.$reclamation->numero.'%')->count());
     }
 
     public function test_configuration_des_periodes(): void

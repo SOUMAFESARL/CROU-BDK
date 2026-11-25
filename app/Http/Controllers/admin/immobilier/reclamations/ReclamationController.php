@@ -62,7 +62,7 @@ class ReclamationController extends Controller
         $compteurs = (clone $base)->selectRaw('statut, count(*) as total')->groupBy('statut')->pluck('total', 'statut');
 
         $liste = $base->when($statut !== '', fn ($query) => $query->where('statut', $statut))
-            ->with(['campagne', 'demande', 'etudiant:id_etudiant,name,matricule,date_naissance'])
+            ->avecResultat()->with(['campagne', 'demande', 'etudiant:id_etudiant,name,matricule,date_naissance'])
             ->orderByDesc('created_at')->orderBy('numero')
             ->paginate(10)->withQueryString();
         $voirDossier = $this->access->allows($admin, 'admin.hebergement.campagnes_admission.show');
@@ -89,18 +89,19 @@ class ReclamationController extends Controller
         ]);
     }
 
-    /** Changement de statut d'une réclamation. */
+    /** Changement de statut d'une réclamation ; favorable, elle admet la demande à loger. */
     public function traiter(Request $request, Reclamation $reclamation): RedirectResponse
     {
         $donnees = $request->validate([
             'statut' => ['required', Rule::in(Reclamation::STATUTS_TRAITEMENT)],
         ], [
-            'statut.required' => 'Choisissez le statut de la réclamation.',
-            'statut.in' => 'Le statut choisi n’est pas valide.',
+            'statut.required' => 'Choisissez la décision.',
+            'statut.in' => 'La décision choisie n’est pas valide.',
         ]);
-        $this->reclamations->traiter($reclamation, $donnees['statut'], $request->user('admin'));
+        $admise = $this->reclamations->traiter($reclamation, $donnees['statut'], $request->user('admin'));
 
-        return back()->with('success', "Réclamation {$reclamation->numero} : ".mb_strtolower(Reclamation::STATUTS[$donnees['statut']]).'.');
+        return back()->with('success', "Réclamation {$reclamation->numero} : ".mb_strtolower(Reclamation::STATUTS[$donnees['statut']]).'.'
+            .($admise ? ' La demande passe dans « Admis à loger ».' : ''));
     }
 
     /** Sous-page de configuration : périodes de réclamation et campagne à laquelle chacune s'applique. */
