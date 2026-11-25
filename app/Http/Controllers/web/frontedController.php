@@ -84,8 +84,8 @@ class  frontedController extends Controller
             'registerUrl' => Campagne::admissionsOuvertes()->exists() ? route('etudiant.register') : null,
             // Lien vers le formulaire de réclamation, proposé uniquement pendant une période de réclamation ouverte.
             'reclamationUrl' => app(\App\Http\Services\ReclamationService::class)->periodeOuverte() ? route('etudiant.reclamation') : null,
-            // Lien vers les résultats d'admission, une fois une liste définitive publiée.
-            'resultatsUrl' => app(\App\Http\Services\Eligibilite\ResultatsAdmission::class)->campagnePubliee() ? route('etudiant.resultats') : null,
+            // Lien vers les résultats d'admission, quand au moins une campagne publiée y est visible.
+            'resultatsUrl' => app(\App\Http\Services\Eligibilite\ResultatsAdmission::class)->campagnesConsultables()->isNotEmpty() ? route('etudiant.resultats') : null,
             'csrfToken' => csrf_token(),
             'oldEmail' => old('email'),
             'logoUrl' => systemLogo('admin/assets/images/logos/crou_bdk.jpeg'),

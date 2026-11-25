@@ -115,7 +115,7 @@ type Props = {
      * `deroger` : bouton « Déroger » (demande des listes « Demandes irrecevables » ou « Demandes refusées », liste des
      * demandes validées de son volet pas encore approuvée en commission) ; null sinon ou sans le droit de déroger.
      */
-    urls: { admissions: string | null; deroger: string | null; reclamations: string | null };
+    urls: { admissions: string | null; deroger: string | null; reclamations: string | null; resultats: string | null };
 };
 
 const ETATS_REGLE = {
@@ -141,7 +141,8 @@ const STATUTS_INSCRIPTION: Record<string, [string, 'success' | 'warning' | 'info
 /** Traitement d'un dossier de candidature (remplace `admission/traiter-demande.blade.php`, `derogations.blade.php` et le mode admin de `dossier-cycle`). */
 export default function AdmissionShow(props: Props) {
     const { etudiant, demande, discipline, eligibilite, rejets, bareme, documents, reclamations, profil, historique, urls } = props;
-    const retour = urls.reclamations ?? urls.admissions;
+    const retour = urls.reclamations ?? urls.resultats ?? urls.admissions;
+    const libelleRetour = urls.reclamations ? 'Retour aux réclamations' : urls.resultats ? 'Retour aux résultats d’admission' : 'Retour aux admissions';
     const [aDeroger, setADeroger] = useState(false);
 
     return (
@@ -170,7 +171,7 @@ export default function AdmissionShow(props: Props) {
                                     href={retour}
                                     className="inline-flex h-10 items-center gap-2 rounded-brand border border-gray-300 bg-white px-4 text-sm font-medium text-muted hover:bg-surface hover:text-primary"
                                 >
-                                    <ArrowLeft {...ICON} aria-hidden /> {urls.reclamations ? 'Retour aux réclamations' : 'Retour aux admissions'}
+                                    <ArrowLeft {...ICON} aria-hidden /> {libelleRetour}
                                 </Link>
                             )}
                             {urls.deroger && (

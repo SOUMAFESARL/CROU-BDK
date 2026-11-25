@@ -45,6 +45,7 @@ class Paiement extends Model
         'justificatif',
         'valide_par',
         'transaction_id',
+        'encaissement_id',
         'created_by',
         'updated_by',
         'deleted_by',
@@ -52,6 +53,9 @@ class Paiement extends Model
         'created_at',
         'updated_at',
     ];
+
+    /** Interne (reçu unique) : absent des réponses JSON. */
+    protected $hidden = ['encaissement_id'];
 
     protected $casts = [
         'montant' => 'decimal:2',
@@ -164,6 +168,23 @@ class Paiement extends Model
       
     {
         return $this->belongsTo(User::class, 'created_by', 'id_user');
+    }
+
+    /**
+     * Paiements figurant sur le même reçu : ceux enregistrés ensemble (« Nouveau paiement », plusieurs types cochés)
+     * et de même statut. Un paiement enregistré seul, ou annulé entre-temps, a son propre reçu.
+     */
+    public function paiementsDuRecu(): \Illuminate\Database\Eloquent\Collection
+    {
+        if (! $this->encaissement_id) {
+            return $this->newCollection([$this]);
+        }
+
+        return self::query()
+            ->where('encaissement_id', $this->encaissement_id)
+            ->where('statut_paiement', $this->statut_paiement)
+            ->orderBy('numero_paiement')
+            ->get();
     }
 
     // ============================================

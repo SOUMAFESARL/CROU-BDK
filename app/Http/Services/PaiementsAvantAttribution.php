@@ -6,6 +6,8 @@ use App\Http\Services\Eligibilite\CriteresCampagne;
 use App\Models\Campagne;
 use App\Models\Chambre;
 use App\Models\Etudiant;
+use App\Models\TypeChambre;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
@@ -34,10 +36,59 @@ class PaiementsAvantAttribution
         if ($loyer <= 0 || ! Schema::hasTable('paiements')) {
             return [];
         }
-        $etudiantId = (string) $etudiant->getKey();
-        $conditions = $this->criteres->conditionsFinancieres($campagne, $this->criteres->voletEtudiant($campagne, $etudiantId));
+        $volet = $this->criteres->voletEtudiant($campagne, (string) $etudiant->getKey());
+
+        return $this->soldes((string) $etudiant->getKey(), $campagne, $volet, $loyer);
+    }
+
+    /**
+     * Paiements exigés des étudiants admis à loger, avant le choix de leur chambre : le montant exigé se calcule sur le
+     * type de chambre actif le moins cher (le contrôle définitif, sur la chambre attribuée, reste `verifier()`).
+     * `paye` : tout ce qui est exigé est versé (ou rien n'est exigé).
+     *
+     * @param  iterable<Etudiant>  $etudiants  avec `derniereDemande.campagne` chargée
+     * @return array<string, array{volet: string, paye: bool, loyer: float, types: array<string, array{exige: float, verse: float, reste: float}>}> par identifiant d'étudiant
+     */
+    public function etatsAvantChambre(iterable $etudiants): array
+    {
+        $loyer = (float) $this->typesChambre()->min('montant');
+        $payable = $loyer > 0 && Schema::hasTable('paiements');
+
+        return collect($etudiants)->mapWithKeys(function (Etudiant $etudiant) use ($loyer, $payable) {
+            $id = (string) $etudiant->getKey();
+            $campagne = $etudiant->derniereDemande?->campagne;
+            $volet = $this->criteres->voletEtudiant($campagne, $id);
+            $types = $payable && $campagne ? $this->soldes($id, $campagne, $volet, $loyer) : [];
+
+            return [$id => [
+                'volet' => $volet,
+                'paye' => collect($types)->every(fn (array $etat) => $etat['reste'] <= 0),
+                'loyer' => $loyer,
+                'types' => $types,
+            ]];
+        })->all();
+    }
+
+    /** Types de chambre actifs avec un loyer mensuel : base du montant d'un paiement avant l'attribution de la chambre. */
+    public function typesChambre(): Collection
+    {
+        if (! Schema::hasTable('type_chambre')) {
+            return collect();
+        }
+
+        return TypeChambre::query()
+            ->when(Schema::hasColumn('type_chambre', 'is_active'), fn ($q) => $q->where(fn ($q) => $q->whereNull('is_active')->orWhere('is_active', true)))
+            ->where('montant', '>', 0)
+            ->orderBy('montant')->orderBy('name')
+            ->get();
+    }
+
+    /** Exigé, versé et restant dû par type, pour un loyer mensuel donné ; en réadmission, la caution n'est jamais exigée. */
+    private function soldes(string $etudiantId, Campagne $campagne, string $volet, float $loyer): array
+    {
+        $conditions = $this->criteres->conditionsFinancieres($campagne, $volet);
         $exiges = array_filter([
-            'caution' => $conditions['caution_mois'] * $loyer,
+            'caution' => $volet === 'readmission' ? 0.0 : $conditions['caution_mois'] * $loyer,
             PaiementService::TYPE_AVANCE => $conditions['avance_mois'] * $loyer,
         ], fn (float $montant) => $montant > 0);
         if ($exiges === []) {

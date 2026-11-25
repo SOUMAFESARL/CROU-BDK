@@ -308,7 +308,7 @@ class AdminPermissionsTest extends TestCase
         $this->assertSame($count, DB::table('permissions')->count());
         $this->assertSame(1, DB::table('role_permission')->where('role_id', 2)->count());
         // Permissions ajoutées par les migrations suivantes (même principe : rôle 1 seulement).
-        foreach (['2026_10_17_000001_add_campagne_update_delete_permissions.php', '2026_11_10_000002_add_eligibilite_permissions.php', '2026_11_13_000002_add_discipline_configure_permission.php', '2026_11_23_000003_add_types_paiement_permissions.php', '2026_11_24_000001_add_admission_screen_permissions.php', '2026_11_24_000006_add_reclamations_permissions.php', '2026_11_24_000009_rename_reclamations_update_permission_to_traiter.php', '2026_11_25_000001_ranger_droits_admissions_en_sous_modules.php'] as $suivante) {
+        foreach (['2026_10_17_000001_add_campagne_update_delete_permissions.php', '2026_11_10_000002_add_eligibilite_permissions.php', '2026_11_13_000002_add_discipline_configure_permission.php', '2026_11_23_000003_add_types_paiement_permissions.php', '2026_11_24_000001_add_admission_screen_permissions.php', '2026_11_24_000006_add_reclamations_permissions.php', '2026_11_24_000009_rename_reclamations_update_permission_to_traiter.php', '2026_11_25_000001_ranger_droits_admissions_en_sous_modules.php', '2026_11_25_000004_add_resultats_permissions.php', '2026_11_25_000007_add_resultats_admettre_permission.php'] as $suivante) {
             (require database_path('migrations/'.$suivante))->up();
         }
         $this->assertSame(1, DB::table('role_permission')->where('role_id', 2)->count());

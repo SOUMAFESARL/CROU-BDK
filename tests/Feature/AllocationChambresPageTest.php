@@ -144,6 +144,22 @@ class AllocationChambresPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('m', collect($props['etudiants'])->firstWhere('id', 'student')['sexe']);
         $chambre = collect($props['chambres'])->firstWhere('id', 'room');
         $this->assertSame('mixte', $chambre['sexe']);
+        $this->assertNull($chambre['sexeOccupants']);
         $this->assertNotEmpty($chambre['lits']);
+    }
+
+    public function test_formulaire_indique_le_sexe_des_occupants(): void
+    {
+        $this->tablesDuSuivi();
+        DB::table('chambre')->update(['capacite_max' => 2]);
+        $this->allocate();
+
+        $page = $this->page('allocateForm', ['campagneId' => 'campaign'], ['etudiant_id' => 'other']);
+
+        $chambre = collect($page['props']['chambres'])->firstWhere('id', 'room');
+        $this->assertSame('mixte', $chambre['sexe']);
+        $this->assertSame('m', $chambre['sexeOccupants']);
+        $this->assertSame(1, $chambre['libres']);
+        $this->assertCount(1, $chambre['lits']);
     }
 }

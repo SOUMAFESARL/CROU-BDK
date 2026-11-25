@@ -184,8 +184,9 @@ class AllocationChambreController extends Controller
     {
         $campagne = Campagne::findOrFail($campagneId);
         $etudiants = $this->assignationRepository->getStudentsSansChambres($campagneId);
-        $chambres = $this->chambreRepository->getDisponibles($campagneId);
-        // Pré-contrôle affiché à l'écran ; AttributionRules::erreurs() refait la vérification complète.
+        $chambres = $this->chambreRepository->getDisponibles($campagneId)
+            ->load(['assignations' => fn ($q) => $q->mobilisantPlace()->with('etudiant.genre')]);
+        // Filtrage des chambres (sexe, PMR) et pré-contrôle faits à l'écran ; AttributionRules::erreurs() refait la vérification complète.
         $regles = app(AttributionRules::class);
         $lits = app(LitService::class);
         // Types visés par l'attribution automatique (Etudiant::getPrioriteChambres()).
@@ -217,6 +218,7 @@ class AllocationChambreController extends Controller
                 'prix' => (float) $chambre->prix,
                 'pmr' => (bool) $chambre->pmr,
                 'sexe' => $regles->sexeRequis($chambre),
+                'sexeOccupants' => $regles->sexeOccupants($chambre->assignations),
                 'lits' => array_values(array_map('intval', (array) $lits->disponibles($chambre))),
             ])->values(),
             'etudiantInitial' => (string) $request->query('etudiant_id', ''),

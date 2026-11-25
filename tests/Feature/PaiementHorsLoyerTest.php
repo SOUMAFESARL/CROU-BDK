@@ -24,7 +24,7 @@ class PaiementHorsLoyerTest extends TestCase
 
         Schema::create('paiements', function (Blueprint $t) {
             $t->string('id_paiement')->primary();
-            foreach (['numero_paiement', 'resident_id', 'contrat_id', 'chambre_id', 'batiment_id', 'cite_id', 'loyer_id', 'type_paiement', 'devise', 'methode_paiement', 'reference_transaction', 'statut_paiement', 'created_by', 'updated_by'] as $champ) {
+            foreach (['numero_paiement', 'resident_id', 'contrat_id', 'chambre_id', 'batiment_id', 'cite_id', 'loyer_id', 'type_paiement', 'devise', 'methode_paiement', 'reference_transaction', 'statut_paiement', 'created_by', 'updated_by', 'encaissement_id'] as $champ) {
                 $t->string($champ)->nullable();
             }
             $t->text('mois')->nullable();
@@ -95,6 +95,10 @@ class PaiementHorsLoyerTest extends TestCase
         ]);
 
         $this->assertCount(2, $paiements);
+        // Un seul encaissement : reçu commun aux deux types.
+        $this->assertNotNull($paiements[0]->encaissement_id);
+        $this->assertSame($paiements[0]->encaissement_id, $paiements[1]->encaissement_id);
+        $this->assertCount(2, $paiements[0]->paiementsDuRecu());
         $this->assertEquals(
             [['caution', 30000, 'e1', 'especes'], ['frais_de_dossier', 5000, 'e1', 'especes']],
             Paiement::orderBy('montant', 'desc')->get()->map(fn ($p) => [$p->type_paiement, (float) $p->montant, $p->resident_id, $p->methode_paiement])->all()

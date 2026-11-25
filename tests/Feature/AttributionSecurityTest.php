@@ -110,6 +110,24 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
         $this->assertNotNull($this->allocate());
     }
 
+    public function test_mixed_room_never_mixes_men_and_women(): void
+    {
+        DB::table('chambre')->update(['capacite_max' => 2]);
+        DB::table('etudiants')->where('id_etudiant', 'other')->update(['genre_id' => 2]);
+        $this->allocate();
+        try {
+            $this->allocate('other');
+            $this->fail('Une femme ne doit pas rejoindre une chambre occupée par un homme');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('autre sexe', $e->getMessage());
+        }
+        // L'attribution automatique écarte aussi cette chambre.
+        $this->assertNull($this->allocate('other', null));
+
+        DB::table('etudiants')->where('id_etudiant', 'other')->update(['genre_id' => 1]);
+        $this->assertNotNull($this->allocate('other'));
+    }
+
     public function test_reference_labels_of_type_cite_are_recognized(): void
     {
         // Libellés réels du référentiel en production.

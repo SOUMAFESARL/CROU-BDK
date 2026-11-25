@@ -31,11 +31,11 @@ class ResultatPublicController extends Controller
 
     private function page(?array $resultat = null): Response
     {
-        $campagne = $this->resultats->campagnePubliee();
+        $campagnes = $this->resultats->campagnesConsultables();
 
         return Inertia::render('Etudiant/Auth/Resultat', [
-            // Campagne de la dernière publication ; null : aucun résultat publié.
-            'campagne' => $campagne ? collect([$campagne->libelle, $campagne->annee_campagne])->filter()->implode(' · ') : null,
+            // Campagnes dont les résultats sont publiés et visibles ; null : aucune (page masquée).
+            'campagne' => $campagnes->map(fn ($campagne) => collect([$campagne->libelle, $campagne->annee_campagne])->filter()->implode(' · '))->implode(', ') ?: null,
             'resultat' => $resultat,
             'liens' => [
                 'consulter' => route('etudiant.resultats.show'),

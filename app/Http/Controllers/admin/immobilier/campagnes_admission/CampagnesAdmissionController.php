@@ -371,6 +371,8 @@ class CampagnesAdmissionController extends Controller
                 // Fiche ouverte depuis la liste des réclamations : retour à cette liste.
                 'reclamations' => $request->query('origine') === 'reclamations' && $vues->allows($admin, 'admissions.reclamations')
                     ? $url('admin.hebergement.reclamations.liste') : null,
+                // Fiche ouverte depuis la page « Résultats d'admission » : retour à cette page.
+                'resultats' => $request->query('origine') === 'resultats' ? $url('admin.hebergement.resultats.index') : null,
             ],
         ]);
     }
@@ -855,7 +857,9 @@ class CampagnesAdmissionController extends Controller
                     1 => ' 1 étudiant passe dans « Admis à loger ».',
                     default => ' '.$bilan['admis'].' étudiants passent dans « Admis à loger ».',
                 }
-                .' Les étudiants peuvent consulter leur résultat sur la plateforme.'
+                .(in_array((string) $campagne->getKey(), $resultats->campagnesVisibles(), true)
+                    ? ' Les étudiants peuvent consulter leur résultat sur la plateforme.'
+                    : ' Pour que les étudiants consultent leur résultat, cochez cette campagne dans le menu « Résultats d’admission ».')
                 .($bilan['bloques'] !== [] ? ' Non admis à loger : '.implode(' ; ', $bilan['bloques']) : ''));
     }
 

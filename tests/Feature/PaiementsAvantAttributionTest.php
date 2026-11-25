@@ -137,4 +137,32 @@ class PaiementsAvantAttributionTest extends TestCase
         $this->assertSame(['avance'], array_keys($etat));
         $this->assertSame(24000.0, $etat['avance']['exige']);
     }
+
+    private function etatAvantChambre(): array
+    {
+        return app(PaiementsAvantAttribution::class)->etatsAvantChambre(Etudiant::with('derniereDemande.campagne')->get())['e1'];
+    }
+
+    public function test_etat_avant_le_choix_de_la_chambre_sur_le_type_le_moins_cher(): void
+    {
+        DB::table('type_chambre')->insert([['id_type_chambre' => 't2', 'name' => 'Individuelle', 'montant' => 20000], ['id_type_chambre' => 't3', 'name' => 'Sans loyer', 'montant' => 0]]);
+        $this->payer('caution', 24000);
+
+        $etat = $this->etatAvantChambre();
+        $this->assertFalse($etat['paye']);
+        $this->assertSame(['admission', 8000.0], [$etat['volet'], $etat['loyer']]);
+        $this->assertSame([0.0, 16000.0], [$etat['types']['caution']['reste'], $etat['types']['avance']['reste']]);
+
+        $this->payer('avance', 16000);
+        $this->assertTrue($this->etatAvantChambre()['paye']);
+    }
+
+    public function test_etat_avant_chambre_en_readmission_sans_caution(): void
+    {
+        DB::table('campagne')->update(['admission' => false, 'readmission' => true]);
+        $this->assertSame([['avance'], false], [array_keys($this->etatAvantChambre()['types']), $this->etatAvantChambre()['paye']]);
+
+        $this->payer('avance', 24000);
+        $this->assertTrue($this->etatAvantChambre()['paye']);
+    }
 }

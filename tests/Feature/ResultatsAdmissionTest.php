@@ -40,10 +40,12 @@ class ResultatsAdmissionTest extends \Tests\Support\DossierTestCase
         });
         foreach (['2026_11_20_000001_add_approbation_commission_to_demande.php', '2026_11_20_000002_add_attente_commission_to_demande.php',
             '2026_11_20_000003_add_liste_approbation_commission_to_demande.php', '2026_11_20_000004_create_publication_liste_definitive_table.php',
-            '2026_11_24_000005_create_reclamations_tables.php', '2026_11_25_000002_create_resultats_admission_table.php'] as $migration) {
+            '2026_11_24_000005_create_reclamations_tables.php', '2026_11_25_000002_create_resultats_admission_table.php', '2026_11_25_000003_create_resultats_visibilite_table.php'] as $migration) {
             (require database_path('migrations/'.$migration))->up();
         }
         DB::table('campagne')->update(['libelle' => 'Campagne test', 'annee_campagne' => '2026-2027']);
+        // Campagne cochée dans le menu « Résultats d'admission ».
+        app(ResultatsAdmission::class)->definirCampagnesVisibles(['campaign'], null);
         foreach (['student' => 'KONÉ Awa', 'other' => 'YAO Jean', 'troisieme' => 'BAMBA Ali', 'quatrieme' => 'DIALLO Issa'] as $id => $nom) {
             DB::table('etudiants')->updateOrInsert(['id_etudiant' => $id], ['name' => $nom, 'genre_id' => 1, 'statut_inscription' => 'demande']);
             $this->dossier($id);
@@ -112,6 +114,16 @@ class ResultatsAdmissionTest extends \Tests\Support\DossierTestCase
         // Rejouer la publication ne change rien.
         $this->assertSame(0, app(ResultatsAdmission::class)->publier(Campagne::findOrFail('campaign'), ['admission'],
             Etudiant::with('derniereDemande.campagne')->get(), ['definitives' => ['student', 'other'], 'rejetees' => ['troisieme']] + self::CLASSES)['admis']);
+    }
+
+    public function test_une_nouvelle_publication_garde_l_admission_depuis_la_file_d_attente(): void
+    {
+        $this->publier();
+        DB::table('demande')->where('etudiant_id', 'other')->update(['etat_dossier' => 'confirme']);
+        app(ResultatsAdmission::class)->publier(Campagne::findOrFail('campaign'), ['admission'],
+            Etudiant::with('derniereDemande.campagne')->get(), ['definitives' => ['student', 'other']] + self::CLASSES);
+
+        $this->assertDatabaseHas('resultats_admission', ['etudiant_id' => 'other', 'resultat' => 'admis']);
     }
 
     public function test_un_volet_non_publie_et_une_approbation_posterieure_ne_donnent_pas_d_admission(): void

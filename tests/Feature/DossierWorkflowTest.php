@@ -78,6 +78,15 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->confirm();
         $this->assertSame('confirme',$dossier->fresh()->etat_dossier);
     }
+    public function test_room_can_be_allocated_once_the_campaign_is_closed(): void
+    {
+        $dossier=$this->eligibleRequest();$this->confirm();
+        DB::table('campagne')->update(['statut'=>'terminer']);
+        $assignment=$this->allocate();
+        $this->assertSame('confirmee',$assignment->fresh()->statut);
+        $this->assertSame('attribue_definitif',$dossier->fresh()->etat_dossier);
+        $this->assertSame('residents',Etudiant::findOrFail('student')->statut_inscription);
+    }
     public function test_student_space_no_longer_confirms_an_eligible_dossier(): void
     {
         $dossier=$this->eligibleRequest();

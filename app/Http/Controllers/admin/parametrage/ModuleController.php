@@ -25,7 +25,7 @@ class ModuleController extends Controller
         'history'=>'Historique',
         // Onglets des campagnes et admissions.
         'refuser'=>'Refuser','attente'=>'Mettre en attente','approuver'=>'Approuver','publier'=>'Publier',
-        'document'=>'Contrôler les pièces','decision'=>'Décider','deroger'=>'Déroger',
+        'document'=>'Contrôler les pièces','decision'=>'Décider','deroger'=>'Déroger','admettre'=>'Valider une demande',
     ];
 
     /** Page React `Admin/Parametrage/Modules` : liste à plat, l'arborescence est reconstruite côté client. */

@@ -359,7 +359,7 @@ public function creerPaiement(array $data): Paiement
             'valide_par' => $data['valide_par'] ?? null,
             'transaction_id' => $data['transaction_id'] ?? null,
           //  'created_by' => $data['created_by'] ?? (auth()->id() ?? 'system'),
-        ];
+        ] + $this->encaissement($data);
         
         // 6. Enregistrer le paiement principal
         $paiement = $this->paiementRepository->create($paiementData);
@@ -465,12 +465,17 @@ if ($paiementsSansMois->isNotEmpty()) {
  * « Nouveau paiement » avec plusieurs types cochés : un paiement par ligne (type + montant), tous ou aucun.
  * Les données communes (résident, logement, méthode, notes) sont reprises sur chaque paiement ; le loyer passe
  * par la répartition habituelle, les autres types sont enregistrés hors loyer.
+ * Plusieurs lignes partagent un identifiant d'encaissement : un seul reçu pour l'ensemble (`Paiement::paiementsDuRecu`).
  *
  * @param array<int, array{type_paiement: string, montant: float|int|string, mois?: string[]}> $lignes
  * @return Paiement[]
  */
 public function creerPaiements(array $commun, array $lignes): array
 {
+    if (count($lignes) > 1) {
+        $commun['encaissement_id'] = (string) \Illuminate\Support\Str::uuid();
+    }
+
     return DB::transaction(fn () => array_map(
         fn (array $ligne) => $this->creerPaiement(array_merge($commun, [
             'type_paiement' => $ligne['type_paiement'],
@@ -478,6 +483,12 @@ public function creerPaiements(array $commun, array $lignes): array
         ], isset($ligne['mois']) ? ['mois' => $ligne['mois']] : [])),
         $lignes,
     ));
+}
+
+/** Encaissement commun à plusieurs paiements ; rien à enregistrer pour un paiement seul. */
+private function encaissement(array $data): array
+{
+    return isset($data['encaissement_id']) ? ['encaissement_id' => $data['encaissement_id']] : [];
 }
 
 /**
@@ -503,7 +514,7 @@ protected function creerPaiementHorsLoyer(array $data): Paiement
         'statut_paiement' => 'valide',
         'date_paiement' => now(),
         'notes' => $data['notes'] ?? null,
-    ]);
+    ] + $this->encaissement($data));
 
     Log::info('Paiement hors loyer créé', [
         'paiement_id' => $paiement->id_paiement,

@@ -44,6 +44,15 @@ La migration `2026_11_24_000006_add_reclamations_permissions.php` ajoute le modu
 | `admin.hebergement.reclamations.configuration`, `.periodes.store`, `.periodes.update`, `.periodes.destroy` | `hebergement.reclamations.configure` |
 | `admin.hebergement.reclamations.traiter` | `hebergement.reclamations.traiter` |
 
+La migration `2026_11_25_000004_add_resultats_permissions.php` ajoute le module **« Résultats d'admission »** (`hebergement.resultats`) et ses droits `.view`, `.publier` et `.export`, accordés au seul rôle 1 (libellé du module : `2026_11_25_000005` ; droit `.admettre` : `2026_11_25_000007` ; voir `docs/resultats-admission.md`). Publier, admettre et exporter exigent aussi `.view`.
+
+| Route | Permission(s) |
+| --- | --- |
+| `admin.hebergement.resultats.index` | `hebergement.resultats.view` |
+| `admin.hebergement.resultats.visibilite` (campagnes visibles, page masquée) | `hebergement.resultats.publier` |
+| `admin.hebergement.resultats.admettre` (file d'attente → « Admis à loger ») | `hebergement.resultats.admettre` |
+| `admin.hebergement.resultats.export` (Excel, PDF) | `hebergement.resultats.export` |
+
 La migration `2026_11_25_000001_ranger_droits_admissions_en_sous_modules.php` range les droits du module **« Campagnes et admissions »** (`hebergement.admissions`) : le module ne garde que ses droits de base (`view`, `create`, `update`, `delete`, `validate`, `personal`, `documents`, `history`) et chaque onglet devient un sous-module, comme « Dérogations d’admission » (sauf « Campagnes » : la liste des campagnes s’ouvre avec « Consulter » du module, `hebergement.admissions.view`). Les droits existants sont déplacés (les rôles les gardent) : `hebergement.admissions.commission_validees_view` devient `hebergement.admissions.commission-validees.view`, et « Valider » y est l’action commune `validate`. Les slugs se lisent toujours par `App\Services\AdmissionPermissions::slug($onglet, $action)`.
 
 | Sous-module (`hebergement.admissions.…`) | Droits |

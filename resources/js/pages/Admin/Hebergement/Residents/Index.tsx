@@ -1,16 +1,17 @@
 import { Link, router } from '@inertiajs/react';
-import { BedDouble, CirclePlay, Eye, FileText, ListChecks, Pencil, Search, UserPlus, Users, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { BedDouble, CirclePlay, Eye, FileText, ListChecks, Search, UserPlus, Users, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
+import { fcfa } from '@/components/paiements/shared';
+import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { EtudiantEditDialog, type OptionsEtudiant, type ValeursEtudiant } from '@/components/residents/etudiant-edit-dialog';
 import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
@@ -26,9 +27,20 @@ type Resident = {
     /** Résidents logés seulement, comme le contrat. */
     demandes: number | null;
     chambre: { numero: string | null; lieu: string | null } | null;
-    urls: { dossier: string | null; attribuer: string | null; contrat: string | null; modifier: string | null };
-    /** Valeurs du formulaire de modification (envoyées seulement avec le droit de modifier). */
-    edition: ValeursEtudiant | null;
+    /** Admis à loger seulement : paiements exigés avant l'attribution de la chambre. */
+    paiement: { readmission: boolean; types: PaiementExige[] } | null;
+    urls: { dossier: string | null; attribuer: string | null; contrat: string | null };
+};
+
+/** Caution (nouvelle admission) ou avance ; montants `null` sans le droit de consulter les paiements. */
+type PaiementExige = { type: 'caution' | 'avance'; statut: 'paye' | 'partiel' | 'non_paye'; verse: number | null; exige: number | null };
+
+const LIBELLES_EXIGES: Record<PaiementExige['type'], string> = { caution: 'Caution', avance: 'Avance' };
+
+const STATUTS_EXIGES: Record<PaiementExige['statut'], { label: string; variant: 'success' | 'warning' | 'danger' }> = {
+    paye: { label: 'Payée', variant: 'success' },
+    partiel: { label: 'Partielle', variant: 'warning' },
+    non_paye: { label: 'Non payée', variant: 'danger' },
 };
 
 type Props = {
@@ -42,8 +54,6 @@ type Props = {
     campagnes: CampagneOption[];
     /** Campagne choisie (par défaut la campagne active ; `null` : toutes les campagnes). */
     campagneActive: { id: string; annee: string } | null;
-    /** Référentiels du formulaire de modification (`null` sans le droit de modifier). */
-    options: OptionsEtudiant | null;
     urls: { admissionDirecte: string | null; attributions: string | null; filtres: Record<Filtre, string> | null };
 };
 
@@ -61,14 +71,8 @@ const TITRES: Record<Filtre, string> = {
 };
 
 /** Résidents et contrats (remplace `resident_contrat/index.blade.php`). */
-export default function ResidentsIndex({ residents, stats, etat, filters, colonnes, campagnes, campagneActive, options, urls }: Props) {
+export default function ResidentsIndex({ residents, stats, etat, filters, colonnes, campagnes, campagneActive, urls }: Props) {
     const [recherche, setRecherche] = useState(filters.q);
-    const [enEdition, setEnEdition] = useState<Resident | null>(null);
-    // Objet stable : la fenêtre réinitialise son formulaire quand l'étudiant change.
-    const etudiantEdite = useMemo(
-        () => (enEdition?.urls.modifier && enEdition.edition ? { name: enEdition.name, url: enEdition.urls.modifier, valeurs: enEdition.edition } : null),
-        [enEdition],
-    );
     const premierRendu = useRef(true);
 
     // Rechargement de la liste (retour en page 1, filtre conservé) avec la recherche et la campagne choisie.
@@ -152,6 +156,15 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                   },
               ] satisfies DataTableColumn<Resident>[])
             : []),
+        ...(!vueResidents
+            ? ([
+                  {
+                      key: 'paiement',
+                      header: 'Caution / Avance',
+                      cell: (r) => (r.paiement ? <StatutPaiement paiement={r.paiement} /> : vide(null)),
+                  },
+              ] satisfies DataTableColumn<Resident>[])
+            : []),
         {
             key: 'actions',
             header: <span className="sr-only">Actions</span>,
@@ -159,7 +172,6 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
             cell: (r) => (
                 <RowActions>
                     {r.urls.attribuer && <RowAction label="Attribuer une chambre" icon={BedDouble} href={r.urls.attribuer} tone="success" />}
-                    {r.urls.modifier && r.edition && <RowAction label="Modifier les informations" icon={Pencil} onClick={() => setEnEdition(r)} tone="edit" />}
                     {r.urls.contrat && <RowAction label="Consulter le contrat (PDF)" icon={FileText} href={r.urls.contrat} newTab />}
                     {r.urls.dossier && <RowAction label="Voir le dossier" icon={Eye} href={r.urls.dossier} tone="view" />}
                 </RowActions>
@@ -271,8 +283,30 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                     }
                 />
             </section>
-
-            {options && <EtudiantEditDialog etudiant={etudiantEdite} options={options} onClose={() => setEnEdition(null)} />}
         </AdminLayout>
+    );
+}
+
+/** Statut des paiements exigés avant l'attribution : caution et avance (nouvelle admission), avance seule (réadmission). */
+function StatutPaiement({ paiement }: { paiement: NonNullable<Resident['paiement']> }) {
+    return (
+        <div className="min-w-44 space-y-1">
+            <p className="text-xs text-muted">{paiement.readmission ? 'Réadmission' : 'Nouvelle admission'}</p>
+            {paiement.types.length === 0 && <p className="text-xs text-muted">Aucun paiement exigé</p>}
+            {paiement.types.map((exige) => {
+                const statut = STATUTS_EXIGES[exige.statut];
+                return (
+                    <div key={exige.type} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="w-14 text-sm">{LIBELLES_EXIGES[exige.type]}</span>
+                        <Badge variant={statut.variant}>{statut.label}</Badge>
+                        {exige.statut === 'partiel' && exige.verse !== null && exige.exige !== null && (
+                            <span className="text-xs whitespace-nowrap text-muted tabular-nums">
+                                {fcfa(exige.verse)} / {fcfa(exige.exige)}
+                            </span>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
     );
 }

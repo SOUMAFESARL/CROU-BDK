@@ -1,5 +1,5 @@
 import { Link, router } from '@inertiajs/react';
-import { BarChart3, Check, CirclePlay, Download, Eye, Plus, Send, Wallet, X } from 'lucide-react';
+import { BarChart3, Check, CirclePlay, Download, Eye, Plus, Printer, Send, Wallet, X } from 'lucide-react';
 import { useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
@@ -33,7 +33,8 @@ type Paiement = {
     statut: string;
     statut_label: string;
     date_paiement: string | null;
-    urls: { show: string | null; valider: string | null; annuler: string | null };
+    /** `recu` : reçu PDF, unique pour les types de paiement enregistrés ensemble. */
+    urls: { show: string | null; recu: string | null; valider: string | null; annuler: string | null };
 };
 
 type Filtres = { campagne: string; residence: string; statut: string; mois: string };
@@ -158,6 +159,7 @@ export default function PaiementsIndex({ paiements, kpis, residences, typesPaiem
                 <RowActions>
                     {p.urls.valider && <RowAction label="Valider le paiement" icon={Check} tone="success" onClick={() => setAction({ type: 'valider', paiement: p })} />}
                     {p.urls.annuler && <RowAction label="Annuler le paiement" icon={X} tone="danger" onClick={() => setAction({ type: 'annuler', paiement: p })} />}
+                    {p.urls.recu && <RowAction label="Imprimer le reçu" icon={Printer} href={p.urls.recu} newTab />}
                     {p.urls.show && <RowAction label="Voir le détail" icon={Eye} href={p.urls.show} tone="view" />}
                 </RowActions>
             ),

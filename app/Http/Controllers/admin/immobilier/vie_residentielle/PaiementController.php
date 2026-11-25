@@ -6,6 +6,7 @@ namespace App\Http\Controllers\admin\immobilier\vie_residentielle;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Http\Services\PaiementService;
+use App\Http\Services\PaiementsAvantAttribution;
 use App\Models\Campagne;
 use App\Models\Cite;
 use App\Models\Loyer;
@@ -107,6 +108,8 @@ class PaiementController extends Controller
             'date_paiement' => $paiement->date_paiement?->format('Y-m-d H:i'),
             'urls' => [
                 'show' => $url('admin.hebergement.paiements.show', ['id' => $paiement->id_paiement]),
+                // Reçu unique pour les types enregistrés ensemble : même document sur chaque ligne de l'encaissement.
+                'recu' => $url('admin.hebergement.paiements.recu', ['id' => $paiement->id_paiement]),
                 'valider' => $paiement->statut_paiement === 'en_attente' ? $url('admin.hebergement.paiements.valider', ['id' => $paiement->id_paiement]) : null,
                 'annuler' => $paiement->statut_paiement === 'en_attente' ? $url('admin.hebergement.paiements.annuler', ['id' => $paiement->id_paiement]) : null,
             ],
@@ -311,9 +314,9 @@ class PaiementController extends Controller
         return response()->stream($callback, 200, $headers);
     }
 
- /**
-     * Recherche dynamique des résidents : étudiants logés (affectation confirmée), puis étudiants de la liste
-     * définitive publiée qui n'ont pas encore de chambre (`ListeDefinitivePubliee`, paiements hors loyer seulement).
+    /**
+     * Recherche dynamique de « Nouveau paiement » : uniquement les étudiants de la liste « Admis à loger »
+     * (Résidents & contrats), sans chambre (`ListeDefinitivePubliee`).
      */
     public function rechercheResidents(Request $request)
     {
@@ -334,81 +337,36 @@ class PaiementController extends Controller
               ->orWhereHas('demandes', fn ($d) => $d->where('num_table_bac', 'LIKE', "%{$query}%"));
         };
 
-        $residents = Etudiant::with(['assignationActive.campagne', 'assignationActive.chambre.cite', 'assignationActive.chambre.batiment', 'assignationActive.chambre.typeChambre'])
-            ->where($correspond)
-            ->whereHas('assignationActive', function($q) {
-                $q->where('statut', 'confirmee');
-            })
-            ->limit(15)
-            ->get();
-
-        return response()->json($residents->map(function($resident) {
-            $assignation = $resident->assignationActive;
-            $chambre = $assignation ? $assignation->chambre : null;
-            $cite = $chambre ? $chambre->cite : null;
-             $batiment = $chambre ? $chambre->batiment : null;
-            
-            // Loyer mensuel du type de chambre (Paramétrage hébergement › Types de chambre) : base des montants de « Nouveau paiement ».
-            $loyerMensuel = $this->loyerMensuelChambre($chambre);
-            
-            // Calcul des arriérés (à adapter selon votre logique métier)
-            $arriere = $this->loyerService->calculerArriere($resident->id_etudiant);
-            $loyerActuel = $this->paiementService->getLoyerActuel($resident->id_etudiant);
-             $montantMois = $loyerActuel ? ($loyerActuel->solde_restant ?? $loyerActuel->montant_total) : 0;
-//dd($arriere);
-            return [
-                'id_etudiant' => $resident->id_etudiant,
-                'name' => trim($resident->name ),
-                'matricule' => $resident->matricule,
-                'num_table_bac' => $resident->demandes()->whereNotNull('num_table_bac')->latest('created_at')->value('num_table_bac'),
-                'telephone' => $resident->telephone1 ?? $resident->telephone2 ?? null,
-                'residence' => $cite ? $cite->name : null,
-                'residence_id' => $cite ? $cite->id_cite : null,
-                 'batiment' => $batiment ? $batiment->name : null,
-                'batiment_id' => $batiment ? $batiment->id_batiment : null,
-                'chambre' => $chambre ? $chambre->numero_chambre : null,
-                'chambre_id' => $chambre ? $chambre->id_chambre : null,
-                'contrat_id' => $assignation ? $assignation->id_assignation : null,
-                'loyer_mensuel' => $loyerMensuel,
-                 'arriere' => $arriere['solde_restant'],
-                'montant_mois' => $montantMois,
-                'total_du' => $arriere['solde_restant'] + $montantMois,
-                'statut_paiement' => $arriere['solde_restant'] > 0 ? 'En retard' : 'À jour',
-                // Réadmission : pas de caution (type masqué dans « Nouveau paiement »).
-                'readmission' => $this->voletResident($assignation, $resident->id_etudiant) === 'readmission',
-                // Mois suivant le dernier mois payé (loyer ou avance) : premier mois proposé dans le champ « Mois » (mm-aaaa).
-                'prochain_mois' => $this->paiementService->prochainMoisAPayer($resident->id_etudiant),
-                'sans_chambre' => false,
-            ];
-        })->concat($this->admisSansChambre($correspond))->values());
-    }
-
-    /**
-     * Étudiants de la liste définitive publiée, sans chambre, correspondant à la recherche : le montant de leurs
-     * paiements se calcule sur le loyer d'un type de chambre choisi dans le formulaire (`types_chambre`).
-     */
-    private function admisSansChambre(\Closure $correspond): \Illuminate\Support\Collection
-    {
-        $liste = app(ListeDefinitivePubliee::class);
-        $candidats = $liste->candidats(Etudiant::query())
+        $etudiants = app(ListeDefinitivePubliee::class)->candidats(Etudiant::query())
             ->with('derniereDemande.campagne')
             ->where($correspond)
             ->limit(15)
             ->get();
-        $publies = $liste->publies($candidats);
-        if ($publies === []) {
-            return collect();
+
+        return response()->json($this->lignesAdmis($etudiants));
+    }
+
+    /**
+     * Étudiants admis à loger proposés par « Nouveau paiement » : le montant de leurs paiements se calcule sur le loyer
+     * d'un type de chambre choisi dans le formulaire (`types_chambre`).
+     *
+     * @param  \Illuminate\Support\Collection<int, Etudiant>  $etudiants  avec `derniereDemande.campagne` chargée
+     */
+    private function lignesAdmis(\Illuminate\Support\Collection $etudiants): array
+    {
+        if ($etudiants->isEmpty()) {
+            return [];
         }
-        $typesChambre = $this->typesChambreAvantAttribution()
+        $paiements = app(PaiementsAvantAttribution::class);
+        $typesChambre = $paiements->typesChambre()
             ->map(fn (TypeChambre $type) => ['id' => (string) $type->id_type_chambre, 'name' => $type->name, 'montant' => (float) $type->montant])
             ->values()->all();
-        $criteres = app(CriteresCampagne::class);
+        $etats = $paiements->etatsAvantChambre($etudiants);
 
-        return $candidats->filter(fn (Etudiant $etudiant) => in_array((string) $etudiant->getKey(), $publies, true))
-            ->map(function (Etudiant $etudiant) use ($criteres, $typesChambre) {
-                $volet = $criteres->voletEtudiant($etudiant->derniereDemande->campagne, (string) $etudiant->getKey());
+        return $etudiants->map(function (Etudiant $etudiant) use ($etats, $typesChambre) {
+            $etat = $etats[(string) $etudiant->getKey()];
 
-                return [
+            return [
                 'id_etudiant' => $etudiant->id_etudiant,
                 'name' => trim((string) $etudiant->name),
                 'matricule' => $etudiant->matricule,
@@ -426,27 +384,18 @@ class PaiementController extends Controller
                 'montant_mois' => 0,
                 'total_du' => 0,
                 'statut_paiement' => 'À jour',
-                'readmission' => $volet === 'readmission',
+                'readmission' => $etat['volet'] === 'readmission',
                 'prochain_mois' => $this->paiementService->prochainMoisAPayer($etudiant->id_etudiant),
-                // Liste définitive publiée, pas encore de chambre : caution et avance à verser avant l'attribution,
+                // Admis à loger, pas encore de chambre : caution et avance à verser avant l'attribution,
                 // montant sur le type de chambre choisi.
                 'sans_chambre' => true,
                 'campagne' => $etudiant->derniereDemande->campagne?->annee_campagne,
                 'types_chambre' => $typesChambre,
-                // Mois de caution et d'avance exigés par la campagne pour son volet (nombres de mois proposés).
-                'conditions' => $criteres->conditionsFinancieres($etudiant->derniereDemande->campagne, $volet),
-                ];
-            })->values();
-    }
-
-    /** Types de chambre actifs avec un loyer mensuel : base du montant d'un paiement avant l'attribution de la chambre. */
-    private function typesChambreAvantAttribution(): \Illuminate\Support\Collection
-    {
-        return TypeChambre::query()
-            ->when(\Illuminate\Support\Facades\Schema::hasColumn('type_chambre', 'is_active'), fn ($q) => $q->where(fn ($q) => $q->whereNull('is_active')->orWhere('is_active', true)))
-            ->where('montant', '>', 0)
-            ->orderBy('montant')->orderBy('name')
-            ->get();
+                // Mois restant à payer par type exigé avant l'attribution (types soldés omis) : lignes proposées.
+                'a_payer' => (object) collect($etat['types'])->filter(fn (array $solde) => $solde['reste'] > 0)
+                    ->map(fn (array $solde) => min(self::MOIS_MAX, (int) ceil($solde['reste'] / $etat['loyer'])))->all(),
+            ];
+        })->values()->all();
     }
 
       /**
@@ -516,7 +465,7 @@ class PaiementController extends Controller
                     $echec('Cette méthode de paiement n’est pas acceptée (Configuration › Paiements).');
                 }
             }],
-            // Sans chambre : étudiant de la liste définitive publiée, montant calculé sur le type de chambre choisi.
+            // Sans chambre : étudiant admis à loger, montant calculé sur le type de chambre choisi.
             'chambre_id' => 'nullable|exists:chambre,id_chambre',
             'cite_id' => 'nullable|exists:cite,id_cite',
             'contrat_id' => 'nullable|exists:assignation_chambres,id_assignation',
@@ -536,7 +485,7 @@ class PaiementController extends Controller
             'lignes.*.mois.integer' => 'Le nombre de mois doit être un nombre entier.',
             'lignes.*.mois.min' => 'Au moins 1 mois.',
             'lignes.*.mois.max' => sprintf('%d mois au maximum.', self::MOIS_MAX),
-            'batiment_id.required_with' => 'Le bâtiment de ce résident est introuvable.',
+            'batiment_id.required_with' => 'Le bâtiment de cet étudiant est introuvable.',
         ]);
 
         $avantAttribution = empty($validated['chambre_id']);
@@ -545,7 +494,7 @@ class PaiementController extends Controller
             : $this->loyerMensuelChambre(\App\Models\Chambre::with('typeChambre')->find($validated['chambre_id']));
         if (! $avantAttribution && $loyerMensuel <= 0) {
             throw \Illuminate\Validation\ValidationException::withMessages([
-                'resident_id' => 'Le type de la chambre de ce résident n’a pas de loyer mensuel (Paramétrage hébergement › Types de chambre).',
+                'resident_id' => 'Le type de la chambre de cet étudiant n’a pas de loyer mensuel (Paramétrage hébergement › Types de chambre).',
             ]);
         }
 
@@ -554,7 +503,7 @@ class PaiementController extends Controller
         if (in_array(self::TYPE_CAUTION, array_column($validated['lignes'], 'type_paiement'), true)
             && $this->voletResident($assignation, $validated['resident_id']) === 'readmission') {
             throw \Illuminate\Validation\ValidationException::withMessages([
-                'lignes' => 'Ce résident est en réadmission : la caution ne s’applique pas.',
+                'lignes' => 'Cet étudiant est en réadmission : la caution ne s’applique pas.',
             ]);
         }
 
@@ -668,7 +617,7 @@ class PaiementController extends Controller
     }
 
     /**
-     * Paiement avant l'attribution de la chambre : l'étudiant doit figurer sur une liste définitive publiée, sans
+     * Paiement avant l'attribution de la chambre : l'étudiant doit figurer dans la liste « Admis à loger », sans
      * affectation confirmée. Caution (nouvelles demandes) et avance (nouvelles demandes et réadmissions) se paient avant
      * l'attribution ; le loyer mensuel est refusé. Le montant se calcule sur le loyer mensuel du type de chambre choisi.
      */
@@ -676,7 +625,7 @@ class PaiementController extends Controller
     {
         if (! app(ListeDefinitivePubliee::class)->figure($validated['resident_id'])) {
             throw \Illuminate\Validation\ValidationException::withMessages([
-                'resident_id' => 'Cet étudiant n’a pas de chambre attribuée et ne figure pas sur une liste définitive publiée : le paiement ne peut pas être enregistré.',
+                'resident_id' => 'Cet étudiant n’a pas de chambre attribuée et ne figure pas dans la liste « Admis à loger » : le paiement ne peut pas être enregistré.',
             ]);
         }
         // Avant l'attribution : caution (nouvelles demandes) et avance (toutes) se paient ; le loyer mensuel, non.
@@ -686,7 +635,7 @@ class PaiementController extends Controller
             ]);
         }
         $type = filled($validated['type_chambre_id'] ?? null)
-            ? $this->typesChambreAvantAttribution()->first(fn (TypeChambre $type) => (string) $type->id_type_chambre === (string) $validated['type_chambre_id'])
+            ? app(PaiementsAvantAttribution::class)->typesChambre()->first(fn (TypeChambre $type) => (string) $type->id_type_chambre === (string) $validated['type_chambre_id'])
             : null;
         if (! $type) {
             throw \Illuminate\Validation\ValidationException::withMessages([
@@ -947,29 +896,42 @@ public function show(Request $request, string $id)
 /**
  * Reçu PDF d'un paiement : document dédié (et non une copie de la page de détail), tenant sur une page A4 —
  * en-tête avec le logo et le nom du système, bénéficiaire, détail du paiement, répartition et signatures.
+ * Reçu unique pour les types de paiement enregistrés ensemble : même document depuis chacun d'eux.
  */
 public function recu(string $id)
 {
-    $paiement = Paiement::with(['resident', 'chambre', 'cite', 'repartitions', 'createdBy'])->findOrFail($id);
-    $mois = $paiement->mois ? formatPaiementMois($paiement->mois, 0) : null;
-    // Une seule page : au-delà de 12 lignes de répartition, les dernières sont regroupées en une ligne.
-    $repartitions = $paiement->repartitions->values();
-    $reste = $repartitions->slice(self::RECU_LIGNES_MAX - 1);
-    $lignes = $repartitions->count() > self::RECU_LIGNES_MAX
-        ? $repartitions->take(self::RECU_LIGNES_MAX - 1)
-        : $repartitions;
+    $paiements = Paiement::findOrFail($id)->paiementsDuRecu()
+        ->load(['resident', 'chambre', 'cite', 'repartitions', 'createdBy']);
+    $paiement = $paiements->first();
+
+    // Une seule page : au-delà de 12 lignes (moins une par type supplémentaire), les dernières sont regroupées en une ligne.
+    $max = max(3, self::RECU_LIGNES_MAX - ($paiements->count() - 1));
+    $repartitions = $paiements->flatMap(fn (Paiement $p) => $p->repartitions)->values();
+    $reste = $repartitions->slice($max - 1);
+    $lignes = $repartitions->count() > $max ? $repartitions->take($max - 1) : $repartitions;
 
     $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.recu-paiement', [
         'paiement' => $paiement,
-        'montant' => formatSystemAmount($paiement->montant),
-        'mois' => $mois && $mois !== '-' ? $mois : null,
+        'montant' => formatSystemAmount($paiements->sum('montant')),
+        'details' => $paiements->map(function (Paiement $p) {
+            $mois = $p->mois ? formatPaiementMois($p->mois, 0) : null;
+
+            return [
+                'numero' => $p->numero_paiement,
+                'type' => $p->type_label,
+                'mois' => $mois && $mois !== '-' ? $mois : null,
+                'montant' => formatSystemAmount($p->montant),
+            ];
+        })->all(),
+        'references' => $paiements->pluck('reference_transaction')->filter()->unique()->join(', '),
+        'notes' => $paiements->pluck('notes')->filter()->unique()->join(' '),
         'matricule' => $paiement->resident?->matricule
             ?: $paiement->resident?->demandes()->whereNotNull('num_table_bac')->latest('created_at')->value('num_table_bac'),
         'repartitions' => $lignes->map(fn ($rep) => [
             'libelle' => ['arriere' => 'Arriéré', 'mois_cours' => 'Mois en cours', 'avance' => 'Avance'][$rep->type] ?? ucfirst((string) $rep->type),
             'periode' => $rep->mois && $rep->annee ? str_pad((string) $rep->mois, 2, '0', STR_PAD_LEFT).'/'.$rep->annee : null,
             'montant' => formatSystemAmount($rep->montant),
-        ])->when($repartitions->count() > self::RECU_LIGNES_MAX, fn ($l) => $l->push([
+        ])->when($repartitions->count() > $max, fn ($l) => $l->push([
             'libelle' => sprintf('Autres périodes (%d)', $reste->count()),
             'periode' => null,
             'montant' => formatSystemAmount($reste->sum('montant')),

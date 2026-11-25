@@ -52,6 +52,7 @@ class PaiementsPageTest extends TestCase
             $t->string('matricule')->nullable();
             $t->string('telephone1')->nullable();
             $t->string('email1')->nullable();
+            $t->string('statut_inscription')->nullable();
             $t->timestamps();
             $t->softDeletes();
         });
@@ -79,6 +80,7 @@ class PaiementsPageTest extends TestCase
             $t->string('reference_transaction')->nullable();
             $t->text('notes')->nullable();
             $t->string('created_by')->nullable();
+            $t->string('encaissement_id')->nullable();
             $t->timestamps();
             $t->softDeletes();
         });
@@ -299,6 +301,62 @@ class PaiementsPageTest extends TestCase
         $this->assertSame(1, preg_match_all('#/Type\s*/Page[^s]#', $reponse->getContent()));
     }
 
+    public function test_recu_unique_pour_les_types_enregistres_ensemble(): void
+    {
+        $base = ['resident_id' => 'e1', 'contrat_id' => null, 'methode_paiement' => 'especes', 'statut_paiement' => 'valide', 'created_at' => now()];
+        DB::table('paiements')->insert([
+            $base + ['id_paiement' => 'g1', 'numero_paiement' => 'PAY-011', 'type_paiement' => 'loyer', 'montant' => 16000, 'mois' => json_encode(['12-2026', '01-2027']), 'encaissement_id' => 'enc'],
+            $base + ['id_paiement' => 'g2', 'numero_paiement' => 'PAY-012', 'type_paiement' => 'caution', 'montant' => 24000, 'mois' => '[]', 'encaissement_id' => 'enc'],
+            // Même instant, mais enregistré seul : pas sur ce reçu.
+            $base + ['id_paiement' => 'g3', 'numero_paiement' => 'PAY-013', 'type_paiement' => 'autre', 'montant' => 5000, 'mois' => '[]', 'encaissement_id' => null],
+        ]);
+        $vue = null;
+        \Illuminate\Support\Facades\View::composer('pdf.recu-paiement', function ($v) use (&$vue) {
+            $vue = $v->getData();
+        });
+
+        // Même reçu depuis chacun des deux paiements.
+        foreach (['g1', 'g2'] as $id) {
+            $reponse = $this->controleur()->recu($id);
+            $this->assertStringContainsString('recu-PAY-011.pdf', (string) $reponse->headers->get('Content-Disposition'));
+            $this->assertSame(1, preg_match_all('~/Type\s*/Page\b(?!s)~', $reponse->getContent()));
+            $this->assertSame(['PAY-011', 'PAY-012'], array_column($vue['details'], 'numero'));
+            $this->assertSame(formatSystemAmount(40000), $vue['montant']);
+        }
+        $this->controleur()->recu('g3');
+        $this->assertSame(['PAY-013'], array_column($vue['details'], 'numero'));
+
+        // Un paiement annulé sort du reçu commun.
+        DB::table('paiements')->where('id_paiement', 'g2')->update(['statut_paiement' => 'annule']);
+        $this->controleur()->recu('g1');
+        $this->assertSame(['PAY-011'], array_column($vue['details'], 'numero'));
+        $this->assertSame(formatSystemAmount(16000), $vue['montant']);
+    }
+
+    public function test_reprise_des_paiements_deja_enregistres_ensemble(): void
+    {
+        Schema::table('paiements', fn (Blueprint $t) => $t->dropColumn('encaissement_id'));
+        $base = ['resident_id' => 'e1', 'created_by' => 'u1', 'methode_paiement' => 'especes', 'statut_paiement' => 'valide', 'montant' => 1000];
+        $instant = '2026-11-25 14:11:20';
+        DB::table('paiements')->insert([
+            $base + ['id_paiement' => 'g1', 'type_paiement' => 'avance', 'created_at' => $instant],
+            $base + ['id_paiement' => 'g2', 'type_paiement' => 'caution', 'created_at' => $instant],
+            $base + ['id_paiement' => 'g3', 'type_paiement' => 'autre', 'created_at' => '2026-11-25 15:00:00'],
+            ['resident_id' => 'e2'] + $base + ['id_paiement' => 'g4', 'type_paiement' => 'caution', 'created_at' => $instant],
+            $base + ['id_paiement' => 'g5', 'type_paiement' => 'avance', 'created_at' => '2026-10-15 10:00:00'],
+            $base + ['id_paiement' => 'g6', 'type_paiement' => 'caution', 'created_at' => '2026-10-15 10:00:00'],
+        ]);
+
+        (require database_path('migrations/2026_11_25_000006_add_encaissement_to_paiements.php'))->up();
+
+        $encaissements = DB::table('paiements')->pluck('encaissement_id', 'id_paiement');
+        $this->assertNotNull($encaissements['g1']);
+        $this->assertSame($encaissements['g1'], $encaissements['g2']);
+        foreach (['g3', 'g4', 'g5', 'g6'] as $id) {
+            $this->assertNull($encaissements[$id]);
+        }
+    }
+
     public function test_rapport_financier(): void
     {
         $props = $this->page('rapportFinancier', 'Admin/Hebergement/Paiements/RapportFinancier', ['annee' => '2026']);
@@ -341,7 +399,7 @@ class PaiementsPageTest extends TestCase
         DB::table('chambre')->where('id_chambre', 'ch1')->update(['type_chambre_id' => 't1']);
         DB::table('batiment')->insert(['id_batiment' => 'b1']);
         if ($sansChambre !== null) {
-            $this->etudiantDeListeDefinitive(...$sansChambre);
+            $this->etudiantAdmisALoger(...$sansChambre);
         }
 
         $enregistrees = [];
@@ -374,32 +432,19 @@ class PaiementsPageTest extends TestCase
         return $enregistrees;
     }
 
-    /**
-     * e1 sans affectation confirmée, dernière demande « Recevable » de la campagne k1 approuvée en commission
-     * (« Demandes validées ») ; `$publiee` : liste des admissions publiée après l'approbation.
-     */
-    private function etudiantDeListeDefinitive(bool $publiee = true, string $liste = 'validees', ?string $typeChambre = null): void
+    /** e1 sans affectation confirmée, dernière demande de la campagne k1 ; `$admis` : figure dans la liste « Admis à loger ». */
+    private function etudiantAdmisALoger(bool $admis = true, ?string $typeChambre = null): void
     {
         DB::table('assignation_chambres')->where('etudiant_id', 'e1')->update(['etudiant_id' => 'autre']);
         DB::table('campagne')->where('id_campagne', 'k1')->update(['admission' => true, 'readmission' => false]);
+        DB::table('etudiants')->where('id_etudiant', 'e1')->update(['statut_inscription' => $admis ? 'en_verification' : 'en_attente']);
         DB::table('demande')->insert([
-            'id_demande' => 'd1', 'etudiant_id' => 'e1', 'campagne_id' => 'k1', 'etat_dossier' => 'eligible',
-            'liste_approbation_commission' => $liste, 'date_approbation_commission' => now()->subDay(), 'created_at' => now()->subWeek(),
+            'id_demande' => 'd1', 'etudiant_id' => 'e1', 'campagne_id' => 'k1', 'etat_dossier' => $admis ? 'confirme' : 'eligible',
+            'created_at' => now()->subWeek(),
         ]);
-        Schema::create('publication_liste_definitive', function (Blueprint $t) {
-            $t->string('id')->primary();
-            foreach (['campagne_id', 'liste', 'volet', 'publiee_par'] as $champ) {
-                $t->string($champ)->nullable();
-            }
-            $t->dateTime('date_publication');
-            $t->timestamps();
-        });
-        if ($publiee) {
-            DB::table('publication_liste_definitive')->insert(['id' => 'pub1', 'campagne_id' => 'k1', 'liste' => $liste, 'volet' => 'admission', 'date_publication' => now()]);
-        }
     }
 
-    public function test_nouveau_paiement_sans_chambre_pour_un_etudiant_de_la_liste_definitive_publiee(): void
+    public function test_nouveau_paiement_sans_chambre_pour_un_etudiant_admis_a_loger(): void
     {
         // Montant : mois × loyer du type de chambre choisi ; ni chambre ni bâtiment.
         $lignes = $this->enregistrer([['type_paiement' => 'caution', 'mois' => 2]], sansChambre: []);
@@ -438,38 +483,61 @@ class PaiementsPageTest extends TestCase
         }
     }
 
-    public function test_nouveau_paiement_sans_chambre_hors_liste_definitive_publiee_refuse(): void
+    public function test_nouveau_paiement_sans_chambre_hors_admis_a_loger_refuse(): void
     {
-        // Liste pas encore publiée, puis approbation depuis la file d'attente (publiée) : refusés.
-        foreach ([['publiee' => false], ['liste' => 'attente']] as $cas) {
-            $this->setUp();
-            try {
-                $this->enregistrer([['type_paiement' => 'caution', 'mois' => 1]], sansChambre: $cas);
-                $this->fail('Un étudiant hors liste définitive publiée ne peut pas payer sans chambre.');
-            } catch (\Illuminate\Validation\ValidationException $e) {
-                $this->assertSame(['resident_id'], array_keys($e->errors()));
-            }
+        try {
+            $this->enregistrer([['type_paiement' => 'caution', 'mois' => 1]], sansChambre: ['admis' => false]);
+            $this->fail('Un étudiant hors de la liste « Admis à loger » ne peut pas payer sans chambre.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertSame(['resident_id'], array_keys($e->errors()));
         }
     }
 
-    public function test_recherche_propose_les_etudiants_de_la_liste_definitive_sans_chambre(): void
+    /** Résultats de la recherche « Awa » de « Nouveau paiement ». */
+    private function rechercher(): array
     {
-        $this->enregistrer([['type_paiement' => 'caution', 'mois' => 1]], sansChambre: []);
-        Schema::table('etudiants', function (Blueprint $t) {
-            $t->string('telephone2')->nullable();
-            $t->string('email2')->nullable();
-        });
-
+        if (! Schema::hasColumn('etudiants', 'telephone2')) {
+            Schema::table('etudiants', function (Blueprint $t) {
+                $t->string('telephone2')->nullable();
+                $t->string('email2')->nullable();
+            });
+        }
         $paiements = Mockery::mock(PaiementService::class);
         $paiements->shouldReceive('prochainMoisAPayer')->andReturn('12-2026');
         $controleur = new PaiementController($paiements, Mockery::mock(EtudiantService::class), Mockery::mock(LoyerService::class), Mockery::mock(CiteService::class));
-        $resultats = $controleur->rechercheResidents(Request::create('/x', 'GET', ['q' => 'Awa']))->getData(true);
+
+        return $controleur->rechercheResidents(Request::create('/x', 'GET', ['q' => 'Awa']))->getData(true);
+    }
+
+    public function test_recherche_propose_les_etudiants_admis_a_loger(): void
+    {
+        $this->enregistrer([['type_paiement' => 'caution', 'mois' => 1]], sansChambre: []);
+
+        $resultats = $this->rechercher();
 
         $this->assertCount(1, $resultats);
         $this->assertSame(['e1', true, null, '2026-2027', false], [$resultats[0]['id_etudiant'], $resultats[0]['sans_chambre'], $resultats[0]['chambre_id'], $resultats[0]['campagne'], $resultats[0]['readmission']]);
         $this->assertSame([['id' => 't1', 'name' => 'Individuelle', 'montant' => 12000]], $resultats[0]['types_chambre']);
-        // Conditions par défaut du volet admission : 3 mois de caution, 2 mois d'avance.
-        $this->assertSame(['caution_mois' => 3, 'avance_mois' => 2], $resultats[0]['conditions']);
+        // Conditions par défaut du volet admission : 3 mois de caution, 2 mois d'avance, rien de versé.
+        $this->assertSame(['caution' => 3, 'avance' => 2], $resultats[0]['a_payer']);
+
+        // Caution soldée, 1 mois d'avance versé : il reste 1 mois d'avance.
+        foreach (['caution' => 36000, 'avance' => 12000] as $type => $montant) {
+            DB::table('paiements')->insert(['id_paiement' => "p-{$type}", 'resident_id' => 'e1', 'montant' => $montant, 'type_paiement' => $type, 'statut_paiement' => 'valide', 'created_at' => now()]);
+        }
+        $this->assertSame(['avance' => 1], $this->rechercher()[0]['a_payer']);
+    }
+
+    public function test_recherche_limitee_aux_admis_a_loger(): void
+    {
+        // Étudiant déjà logé (affectation confirmée) : plus proposé.
+        $this->enregistrer([['type_paiement' => 'loyer', 'mois' => 1]]);
+        DB::table('etudiants')->where('id_etudiant', 'e1')->update(['statut_inscription' => 'residents']);
+        $this->assertSame([], $this->rechercher());
+
+        // Dossier « Recevable », pas encore admis à loger : pas proposé.
+        $this->etudiantAdmisALoger(false);
+        $this->assertSame([], $this->rechercher());
     }
 
     public function test_nouveau_paiement_montant_calcule_depuis_le_type_de_chambre(): void

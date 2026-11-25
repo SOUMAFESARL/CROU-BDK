@@ -95,10 +95,6 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNotNull($urls['contrat']);
         $this->assertNull($props['urls']['attributions']);
         $this->assertNull($props['urls']['admissionDirecte']);
-        // Sans le droit de modifier : ni action, ni valeurs du formulaire, ni référentiels.
-        $this->assertNull($urls['modifier']);
-        $this->assertNull(collect($props['residents']['data'])->firstWhere('id', 'student')['edition']);
-        $this->assertNull($props['options']);
     }
 
     public function test_modification_des_informations_d_un_etudiant(): void
@@ -108,11 +104,10 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
 
         $props = $this->page('residents')['props'];
         $ligne = collect($props['residents']['data'])->firstWhere('id', 'student');
-        $this->assertStringContainsString('/residents_contrat/etudiants/student', $ligne['urls']['modifier']);
-        $this->assertSame('Konan Awa', $ligne['edition']['name']);
-        $this->assertTrue($ligne['edition']['avec_demande']);
-        $this->assertCount(2, $props['options']['genres']);
-        $this->assertSame(['id' => '10', 'name' => 'Bondoukou', 'region_id' => '1'], $props['options']['villes'][0]);
+        // Modification plus proposée dans la liste, même avec le droit : ni action, ni valeurs, ni référentiels.
+        $this->assertArrayNotHasKey('modifier', $ligne['urls']);
+        $this->assertArrayNotHasKey('edition', $ligne);
+        $this->assertArrayNotHasKey('options', $props);
         $this->assertNotNull($props['urls']['admissionDirecte']);
 
         $donnees = ['name' => 'Konan Awa Marie', 'genre_id' => 2, 'matricule' => 'M-001', 'telephone1' => '0700000001',
@@ -223,6 +218,51 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         // Sans le droit d'attribuer : pas d'icône.
         $this->agent(['hebergement.residents.view']);
         $this->assertNull($this->page('admis_a_loger')['props']['residents']['data'][0]['urls']['attribuer']);
+    }
+
+    public function test_attribution_proposee_une_fois_caution_et_avance_payees(): void
+    {
+        $dossier = $this->dossier('other');
+        $this->workflow->admin($dossier->getKey(), 'eligible');
+        $this->confirm('other');
+        Schema::create('type_chambre', function (Blueprint $t) {
+            $t->string('id_type_chambre')->primary();
+            $t->string('name');
+            $t->decimal('montant', 12, 2)->default(0);
+            $t->timestamps();
+        });
+        DB::table('type_chambre')->insert(['id_type_chambre' => 't1', 'name' => 'Double', 'montant' => 8000]);
+        Schema::create('paiements', function (Blueprint $t) {
+            $t->string('id_paiement')->primary();
+            foreach (['resident_id', 'chambre_id', 'type_paiement', 'statut_paiement'] as $champ) {
+                $t->string($champ)->nullable();
+            }
+            $t->decimal('montant', 12, 2)->default(0);
+            $t->timestamps();
+            $t->softDeletes();
+        });
+        $payer = fn (string $type, int $montant) => DB::table('paiements')->insert(['id_paiement' => $type, 'resident_id' => 'other',
+            'type_paiement' => $type, 'statut_paiement' => 'valide', 'montant' => $montant, 'created_at' => now()->addMinute()]);
+        $this->agent(['hebergement.residents.view', 'hebergement.residents.update', 'hebergement.attributions.assign',
+            'hebergement.paiements.view']);
+        $ligne = fn () => $this->page('admis_a_loger')['props']['residents']['data'][0];
+
+        // Nouvelle admission : 3 mois de caution et 2 mois d'avance.
+        $avant = $ligne();
+        $this->assertSame([false, ['caution' => 'non_paye', 'avance' => 'non_paye']], [$avant['paiement']['readmission'], array_column($avant['paiement']['types'], 'statut', 'type')]);
+        $this->assertNull($avant['urls']['attribuer']);
+
+        $payer('caution', 24000);
+        $payer('avance', 8000);
+        $this->assertSame(['caution' => 'paye', 'avance' => 'partiel'], array_column($ligne()['paiement']['types'], 'statut', 'type'));
+        $this->assertNull($ligne()['urls']['attribuer']);
+
+        DB::table('paiements')->where('id_paiement', 'avance')->update(['montant' => 16000]);
+        $this->assertNotNull($ligne()['urls']['attribuer']);
+
+        // Sans le droit de consulter les paiements : statut sans montants.
+        $this->agent(['hebergement.residents.view']);
+        $this->assertNull($ligne()['paiement']['types'][0]['verse']);
     }
 
     public function test_choix_de_la_campagne(): void

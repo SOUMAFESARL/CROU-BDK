@@ -7,6 +7,7 @@ use App\Models\Campagne;
 use App\Models\Chambre;
 use App\Models\Cite;
 use App\Models\Etudiant;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -27,7 +28,7 @@ class AttributionRules
         return $room->setRelation('cite', $cite)->setRelation('batiment', $batiment);
     }
 
-    /** $controlePmr = false : régularisation d'un étudiant déjà logé (admission directe), sans exigence PMR. */
+    /** $controlePmr = false : régularisation d'un étudiant déjà logé (admission directe), sans exigence PMR ni contrôle des co-occupants. */
     public function erreurs(Etudiant $student, Chambre $room, ?Campagne $campaign = null, ?string $ignore = null, bool $controlePmr = true): array
     {
         $errors = [];
@@ -67,10 +68,17 @@ class AttributionRules
         $places = $room->assignations()->mobilisantPlace()
             ->when($ignore, fn ($q) => $q->where('id_assignation', '!=', $ignore));
         // Lecture courante sous MySQL REPEATABLE READ, apres attente du verrou de chambre.
-        $used = $room->getConnection()->transactionLevel() > 0
-            ? $places->lockForUpdate()->get()->count() : $places->count();
-        if ($used >= (int) $room->capacite_max) {
+        $occupations = $room->getConnection()->transactionLevel() > 0
+            ? $places->lockForUpdate()->get() : $places->get();
+        if ($occupations->count() >= (int) $room->capacite_max) {
             $errors[] = 'Toutes les places sont occupées ou réservées.';
+        }
+        // Une chambre « mixte » suit le sexe de ses premiers occupants ; les réservations existantes ne sont pas remises en cause.
+        if ($controlePmr && !$reservationExistante && $occupations->isNotEmpty()) {
+            $sexeOccupants = $this->sexeOccupants($occupations);
+            if ($sexeOccupants !== null && $sexeOccupants !== $sex) {
+                $errors[] = 'Cette chambre est déjà occupée ou réservée par un étudiant de l’autre sexe.';
+            }
         }
         return array_values(array_unique($errors));
     }
@@ -106,6 +114,19 @@ class AttributionRules
             1 => array_key_first($requis),
             default => 'conflit',
         };
+    }
+
+    /**
+     * Sexe des occupants (assignations mobilisant une place) : 'm', 'f', 'mixte' si les deux sont
+     * présents, null si la chambre est vide ou le genre des occupants inconnu.
+     */
+    public function sexeOccupants(Collection $assignations): ?string
+    {
+        $sexes = $assignations->loadMissing('etudiant.genre')->toBase()
+            ->map(fn ($assignation) => $assignation->etudiant ? $this->sexeEtudiant($assignation->etudiant) : null)
+            ->filter()->unique()->values();
+
+        return $sexes->count() > 1 ? 'mixte' : $sexes->first();
     }
 
     /** 'm', 'f' ou null si le genre de l'étudiant n'est pas reconnu. */

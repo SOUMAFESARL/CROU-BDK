@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <title>Reçu de paiement {{ $paiement->numero_paiement }}</title>
-    {{-- Reçu d'un paiement (admin › Paiements › détail › « Imprimer le reçu ») : une seule page A4. --}}
+    {{-- Reçu d'un paiement (admin › Paiements, « Imprimer le reçu ») : une seule page A4, un seul reçu pour les types enregistrés ensemble. --}}
     <style>
         @page { margin: 14mm 14mm; }
         body { font-family: DejaVu Sans, sans-serif; font-size: 10px; color: #1f2328; }
@@ -30,6 +30,8 @@
         .repartition th, .repartition td { padding: 3px 6px; border: 1px solid #e6e9e2; text-align: left; }
         .repartition th { background: #ebf8de; color: #006400; font-weight: normal; }
         .repartition td.somme { text-align: right; white-space: nowrap; }
+        .repartition tr.total td { background: #f8f8f8; color: #006400; }
+        .avec-marge { margin-bottom: 6px; }
         .signatures { margin-top: 22px; }
         .signatures td { width: 50%; vertical-align: top; padding: 0 8px 0 0; }
         .signatures .zone { height: 52px; border-bottom: 1px solid #54595f; }
@@ -44,6 +46,7 @@
         $resident = $paiement->resident;
         $logement = collect([$paiement->cite?->name, $paiement->chambre?->numero_chambre ? 'Chambre '.$paiement->chambre->numero_chambre : null])->filter()->join(' · ');
         $valide = $paiement->statut_paiement === 'valide';
+        $plusieurs = count($details) > 1;
     @endphp
 
     <table class="institution">
@@ -88,17 +91,35 @@
 
     <div class="bloc">
         <h2>Détail du paiement</h2>
+        @if ($plusieurs)
+            <table class="repartition avec-marge">
+                <thead><tr><th>Type de paiement</th><th>N° de paiement</th><th>Mois concernés</th><th style="text-align: right;">Montant</th></tr></thead>
+                <tbody>
+                    @foreach ($details as $detail)
+                        <tr>
+                            <td>{{ $detail['type'] }}</td>
+                            <td>{{ $detail['numero'] ?: '—' }}</td>
+                            <td style="text-transform: capitalize;">{{ $detail['mois'] ?? '—' }}</td>
+                            <td class="somme">{{ $detail['montant'] }}</td>
+                        </tr>
+                    @endforeach
+                    <tr class="total"><td colspan="3">Total</td><td class="somme">{{ $montant }}</td></tr>
+                </tbody>
+            </table>
+        @endif
         <table class="grille">
-            <tr><td class="terme">Type de paiement</td><td>{{ $paiement->type_label }}</td></tr>
-            @if ($mois)
-                <tr><td class="terme">Mois concernés</td><td style="text-transform: capitalize;">{{ $mois }}</td></tr>
-            @endif
+            @unless ($plusieurs)
+                <tr><td class="terme">Type de paiement</td><td>{{ $details[0]['type'] }}</td></tr>
+                @if ($details[0]['mois'])
+                    <tr><td class="terme">Mois concernés</td><td style="text-transform: capitalize;">{{ $details[0]['mois'] }}</td></tr>
+                @endif
+            @endunless
             <tr><td class="terme">Mode de règlement</td><td>{{ $paiement->methode_label }}</td></tr>
             @if ($paiement->methode_paiement !== 'especes')
-                <tr><td class="terme">Référence de transaction</td><td>{{ $paiement->reference_transaction ?: '—' }}</td></tr>
+                <tr><td class="terme">Référence de transaction</td><td>{{ $references ?: '—' }}</td></tr>
             @endif
-            @if ($paiement->notes)
-                <tr><td class="terme">Observations</td><td>{{ \Illuminate\Support\Str::limit($paiement->notes, 300) }}</td></tr>
+            @if ($notes)
+                <tr><td class="terme">Observations</td><td>{{ \Illuminate\Support\Str::limit($notes, 300) }}</td></tr>
             @endif
         </table>
     </div>

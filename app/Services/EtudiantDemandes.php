@@ -167,7 +167,7 @@ class EtudiantDemandes
             'en_etude' => 'Votre dossier est en cours d’étude par le service Logement.',
             'incomplet' => 'Votre dossier est incomplet. Complétez les éléments signalés dans l’historique, puis soumettez-le à nouveau.',
             'eligible' => 'Votre dossier est recevable. Le résultat sera consultable après la publication de la liste définitive.',
-            'confirme' => 'Vous êtes admis(e) à loger. Effectuez votre paiement à la comptabilité du CROU pour avoir accès à votre chambre.',
+            'confirme' => 'Vous êtes admis(e). Effectuez votre paiement à la comptabilité du CROU pour avoir accès à votre chambre.',
             'pre_attribue' => 'Une chambre vous est proposée. Acceptez ou refusez la proposition avant la date limite.',
             'accepte' => 'Vous avez accepté la proposition. La validation définitive reste à effectuer par le service Logement.',
             'attribue_definitif' => 'Votre attribution est définitive. Approuvez votre contrat pour obtenir votre rendez-vous d’entrée.',

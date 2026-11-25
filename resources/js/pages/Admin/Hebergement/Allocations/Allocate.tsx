@@ -44,6 +44,8 @@ type ChambreOption = {
     prix: number;
     pmr: boolean;
     sexe: SexeRequis;
+    /** Sexe des étudiants déjà logés ou réservés (`AttributionRules::sexeOccupants()`), null si aucun. */
+    sexeOccupants: 'm' | 'f' | 'mixte' | null;
     lits: number[];
 };
 
@@ -71,18 +73,36 @@ type Valeurs = z.infer<typeof schema>;
 type Controle = ['ok' | 'ko' | 'warn' | 'idle', string];
 
 const SEXES = { m: 'hommes', f: 'femmes' };
+const SEXES_TITRE = { m: 'Hommes', f: 'Femmes' };
 const PREMIER_LIT = '__premier__';
 
+/**
+ * Chambre proposable à l'étudiant : occupation de son sexe (ou mixte sans occupant de l'autre sexe)
+ * et chambre PMR seulement si son statut PMR est confirmé. Mêmes règles que `AttributionRules::erreurs()`.
+ */
+function estCompatible(etudiant: EtudiantOption, chambre: ChambreOption): boolean {
+    if (chambre.pmr && !etudiant.pmr) return false;
+    if (chambre.sexe !== 'mixte' && chambre.sexe !== etudiant.sexe) return false;
+    return chambre.sexeOccupants === null || chambre.sexeOccupants === etudiant.sexe;
+}
+
+function aucuneChambre(etudiant: EtudiantOption): string {
+    const destinataires = etudiant.sexe ? ` pour ${SEXES[etudiant.sexe]}` : '';
+    return `Aucune chambre${destinataires}${etudiant.pmr ? '' : ' (hors PMR)'} disponible dans les résidences de la campagne.`;
+}
+
 /** Pré-contrôle affiché à l'écran (mêmes règles que l'ancienne page) ; le serveur refait la vérification complète. */
-function controles(etudiant: EtudiantOption | undefined, chambre: ChambreOption | undefined, mode: Valeurs['allocation_type']): Controle[] {
+function controles(etudiant: EtudiantOption | undefined, chambre: ChambreOption | undefined, mode: Valeurs['allocation_type'], compatibles: number): Controle[] {
     if (!etudiant) return [['idle', 'Sélectionnez un étudiant.']];
     const lignes: Controle[] = [];
 
+    if (!etudiant.sexe) lignes.push(['warn', 'Genre de l’étudiant non renseigné : complétez son dossier pour voir les chambres de son sexe.']);
+    if (compatibles === 0) return [...lignes, ['ko', aucuneChambre(etudiant)]];
     if (mode === 'automatique') {
         lignes.push(['ok', `Recherche automatique parmi les chambres ${etudiant.priorites || 'compatibles'}.`]);
         if (etudiant.pmr) lignes.push(['ok', 'Statut PMR confirmé : les chambres adaptées sont aussi proposées.']);
     } else if (!chambre) {
-        return [['idle', 'Choisissez une chambre.']];
+        return [...lignes, ['idle', 'Choisissez une chambre.']];
     } else {
         if (chambre.pmr && !etudiant.pmr) lignes.push(['ko', 'Chambre adaptée PMR : le statut PMR de l’étudiant n’est pas confirmé.']);
         else lignes.push(['ok', chambre.pmr ? 'Chambre PMR et statut PMR confirmé.' : 'Pas de restriction PMR.']);
@@ -90,14 +110,13 @@ function controles(etudiant: EtudiantOption | undefined, chambre: ChambreOption 
         const requis = chambre.sexe;
         if (requis === 'incomplet') lignes.push(['ko', 'Type d’occupation non renseigné pour la chambre, le bâtiment ou la cité.']);
         else if (requis === 'conflit') lignes.push(['ko', 'Types d’occupation contradictoires entre la chambre, le bâtiment et la cité.']);
-        else if (requis === 'mixte') lignes.push(['ok', 'Occupation mixte.']);
-        else if (!etudiant.sexe) lignes.push(['warn', `Genre de l’étudiant non renseigné : chambre réservée aux ${SEXES[requis]}.`]);
+        else if (requis === 'mixte') lignes.push(['ok', chambre.sexeOccupants ? 'Occupation mixte : occupants du même sexe.' : 'Occupation mixte : aucun occupant.']);
         else if (etudiant.sexe !== requis) lignes.push(['ko', `Chambre réservée aux ${SEXES[requis]}.`]);
         else lignes.push(['ok', `Chambre réservée aux ${SEXES[requis]} : compatible.`]);
 
         lignes.push(chambre.libres > 0 ? ['ok', `${chambre.libres} place(s) libre(s).`] : ['ko', 'Plus aucune place libre.']);
     }
-    lignes.push(['idle', 'Sanctions, campagne et places sont revérifiées à l’enregistrement.']);
+    lignes.push(['idle', 'Sanctions, paiements, cité de la campagne et places sont revérifiés à l’enregistrement.']);
     return lignes;
 }
 
@@ -118,8 +137,17 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
     });
     const [etudiantId, mode, chambreId, numeroLit] = useWatch({ control, name: ['etudiant_id', 'allocation_type', 'chambre_id', 'numero_lit'] });
     const etudiant = etudiants.find((item) => item.id === etudiantId);
-    const chambre = mode === 'manuelle' ? chambres.find((item) => item.id === chambreId) : undefined;
-    const lignes = useMemo(() => controles(etudiant, chambre, mode), [etudiant, chambre, mode]);
+    const chambresCompatibles = useMemo(() => (etudiant ? chambres.filter((item) => estCompatible(etudiant, item)) : []), [etudiant, chambres]);
+    const chambre = mode === 'manuelle' ? chambresCompatibles.find((item) => item.id === chambreId) : undefined;
+    const lignes = useMemo(() => controles(etudiant, chambre, mode, chambresCompatibles.length), [etudiant, chambre, mode, chambresCompatibles]);
+
+    // Changement d'étudiant ou de statut PMR : une chambre devenue incompatible est retirée du choix.
+    useEffect(() => {
+        if (chambreId && !chambresCompatibles.some((item) => item.id === chambreId)) {
+            setValue('chambre_id', '');
+            setValue('numero_lit', '');
+        }
+    }, [chambreId, chambresCompatibles, setValue]);
 
     const onSubmit = (valeurs: Valeurs) =>
         envoyer<Valeurs>(
@@ -138,8 +166,8 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                 title="Attribuer une chambre"
                 description={
                     <>
-                        Campagne <strong className="font-medium text-gray-900">{campagne.annee}</strong> · La chambre est d’abord <strong className="font-medium text-gray-900">proposée</strong> à
-                        l’étudiant ; elle devient définitive après son accord et la validation d’un agent.
+                        Campagne <strong className="font-medium text-gray-900">{campagne.annee}</strong> · L’attribution est <strong className="font-medium text-gray-900">définitive</strong> : l’étudiant devient
+                        résident dès l’enregistrement.
                     </>
                 }
                 actions={
@@ -155,7 +183,7 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                 {urls.allocate ? (
                     <form onSubmit={handleSubmit(onSubmit)} noValidate className="overflow-hidden rounded-brand border bg-white">
                         <div className="divide-y">
-                            <Section icone={UserRound} titre="1. Étudiant" description="Dossiers éligibles de la campagne qui n’ont encore aucune chambre proposée ou occupée.">
+                            <Section icone={UserRound} titre="1. Étudiant" description="Étudiants admis à loger de la campagne qui n’ont encore aucune chambre réservée ou occupée.">
                                 <Field id="al-etudiant" label="Étudiant" required error={errors.etudiant_id?.message}>
                                     <Controller
                                         control={control}
@@ -185,6 +213,7 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                                             ['Matricule', etudiant.matricule ?? '—'],
                                             ['Niveau', etudiant.niveau ?? 'Non renseigné'],
                                             ['E-mail', etudiant.email || '—'],
+                                            ['Genre', etudiant.sexe === 'm' ? 'Homme' : etudiant.sexe === 'f' ? 'Femme' : 'Non renseigné'],
                                             ['Statut PMR', etudiant.pmr ? 'Confirmé' : 'Non confirmé'],
                                         ]}
                                     />
@@ -237,7 +266,7 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                             </Section>
 
                             {mode === 'manuelle' && (
-                                <Section icone={DoorOpen} titre="3. Chambre et lit" description="Seules les chambres actives des résidences de la campagne, avec au moins une place libre, sont proposées.">
+                                <Section icone={DoorOpen} titre="3. Chambre et lit" description="Seules les chambres libres correspondant au sexe de l’étudiant sont proposées ; les chambres PMR n’apparaissent que si son statut PMR est confirmé.">
                                     <Field id="al-chambre" label="Chambre" required error={errors.chambre_id?.message}>
                                         <Controller
                                             control={control}
@@ -252,12 +281,13 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                                                     }}
                                                     onBlur={field.onBlur}
                                                     invalid={!!errors.chambre_id}
-                                                    placeholder={chambres.length === 0 ? 'Aucune chambre disponible' : 'Choisir une chambre'}
+                                                    disabled={chambresCompatibles.length === 0}
+                                                    placeholder={!etudiant ? 'Choisissez d’abord un étudiant' : chambresCompatibles.length === 0 ? 'Aucune chambre compatible' : 'Choisir une chambre'}
                                                     searchPlaceholder="Numéro, type, bâtiment…"
-                                                    options={chambres.map((item) => ({
+                                                    options={chambresCompatibles.map((item) => ({
                                                         value: item.id,
                                                         label: `${item.numero} — ${item.type}${item.batiment ? ` · ${item.batiment}` : ''}`,
-                                                        description: `${item.libres} place(s) libre(s) sur ${item.capacite}${item.pmr ? ' · PMR' : ''}`,
+                                                        description: `${item.sexe === 'm' || item.sexe === 'f' ? SEXES_TITRE[item.sexe] : 'Mixte'} · ${item.libres} place(s) libre(s) sur ${item.capacite}${item.pmr ? ' · PMR' : ''}`,
                                                         disabled: item.libres <= 0,
                                                     }))}
                                                 />
@@ -310,7 +340,7 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                             )}
                             <Button type="submit" size="sm" className="h-10 px-4" disabled={isSubmitting || etudiants.length === 0}>
                                 {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
-                                Proposer la chambre
+                                Attribuer la chambre
                             </Button>
                         </div>
                     </form>
@@ -344,7 +374,7 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                         </div>
                         <div className="flex justify-between gap-2 border-t bg-surface/50 px-4 py-3 text-xs text-muted">
                             <span>{nombre(etudiants.length)} étudiant(s) sans chambre</span>
-                            <span>{nombre(chambres.length)} chambre(s) disponible(s)</span>
+                            <span>{etudiant ? `${nombre(chambresCompatibles.length)} chambre(s) compatible(s)` : `${nombre(chambres.length)} chambre(s) disponible(s)`}</span>
                         </div>
                     </section>
                 </aside>

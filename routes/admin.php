@@ -45,6 +45,7 @@ use App\Http\Controllers\admin\immobilier\residents_contrat\ResidentContratContr
 use App\Http\Controllers\admin\immobilier\residents_contrat\AllocationChambreController;
 use App\Http\Controllers\admin\immobilier\ReportingHebergementController;
 use App\Http\Controllers\admin\immobilier\reclamations\ReclamationController;
+use App\Http\Controllers\admin\immobilier\resultats\ResultatController;
 use App\Http\Controllers\MapController;
 use App\Http\Controllers\admin\ActivityLogController;
 
@@ -279,6 +280,19 @@ Route::middleware(['admin'])->group(function () {
         });
 
 
+
+    // Résultats d'admission publiés, par statut, et visibilité de la page publique (docs/resultats-admission.md).
+    Route::prefix('gestion-hebergement/resultats')
+        ->name('hebergement.resultats.')
+        ->controller(ResultatController::class)
+        ->group(function () {
+            Route::get('/', 'index')->name('index');
+            Route::put('/visibilite', 'visibilite')->name('visibilite');
+            Route::post('/{resultat}/admettre', 'admettre')->name('admettre');
+            Route::get('/export/{statut}/{format}', 'export')
+                ->whereIn('statut', ['validees', 'attente', 'non_recevables'])->whereIn('format', ['excel', 'pdf'])
+                ->name('export');
+        });
 
     // Réclamations des étudiants sur leur demande : liste par statut, traitement, configuration des périodes.
     Route::prefix('gestion-hebergement/reclamations')

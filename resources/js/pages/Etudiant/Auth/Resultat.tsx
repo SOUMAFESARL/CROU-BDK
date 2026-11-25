@@ -1,11 +1,12 @@
 import { Link, usePage } from '@inertiajs/react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowLeft, Hash, Loader2, MessageSquareWarning, Search } from 'lucide-react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { AuthAlert, AuthLayout } from '@/components/auth/auth-layout';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { InputSuggestions } from '@/components/ui/input-suggestions';
+import { useSaisiesMemorisees } from '@/hooks/use-saisies-memorisees';
 import { envoyer } from '@/lib/inertia-form';
 import { cn } from '@/lib/utils';
 import { resultatSchema, type SaisieResultat } from '@/schemas/resultat-admission';
@@ -64,15 +65,23 @@ export default function Resultat({ campagne, resultat, liens, logoUrl, backgroun
     );
 }
 
+/** Numéros déjà consultés depuis ce navigateur, proposés à la saisie. */
+const CLE_NUMEROS = 'resultats.numeros';
+
 function Formulaire({ url }: { url: string }) {
     const {
         register,
         handleSubmit,
         setError,
+        setValue,
+        control,
         formState: { errors, isSubmitting },
     } = useForm<SaisieResultat>({ resolver: zodResolver(resultatSchema), mode: 'onTouched', defaultValues: { numero: '' } });
+    const numero = useWatch({ control, name: 'numero' });
+    const { saisies, memoriser, oublier } = useSaisiesMemorisees(CLE_NUMEROS);
 
     const consulter = handleSubmit(async (valeurs) => {
+        memoriser(valeurs.numero);
         await envoyer<SaisieResultat>(url, valeurs, { setError, champs: ['numero'] });
     });
 
@@ -85,9 +94,13 @@ function Formulaire({ url }: { url: string }) {
                 error={errors.numero?.message}
                 hint="L’un ou l’autre, comme dans votre demande d’hébergement."
             >
-                <Input
+                <InputSuggestions
                     id="numero"
-                    autoComplete="off"
+                    valeur={numero}
+                    suggestions={saisies}
+                    libelleListe="Numéros déjà consultés"
+                    onChoisir={(valeur) => setValue('numero', valeur, { shouldDirty: true, shouldValidate: true })}
+                    onOublier={oublier}
                     maxLength={50}
                     placeholder="Ex. : 2501234567"
                     className="uppercase placeholder:normal-case"

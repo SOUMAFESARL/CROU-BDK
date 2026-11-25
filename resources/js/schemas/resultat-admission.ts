@@ -6,3 +6,10 @@ export const resultatSchema = z.object({
 });
 
 export type SaisieResultat = z.infer<typeof resultatSchema>;
+
+/** Campagnes dont les résultats sont visibles (menu « Résultats d'admission » de l'administration). */
+export const campagnesVisiblesSchema = z.object({
+    campagnes: z.array(z.string()).min(1, 'Cochez au moins une campagne.'),
+});
+
+export type CampagnesVisibles = z.infer<typeof campagnesVisiblesSchema>;

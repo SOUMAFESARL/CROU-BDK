@@ -4,8 +4,10 @@ Les écrans existants sont conservés. Une section repliable de confirmation PMR
 
 ## Règles appliquées
 
-- Chambre, bâtiment et cité doivent être actifs et cohérents. La cité doit appartenir à la campagne.
+- Chambre, bâtiment et cité doivent être actifs et cohérents. La cité doit appartenir à la campagne, qui peut ne plus être active (25/11/2026) : un étudiant admis à loger peut recevoir sa chambre après la clôture.
 - Les restrictions hommes/femmes/mixte sont vérifiées aux trois niveaux à partir du référentiel et du genre de l'étudiant. Un référentiel manquant ou inconnu bloque l'attribution et doit être complété.
+- Une chambre « mixte » (aux trois niveaux) suit le sexe de ses premiers occupants : une nouvelle attribution, manuelle ou automatique, est refusée si la chambre est déjà occupée ou réservée par un étudiant de l'autre sexe. L'admission directe (régularisation) et la confirmation d'une réservation existante ne sont pas concernées.
+- Le formulaire d'attribution (`admin.allocation.allocate-form`) ne propose que les chambres du sexe de l'étudiant (ou mixtes sans occupant de l'autre sexe), et les chambres PMR uniquement si son statut PMR est confirmé et enregistré. La chambre choisie est retirée si elle devient incompatible après un changement d'étudiant ou de statut PMR.
 - Une chambre PMR exige `pmr_confirme`, sauf pour l'admission directe (régularisation d'un étudiant déjà installé dans la chambre, formulaire et import). Aucune conversion du champ historique `autiste` n'est effectuée. La confirmation et son retrait enregistrent l'agent et la date.
 - Les assignations `en_attente` et `confirmee` sans date de fin passée consomment une place, toutes campagnes confondues. Les propositions futures sont également réservées : ce lot n'introduit pas de calendrier de séjours successifs.
 - Les places occupées affichées restent les occupations confirmées en cours ; les places disponibles retranchent aussi les réservations. L'état d'une chambre partiellement occupée reste compatible avec les écrans existants.

@@ -19,7 +19,8 @@ use Illuminate\Validation\ValidationException;
  * figé (`resultats_admission`) et les demandes validées publiées passent dans « Admis à loger » (dossier `confirme`).
  * Les étudiants consultent ensuite leur résultat sur `/resultats` (numéro de table au bac ou matricule).
  *
- * - `admis` : demande de la liste définitive publiée (onglet « Demandes validées ») ;
+ * - `admis` : demande de la liste définitive publiée (onglet « Demandes validées »), ou de sa file d'attente admise
+ *   ensuite à loger par un agent (`admettre`) ;
  * - `recevable_non_admis` : demande recevable non retenue (file d'attente, demande recevable non validée) ;
  * - `non_recevable` : demande irrecevable, refusée, ou dont la recevabilité n'a pas pu être établie.
  *
@@ -28,6 +29,9 @@ use Illuminate\Validation\ValidationException;
 class ResultatsAdmission
 {
     public const TABLE = 'resultats_admission';
+
+    /** Campagnes visibles sur la page publique : une ligne par campagne cochée. */
+    public const TABLE_VISIBILITE = 'resultats_visibilite';
 
     public const ADMIS = 'admis';
 
@@ -114,6 +118,50 @@ class ResultatsAdmission
     }
 
     /**
+     * Identifiants des demandes que `admettre` accepte, parmi celles données : approuvées en commission (dossier
+     * « Recevable »), campagne non supprimée, dernière demande de l'étudiant.
+     *
+     * @param  iterable<DemandeEtudiant>  $demandes
+     * @return list<string>
+     */
+    public function admissibles(iterable $demandes): array
+    {
+        $demandes = collect($demandes)->filter(fn (DemandeEtudiant $demande) => $demande->campagne && $demande->etudiant);
+        $approuvees = $this->recevabilite->approbationsCommission($demandes);
+
+        return $demandes->filter(fn (DemandeEtudiant $demande) => in_array((string) $demande->getKey(), $approuvees, true)
+            && (string) $demande->etudiant->derniereDemande?->getKey() === (string) $demande->getKey())
+            ->map(fn (DemandeEtudiant $demande) => (string) $demande->getKey())->values()->all();
+    }
+
+    /**
+     * Fait passer une demande de la file d'attente publiée dans « Admis à loger » : le dossier devient `confirme` (paiement,
+     * puis attribution d'une chambre) et le résultat consulté par l'étudiant devient « admis ». La demande garde sa place
+     * dans la file d'attente des listes définitives déjà publiées.
+     */
+    public function admettre(string $resultatId): Etudiant
+    {
+        abort_unless($this->disponible(), 404);
+
+        return DB::transaction(function () use ($resultatId) {
+            $resultat = DB::table(self::TABLE)->where('id', $resultatId)->lockForUpdate()->first();
+            abort_unless($resultat !== null, 404);
+            $refuser = fn (string $message) => throw ValidationException::withMessages(['admission' => $message]);
+            if ($resultat->resultat !== self::RECEVABLE_NON_ADMIS) {
+                $refuser('Cette demande n’est plus dans la file d’attente : actualisez la page.');
+            }
+            $demande = DemandeEtudiant::with(['campagne', 'etudiant.derniereDemande'])->find($resultat->demande_id);
+            if (! $demande || $this->admissibles([$demande]) === []) {
+                $refuser('Cette demande ne peut pas être admise à loger : elle doit être recevable, approuvée en commission et être la dernière demande de l’étudiant.');
+            }
+            $this->workflow->admettreFileAttente((string) $demande->getKey());
+            DB::table(self::TABLE)->where('id', $resultatId)->update(['resultat' => self::ADMIS, 'updated_at' => now()]);
+
+            return $demande->etudiant;
+        }, 3);
+    }
+
+    /**
      * Applique les publications déjà enregistrées (commande `admissions:appliquer-publications`, après la mise à jour) :
      * seules les demandes approuvées avant leur publication sont admises.
      *
@@ -138,15 +186,53 @@ class ResultatsAdmission
         return $bilan;
     }
 
-    /** Campagne de la dernière publication (lien de la page de connexion) ; null si aucun résultat n'est publié. */
-    public function campagnePubliee(): ?Campagne
+    /**
+     * Campagnes dont les résultats sont visibles (cochées dans le menu « Résultats d'admission ») ; aucune par défaut.
+     *
+     * @return list<string>
+     */
+    public function campagnesVisibles(): array
+    {
+        return Schema::hasTable(self::TABLE_VISIBILITE)
+            ? DB::table(self::TABLE_VISIBILITE)->pluck('campagne_id')->map(fn ($id) => (string) $id)->all() : [];
+    }
+
+    /** @param  list<string>  $campagnes  campagnes visibles, à la place des précédentes ; aucune : page masquée */
+    public function definirCampagnesVisibles(array $campagnes, ?string $auteur): void
+    {
+        if (! Schema::hasTable(self::TABLE_VISIBILITE)) {
+            throw ValidationException::withMessages(['visible' => 'La visibilité n’est pas encore disponible : la base de données doit être mise à jour.']);
+        }
+        DB::transaction(function () use ($campagnes, $auteur) {
+            DB::table(self::TABLE_VISIBILITE)->whereNotIn('campagne_id', $campagnes)->delete();
+            DB::table(self::TABLE_VISIBILITE)->insertOrIgnore(array_map(fn (string $id) => [
+                'campagne_id' => $id, 'modifie_par' => $auteur, 'created_at' => now(), 'updated_at' => now(),
+            ], $campagnes));
+        });
+    }
+
+    /**
+     * Campagnes dont les étudiants peuvent consulter les résultats (publiés et visibles), la dernière publiée d'abord.
+     *
+     * @return Collection<int, Campagne>
+     */
+    public function campagnesConsultables(): Collection
     {
         if (! $this->disponible()) {
-            return null;
+            return collect();
         }
-        $campagneId = DB::table(self::TABLE)->orderByDesc('publie_at')->value('campagne_id');
+        $ids = DB::table(self::TABLE)->whereIn('campagne_id', $this->campagnesVisibles())
+            ->groupBy('campagne_id')->orderByRaw('max(publie_at) desc')->pluck('campagne_id');
+        $campagnes = Campagne::whereIn('id_campagne', $ids)->get()->keyBy(fn (Campagne $campagne) => (string) $campagne->getKey());
 
-        return $campagneId ? Campagne::find($campagneId) : null;
+        return $ids->map(fn ($id) => $campagnes[(string) $id] ?? null)->filter()->values();
+    }
+
+    /** Admission remise en cause depuis la publication (refus, annulation, réexamen, expiration). */
+    public function admissionRemiseEnCause(string $resultat, ?string $etatDossier): bool
+    {
+        return $resultat === self::ADMIS
+            && ! in_array($etatDossier, [RecevabiliteDemandes::ETAT_VALIDE, ...RecevabiliteDemandes::ETATS_ADMIS], true);
     }
 
     /**
@@ -157,19 +243,21 @@ class ResultatsAdmission
      */
     public function consulter(string $numero): array
     {
-        $demande = $this->demandeDe($numero);
+        $consultables = $this->campagnesConsultables()->map(fn (Campagne $campagne) => (string) $campagne->getKey())->all();
+        if ($consultables === []) {
+            $this->invalide('Les résultats ne sont pas consultables pour le moment.');
+        }
+        $demande = $this->demandeDe($numero, $consultables);
         $resultat = $this->disponible() ? DB::table(self::TABLE)->where('demande_id', (string) $demande->getKey())->first() : null;
-        if (! $resultat) {
+        if (! $resultat || ! in_array((string) $resultat->campagne_id, $consultables, true)) {
             $this->invalide('Le résultat de votre demande n’est pas encore publié. Revenez après la publication de la liste définitive.');
         }
-        // Admission remise en cause depuis la publication (refus, annulation, réexamen, expiration).
-        if ($resultat->resultat === self::ADMIS
-            && ! in_array($demande->etat_dossier, [RecevabiliteDemandes::ETAT_VALIDE, ...RecevabiliteDemandes::ETATS_ADMIS], true)) {
+        if ($this->admissionRemiseEnCause($resultat->resultat, $demande->etat_dossier)) {
             $this->invalide('Votre dossier a changé de situation depuis la publication des résultats : adressez-vous au service Logement du CROU.');
         }
 
         [$titre, $message] = match ($resultat->resultat) {
-            self::ADMIS => ['Vous êtes admis(e) à loger', in_array($demande->etat_dossier, self::ETATS_LOGES, true)
+            self::ADMIS => ['Vous êtes admis(e)', in_array($demande->etat_dossier, self::ETATS_LOGES, true)
                 ? 'Une chambre vous a été attribuée. Adressez-vous au service Logement du CROU pour votre entrée.'
                 : 'Votre demande figure sur la liste définitive. Rendez-vous à la comptabilité du CROU pour effectuer votre paiement : vous aurez accès à votre chambre après ce paiement.'],
             self::RECEVABLE_NON_ADMIS => ['Demande recevable, non admise', 'Votre demande est recevable, mais vous n’êtes pas admis(e) pour une chambre : le nombre de places est limité.'],
@@ -222,14 +310,23 @@ class ResultatsAdmission
 
         return match ($classe) {
             'recevables', 'en_attente' => self::RECEVABLE_NON_ADMIS,
-            'definitives' => $demande->liste_approbation_commission === 'attente' ? self::RECEVABLE_NON_ADMIS : null,
+            // File d'attente : admise depuis par un agent (`admettre`), une nouvelle publication garde son admission.
+            'definitives' => match (true) {
+                $demande->liste_approbation_commission !== 'attente' => null,
+                in_array($demande->etat_dossier, RecevabiliteDemandes::ETATS_ADMIS, true) => self::ADMIS,
+                default => self::RECEVABLE_NON_ADMIS,
+            },
             'validees' => null,
             default => self::NON_RECEVABLE,
         };
     }
 
-    /** Dernière demande déposée par l'étudiant désigné par le numéro. */
-    private function demandeDe(string $numero): DemandeEtudiant
+    /**
+     * Dernière demande déposée par l'étudiant désigné par le numéro.
+     *
+     * @param  list<string>  $consultables  campagnes dont les résultats sont consultables
+     */
+    private function demandeDe(string $numero, array $consultables): DemandeEtudiant
     {
         $cle = Str::lower(str_replace([' ', '-', '/', '.'], '', Str::ascii(Str::squish($numero))));
         if ($cle === '') {
@@ -243,9 +340,9 @@ class ResultatsAdmission
             ->pluck('etudiant_id')->unique();
         $demandes = $deposees()->with(['campagne', 'etudiant'])->whereIn('etudiant_id', $etudiants->all())
             ->orderByDesc('created_at')->orderByDesc('id_demande')->get()->unique('etudiant_id')->values();
-        // Même numéro de table pour deux étudiants (sessions différentes du bac) : celui de la campagne publiée.
-        if ($demandes->count() > 1 && ($campagne = $this->campagnePubliee())) {
-            $demandes = $demandes->filter(fn (DemandeEtudiant $demande) => (string) $demande->campagne_id === (string) $campagne->getKey())->values();
+        // Même numéro de table pour deux étudiants (sessions différentes du bac) : celui d'une campagne consultable.
+        if ($demandes->count() > 1) {
+            $demandes = $demandes->filter(fn (DemandeEtudiant $demande) => in_array((string) $demande->campagne_id, $consultables, true))->values();
         }
         if ($demandes->isEmpty()) {
             $this->invalide('Aucune demande ne correspond à ce numéro. Saisissez le numéro de table au bac ou le matricule indiqué dans votre demande.');
