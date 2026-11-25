@@ -16,7 +16,7 @@ class AdmissionDerogationService
         return $role && in_array(Str::lower(Str::ascii(trim($role->name))), [
             'sous-dal', 'sous dal', "sous-directeur de l'accueil et des logements",
             'chef du service logement', 'chef service logement',
-        ], true) && $role->permissions()->where('slug', 'hebergement.admissions.derogations.validate')->exists();
+        ], true) && $role->permissions()->where('slug', 'hebergement.admissions.derogations.deroger')->exists();
     }
 
     private function reason(string $reason): string
@@ -109,7 +109,7 @@ class AdmissionDerogationService
             }
             $eligibility = $this->evaluate($student, $request, $request->campagne);
             if ($request->etat_dossier === 'refuse') {
-                app(DossierWorkflow::class)->admin($request->getKey(), 'soumis', 'Dérogation : '.$reason);
+                app(DossierWorkflow::class)->admin($request->getKey(), 'soumis', 'Dérogation : '.$reason, [], ['derogations', 'deroger']);
             }
 
             return AdmissionDerogation::create([

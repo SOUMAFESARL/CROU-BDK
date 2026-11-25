@@ -180,7 +180,7 @@ class CampagnesAdmissionController extends Controller
         // Levée des refus automatiques (barème) : par dossier, ou pour les dossiers cochés dans la liste.
         $decision = app(DecisionAutomatiqueDossier::class);
         $scopeRefus = $etat === 'recevables' ? 'recevables_demandes' : $etat;
-        $peutLever = $permissions->allows($admin, $scopeRefus, 'lever_refus');
+        $peutLever = $permissions->allows($admin, 'derogations', 'deroger');
         $refusAutomatiques = $rawList && $peutLever
             ? $decision->refusAutomatiques(collect($dossiers->items())->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande?->getKey())->all())
             : [];
@@ -567,7 +567,7 @@ class CampagnesAdmissionController extends Controller
             : null;
         // Approbation en commission, même bouton (même action, même droit) sur les deux onglets : elle porte sur les
         // demandes validées et sur la file d'attente (validée puis approuvée) ; elles passent dans les listes définitives.
-        $approbation = $type === 'validee' && $volets !== [] && $permissions->allows($admin, 'commission_validees', 'approuver')
+        $approbation = $type === 'validee' && $volets !== [] && $permissions->allows($admin, 'commission', 'approuver')
             ? [
                 // La campagne choisie dans le bandeau est approuvée (celle affichée).
                 'url' => route('admin.hebergement.campagnes_admission.liste_validee_approuver', ['volet' => $voletFiltre ?? 'toutes'] + $choixCampagne),
@@ -1173,7 +1173,7 @@ class CampagnesAdmissionController extends Controller
      */
     public function approuverListeValidee(Request $request, string $volet)
     {
-        $this->autoriserListe($request, 'commission_validees', 'approuver');
+        $this->autoriserListe($request, 'commission', 'approuver');
         $admin = $request->user('admin');
         [$volets, $listes] = $this->listesCommission($request);
         $approuves = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
@@ -1200,7 +1200,7 @@ class CampagnesAdmissionController extends Controller
         $echecs = [];
         foreach ($attente as $id) {
             try {
-                $workflow->admin($id, 'eligible', null, [], ['commission_validees', 'approuver']);
+                $workflow->admin($id, 'eligible', null, [], ['commission', 'approuver']);
             } catch (ValidationException $exception) {
                 $echecs[$id] = (string) collect($exception->errors())->flatten()->first();
 
@@ -1496,9 +1496,11 @@ class CampagnesAdmissionController extends Controller
             ['demandes' => 'required|array|min:1|max:500', 'demandes.*' => 'string|max:150', 'motif' => 'required|string|max:2000'],
             ['motif.required' => 'Le motif de la dérogation est obligatoire.', 'motif.max' => 'Le motif de la dérogation ne doit pas dépasser 2 000 caractères.'],
         );
-        $scope = $request->query('scope', 'dossier');
-        abort_unless(is_string($scope), 403);
-        $this->autoriserListe($request, $scope, 'lever_refus');
+        // Le droit de déroger s'exerce dans une liste que l'agent peut consulter.
+        $scope = $request->query('scope', 'toutes');
+        abort_unless(in_array($scope, ['toutes', 'recevables_demandes', 'rejetees', 'refusees'], true), 403);
+        $this->autoriserListe($request, $scope, 'view');
+        $this->autoriserListe($request, 'derogations', 'deroger');
         $ids = $data['demandes'];
         $filtre = match ($scope) {
             'recevables_demandes' => 'recevables',
@@ -1514,7 +1516,7 @@ class CampagnesAdmissionController extends Controller
                 ->map(fn (Etudiant $student) => (string) $student->derniereDemande->getKey())->all();
             abort_if(array_diff($ids, $autorisations) !== [], 403);
         }
-        $resultat = app(DecisionAutomatiqueDossier::class)->rendreEligibles($data['motif'], $ids, $scope);
+        $resultat = app(DecisionAutomatiqueDossier::class)->rendreEligibles($data['motif'], $ids);
         if ($resultat['eligibles'] === 0 && !$resultat['echecs']) {
             return back()->with('error', 'Aucun dossier refusé automatiquement à rendre éligible.');
         }

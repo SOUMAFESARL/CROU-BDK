@@ -163,7 +163,7 @@ class AdminPermissionsTest extends TestCase
     public function test_sensitive_get_actions_require_mutation_permissions(): void
     {
         $rules = config('admin_permissions.routes');
-        $this->assertSame('hebergement.admissions.validate', $rules['admin.hebergement.campagnes_admission.validate_document']);
+        $this->assertSame('hebergement.admissions.dossier.document', $rules['admin.hebergement.campagnes_admission.validate_document']);
         $this->assertSame('hebergement.annonces.update', $rules['admin.hebergement.annonce.update']);
         $this->assertSame('hebergement.parc.create', $rules['admin.hebergement.parc-immobilier.massCreateChambres']);
         $this->assertSame('parametrage.roles.delete', $rules['admin.parametrage.roles-permissions.roles.destroy']);
@@ -183,6 +183,102 @@ class AdminPermissionsTest extends TestCase
         $this->assertTrue($request->authorize());
     }
 
+    /** Les droits des onglets des admissions passent dans des sous-modules sans que les rôles les perdent. */
+    public function test_droits_des_onglets_admissions_ranges_en_sous_modules(): void
+    {
+        Schema::table('modules', function (Blueprint $t) {
+            $t->string('slug')->nullable();
+            $t->string('name')->nullable();
+            $t->integer('parent_id')->nullable();
+            $t->integer('level')->default(0);
+            $t->integer('position')->default(0);
+            $t->text('actions')->nullable();
+            $t->boolean('show_in_menu')->default(false);
+            $t->boolean('is_system')->default(false);
+            $t->timestamps();
+        });
+        Schema::table('permissions', function (Blueprint $t) {
+            foreach (['module', 'action', 'name', 'description'] as $colonne) {
+                $t->string($colonne)->nullable();
+            }
+            $t->timestamps();
+        });
+        DB::table('roles')->insert(['id' => 3, 'name' => 'Sous-onglets']);
+        DB::table('modules')->insert([
+            ['id' => 4, 'is_active' => true, 'slug' => 'hebergement.admissions.derogations', 'parent_id' => 3, 'level' => 2, 'name' => 'Dérogations', 'actions' => '["validate"]'],
+            ['id' => 2, 'is_active' => true, 'slug' => 'hebergement', 'parent_id' => null, 'level' => 0, 'name' => 'Hébergement', 'actions' => '[]'],
+            ['id' => 3, 'is_active' => true, 'slug' => 'hebergement.admissions', 'parent_id' => 2, 'level' => 1, 'name' => 'Campagnes et admissions', 'actions' => '["view","create","campagnes_view","commission_view","commission_attente_valider"]'],
+        ]);
+        DB::table('permissions')->insert([
+            ['id' => 10, 'slug' => 'hebergement.admissions.view', 'module_id' => 3, 'action' => 'view'],
+            ['id' => 11, 'slug' => 'hebergement.admissions.commission_view', 'module_id' => 3, 'action' => 'commission_view'],
+            ['id' => 14, 'slug' => 'hebergement.admissions.commission_validees_approuver', 'module_id' => 3, 'action' => 'commission_validees_approuver'],
+            ['id' => 15, 'slug' => 'hebergement.admissions.demandes_view', 'module_id' => 3, 'action' => 'demandes_view'],
+            ['id' => 16, 'slug' => 'hebergement.admissions.toutes_view', 'module_id' => 3, 'action' => 'toutes_view'],
+            ['id' => 17, 'slug' => 'hebergement.admissions.provisoire_readmission_valider', 'module_id' => 3, 'action' => 'provisoire_readmission_valider'],
+            ['id' => 18, 'slug' => 'hebergement.admissions.definitive_attente_export', 'module_id' => 3, 'action' => 'definitive_attente_export'],
+            ['id' => 19, 'slug' => 'hebergement.admissions.rejetees_lever_refus', 'module_id' => 3, 'action' => 'rejetees_lever_refus'],
+            ['id' => 13, 'slug' => 'hebergement.admissions.campagnes_view', 'module_id' => 3, 'action' => 'campagnes_view'],
+            ['id' => 12, 'slug' => 'hebergement.admissions.commission_attente_valider', 'module_id' => 3, 'action' => 'commission_attente_valider'],
+        ]);
+        DB::table('role_permission')->insert([['role_id' => 2, 'permission_id' => 11], ['role_id' => 2, 'permission_id' => 12], ['role_id' => 2, 'permission_id' => 13], ['role_id' => 2, 'permission_id' => 14], ['role_id' => 2, 'permission_id' => 16], ['role_id' => 3, 'permission_id' => 15], ['role_id' => 3, 'permission_id' => 17], ['role_id' => 3, 'permission_id' => 18], ['role_id' => 3, 'permission_id' => 19]]);
+
+        $migration = require database_path('migrations/2026_11_25_000001_ranger_droits_admissions_en_sous_modules.php');
+        $migration->up();
+        $nombre = DB::table('permissions')->count();
+        $migration->up();
+        $this->assertSame($nombre, DB::table('permissions')->count());
+
+        // Le module ne garde que ses droits de base ; l'onglet imbriqué suit son onglet parent.
+        $this->assertSame('["view","create"]', DB::table('modules')->where('id', 3)->value('actions'));
+        $this->assertSame(['hebergement.admissions.view'], DB::table('permissions')->where('module_id', 3)->pluck('slug')->all());
+        $commission = DB::table('modules')->where('slug', 'hebergement.admissions.commission')->first();
+        $attente = DB::table('modules')->where('slug', 'hebergement.admissions.commission-attente')->first();
+        $this->assertSame([3, 2], [(int) $commission->parent_id, (int) $commission->level]);
+        $this->assertSame([(int) $commission->id, 3], [(int) $attente->parent_id, (int) $attente->level]);
+
+        // La liste des campagnes n'a pas de sous-module : elle suit « Consulter » du module.
+        $this->assertFalse(DB::table('modules')->where('slug', 'hebergement.admissions.campagnes')->exists());
+        $this->assertTrue((new User(['role_id' => 2]))->hasPermission('hebergement.admissions.view'));
+
+        // « Toutes les demandes » et « Liste des demandes » ne font qu'un ; qui n'ouvrait pas la liste ne la reçoit pas.
+        $this->assertFalse(DB::table('modules')->where('slug', 'hebergement.admissions.toutes')->exists());
+        $this->assertTrue((new User(['role_id' => 2]))->hasPermission('hebergement.admissions.demandes.view'));
+        $this->assertFalse((new User(['role_id' => 3]))->hasPermission('hebergement.admissions.demandes.view'));
+
+        // Les listes provisoires (admissions et réadmissions) partagent les mêmes droits.
+        $this->assertSame(1, DB::table('modules')->where('slug', 'like', 'hebergement.admissions.provisoire%')->count());
+        $this->assertTrue((new User(['role_id' => 3]))->hasPermission('hebergement.admissions.provisoire.validate'));
+
+        // Les listes définitives n'ont plus de sous-module par onglet.
+        $this->assertSame(['hebergement.admissions.definitives'], DB::table('modules')->where('slug', 'like', 'hebergement.admissions.definitive%')->pluck('slug')->all());
+        $this->assertTrue((new User(['role_id' => 3]))->hasPermission('hebergement.admissions.definitives.export'));
+
+        // « Lever un refus automatique » rejoint « Déroger ».
+        $this->assertSame('["deroger"]', DB::table('modules')->where('id', 4)->value('actions'));
+        $this->assertFalse(DB::table('permissions')->where('slug', 'like', '%lever_refus')->exists());
+        $this->assertTrue((new User(['role_id' => 3]))->hasPermission('hebergement.admissions.derogations.deroger'));
+
+        // « Approuver la liste » se donne sur la décision de la commission.
+        $this->assertTrue((new User(['role_id' => 2]))->hasPermission('hebergement.admissions.commission.approuver'));
+        $this->assertSame('["view","approuver"]', $commission->actions);
+        $this->assertFalse(DB::table('permissions')->where('slug', 'like', '%commission%validees%approuver')->exists());
+
+        // Tous les droits du service existent, et l'attribution du rôle suit.
+        foreach (\App\Services\AdmissionPermissions::SCOPES as $onglet => [, $actions]) {
+            foreach ($actions as $action) {
+                $slug = \App\Services\AdmissionPermissions::slug($onglet, $action);
+                $this->assertTrue(DB::table('permissions')->where('slug', $slug)->exists(), $slug);
+            }
+        }
+        $this->assertTrue((new User(['role_id' => 2]))->hasPermission('hebergement.admissions.commission-attente.validate'));
+        $this->assertFalse((new User(['role_id' => 2]))->hasPermission('hebergement.admissions.commission-attente.refuser'));
+
+        // Désactiver le module coupe toujours les droits de ses onglets.
+        DB::table('modules')->where('id', 3)->update(['is_active' => false]);
+        $this->assertFalse((new User(['role_id' => 2]))->hasPermission('hebergement.admissions.commission-attente.validate'));
+    }
+
     public function test_migration_covers_route_permissions_without_granting_other_roles(): void
     {
         Schema::table('modules', function (Blueprint $t) {
@@ -190,6 +286,7 @@ class AdminPermissionsTest extends TestCase
             $t->string('name')->nullable();
             $t->integer('parent_id')->nullable();
             $t->integer('level')->default(0);
+            $t->integer('position')->default(0);
             $t->text('actions')->nullable();
             $t->boolean('show_in_menu')->default(false);
             $t->boolean('is_system')->default(false);
@@ -211,7 +308,7 @@ class AdminPermissionsTest extends TestCase
         $this->assertSame($count, DB::table('permissions')->count());
         $this->assertSame(1, DB::table('role_permission')->where('role_id', 2)->count());
         // Permissions ajoutées par les migrations suivantes (même principe : rôle 1 seulement).
-        foreach (['2026_10_17_000001_add_campagne_update_delete_permissions.php', '2026_11_10_000002_add_eligibilite_permissions.php', '2026_11_13_000002_add_discipline_configure_permission.php', '2026_11_23_000003_add_types_paiement_permissions.php'] as $suivante) {
+        foreach (['2026_10_17_000001_add_campagne_update_delete_permissions.php', '2026_11_10_000002_add_eligibilite_permissions.php', '2026_11_13_000002_add_discipline_configure_permission.php', '2026_11_23_000003_add_types_paiement_permissions.php', '2026_11_24_000001_add_admission_screen_permissions.php', '2026_11_24_000006_add_reclamations_permissions.php', '2026_11_24_000009_rename_reclamations_update_permission_to_traiter.php', '2026_11_25_000001_ranger_droits_admissions_en_sous_modules.php'] as $suivante) {
             (require database_path('migrations/'.$suivante))->up();
         }
         $this->assertSame(1, DB::table('role_permission')->where('role_id', 2)->count());

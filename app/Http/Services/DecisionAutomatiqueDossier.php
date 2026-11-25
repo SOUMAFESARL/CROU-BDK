@@ -144,7 +144,7 @@ class DecisionAutomatiqueDossier
      * avec le motif de dérogation saisi par l'admin (obligatoire).
      * @return array{eligibles:int, echecs:array<string,string>}
      */
-    public function rendreEligibles(string $motif, array $demandeIds = [], string $scope = 'dossier'): array
+    public function rendreEligibles(string $motif, array $demandeIds = []): array
     {
         if (trim($motif) === '') {
             throw ValidationException::withMessages(['motif' => 'Le motif de la dérogation est obligatoire.']);
@@ -154,7 +154,7 @@ class DecisionAutomatiqueDossier
         $echecs = [];
         foreach ($ids as $id) {
             try {
-                $this->workflow->admin($id, 'eligible', $motif, [], [$scope, 'lever_refus']);
+                $this->workflow->admin($id, 'eligible', $motif, [], ['derogations', 'deroger']);
                 $eligibles++;
             } catch (ValidationException $e) {
                 $echecs[$id] = (string) collect($e->errors())->flatten()->first();

@@ -149,7 +149,7 @@ export default function ReclamationsListe({ reclamations, compteurs, filters, ca
             <Tabs value={filters.statut || TOUS} onValueChange={(valeur) => filtrer({ statut: valeur === TOUS ? '' : (valeur as StatutReclamation) })} className="mb-4">
                 <TabsList aria-label="Réclamations par statut">
                     {ONGLETS.map((onglet) => (
-                        <TabsTrigger key={onglet.cle || TOUS} value={onglet.cle || TOUS} aria-controls="liste-reclamations">
+                        <TabsTrigger key={onglet.cle || TOUS} value={onglet.cle || TOUS} aria-controls="liste-reclamations" className="focus-visible:ring-0">
                             {onglet.label}
                             <span className="rounded-sm bg-soft px-1.5 py-0.5 text-xs text-primary tabular-nums">{nombre(compteurs[onglet.cle])}</span>
                         </TabsTrigger>

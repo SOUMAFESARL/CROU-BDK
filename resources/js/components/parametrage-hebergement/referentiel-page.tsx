@@ -14,6 +14,7 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { KpiFilters } from '@/components/ui/kpi-filters';
 import { PageHeader } from '@/components/ui/page-header';
+import { Separator } from '@/components/ui/separator';
 import { Stepper } from '@/components/ui/stepper';
 import { Textarea } from '@/components/ui/textarea';
 import { champsManquants } from '@/lib/champs-manquants';
@@ -49,7 +50,7 @@ export type ChampReferentiel = {
 
 type Props<T extends ElementReferentiel> = {
     titre: string;
-    description: ReactNode;
+    description?: ReactNode;
     /** Libellés : « type de cité », « un type de cité »… */
     singulier: string;
     un: string;
@@ -81,6 +82,8 @@ type Props<T extends ElementReferentiel> = {
     filtres?: ReactNode;
     recherche?: string;
     actions?: ReactNode;
+    /** Boutons d'action à l'opposé du titre, au-dessus du séparateur (au lieu d'en dessous). */
+    actionsEnTete?: boolean;
     note?: ReactNode;
     icone: ReactNode;
 };
@@ -147,24 +150,27 @@ export function ReferentielPage<T extends ElementReferentiel>(props: Props<T>) {
     const conseil = suppression && typeof props.conseilSuppression === 'function' ? props.conseilSuppression(suppression) : (props.conseilSuppression as string | undefined);
     const filtre = Object.values(autresFiltres).some((v) => v !== '' && v !== 'tous');
 
+    const boutons = (actions || urls.store) && (
+        <>
+            {actions}
+            {urls.store && (
+                <Button size="sm" className="h-10" onClick={() => setEdition('nouveau')}>
+                    <Plus className="size-4" aria-hidden /> Ajouter {un}
+                </Button>
+            )}
+        </>
+    );
+
     return (
         <AdminLayout title={titre}>
             <PageHeader
                 title={titre}
                 description={description}
-                actions={
-                    (actions || urls.store) && (
-                        <>
-                            {actions}
-                            {urls.store && (
-                                <Button size="sm" className="h-10" onClick={() => setEdition('nouveau')}>
-                                    <Plus className="size-4" aria-hidden /> Ajouter {un}
-                                </Button>
-                            )}
-                        </>
-                    )
-                }
+                actions={!props.actionsEnTete && boutons}
+                aside={props.actionsEnTete && boutons && <div className="flex flex-wrap items-center gap-2">{boutons}</div>}
             />
+
+            {props.actionsEnTete && <Separator className="-mt-2 mb-4" />}
 
             <KpiFilters
                 label={`Indicateurs : ${titre}`}

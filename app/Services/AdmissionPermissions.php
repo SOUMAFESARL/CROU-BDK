@@ -10,22 +10,23 @@ final class AdmissionPermissions
     public const ROUTE = 'admin.hebergement.campagnes_admission.';
     public const SCOPES = [
         'campagnes' => ['Campagnes', ['view']],
-        'demandes' => ['Liste des demandes', ['view']],
-        'toutes' => ['Toutes les demandes', ['view', 'lever_refus']],
+        'toutes' => ['Liste des demandes', ['view']],
         'recevables' => ['Demandes recevables', ['view']],
-        'recevables_demandes' => ['Demandes recevables / Liste des demandes', ['view', 'lever_refus']],
+        'recevables_demandes' => ['Demandes recevables / Liste des demandes', ['view']],
         'provisoire_admission' => ['Liste provisoire admissions', ['view', 'valider', 'refuser', 'attente', 'export']],
         'provisoire_readmission' => ['Liste provisoire réadmissions', ['view', 'valider', 'refuser', 'attente', 'export']],
-        'rejetees' => ['Demandes irrecevables', ['view', 'lever_refus']],
-        'refusees' => ['Demandes refusées', ['view', 'lever_refus']],
-        'commission' => ['Décision de la commission', ['view']],
-        'commission_validees' => ['Commission / Demandes validées', ['view', 'refuser', 'attente', 'approuver']],
+        'rejetees' => ['Demandes irrecevables', ['view']],
+        'refusees' => ['Demandes refusées', ['view']],
+        'commission' => ['Décision de la commission', ['view', 'approuver']],
+        'commission_validees' => ['Commission / Demandes validées', ['view', 'refuser', 'attente']],
         'commission_attente' => ['Commission / File d’attente', ['view', 'valider', 'refuser']],
-        'definitives' => ['Listes définitives', ['view']],
         'definitive_validees' => ['Liste définitive / Demandes validées', ['view', 'publier', 'export']],
         'definitive_attente' => ['Liste définitive / File d’attente', ['view', 'export']],
-        'dossier' => ['Dossier de candidature', ['lever_refus', 'traiter', 'document', 'decision']],
+        'dossier' => ['Dossier de candidature', ['traiter', 'document', 'decision']],
     ];
+
+    /** « Déroger » : bouton de la fiche du dossier et levée des refus automatiques dans les listes. */
+    private const DEROGATIONS = ['derogations' => ['deroger']];
 
     private const SECTIONS = [
         'toutes' => ['toutes' => 'toutes'],
@@ -37,27 +38,34 @@ final class AdmissionPermissions
     ];
 
     private const PARENTS = [
-        'toutes' => ['demandes'],
-        'recevables' => ['demandes'],
-        'rejetees' => ['demandes'],
-        'refusees' => ['demandes'],
-        'recevables_demandes' => ['demandes', 'recevables'],
-        'provisoire_admission' => ['demandes', 'recevables'],
-        'provisoire_readmission' => ['demandes', 'recevables'],
+        'recevables_demandes' => ['recevables'],
+        'provisoire_admission' => ['recevables'],
+        'provisoire_readmission' => ['recevables'],
         'commission_validees' => ['commission'],
         'commission_attente' => ['commission'],
-        'definitive_validees' => ['definitives'],
-        'definitive_attente' => ['definitives'],
     ];
 
+    /** Chaque onglet est un sous-module (`hebergement.admissions.commission-validees`) ; « valider » y est l'action commune `validate`. */
     public static function slug(string $scope, string $action = 'view'): string
     {
-        return self::PREFIX.$scope.'_'.$action;
+        $module = match ($scope) {
+            // La liste des campagnes suit les droits de base du module.
+            'campagnes' => '',
+            // L'onglet « Toutes les demandes » est le sous-module « Liste des demandes » lui-même.
+            'toutes' => 'demandes.',
+            // Les mêmes droits valent pour les deux listes provisoires (admissions et réadmissions).
+            'provisoire_admission', 'provisoire_readmission' => 'provisoire.',
+            // … et pour les deux onglets des listes définitives (demandes validées et file d’attente).
+            'definitive_validees', 'definitive_attente' => 'definitives.',
+            default => str_replace('_', '-', $scope).'.',
+        };
+
+        return self::PREFIX.$module.($action === 'valider' ? 'validate' : $action);
     }
 
     public function allows(?User $user, string $scope, string $action = 'view'): bool
     {
-        $actions = self::SCOPES[$scope][1] ?? [];
+        $actions = self::SCOPES[$scope][1] ?? self::DEROGATIONS[$scope] ?? [];
         if (!$user || !in_array($action, $actions, true) || !$user->hasPermission(self::slug($scope, $action))) {
             return false;
         }
@@ -104,6 +112,6 @@ final class AdmissionPermissions
                 $slugs[] = self::slug($scope, $action);
             }
         }
-        return $slugs;
+        return array_values(array_unique($slugs));
     }
 }

@@ -15,13 +15,17 @@ use Inertia\Response;
 
 class ModuleController extends Controller
 {
+    /** Libellés brefs : ils s'affichent en entier dans l'éditeur de rôles (la description complète est en infobulle). */
     public const ACTIONS = [
         'view'=>'Consulter','create'=>'Créer','update'=>'Modifier','delete'=>'Supprimer',
         'validate'=>'Valider','assign'=>'Affecter','export'=>'Exporter','configure'=>'Configurer',
-        'transmit'=>'Transmettre','close'=>'Clôturer','traiter'=>'Traiter',
-        'personal'=>'Consulter les informations personnelles',
-        'documents'=>'Consulter les pièces justificatives',
-        'history'=>'Consulter l’historique',
+        'transmit'=>'Transmettre','close'=>'Clôturer','traiter'=>'Traiter','manage'=>'Gérer','generate'=>'Générer',
+        'personal'=>'Infos personnelles',
+        'documents'=>'Pièces jointes',
+        'history'=>'Historique',
+        // Onglets des campagnes et admissions.
+        'refuser'=>'Refuser','attente'=>'Mettre en attente','approuver'=>'Approuver','publier'=>'Publier',
+        'document'=>'Contrôler les pièces','decision'=>'Décider','deroger'=>'Déroger',
     ];
 
     /** Page React `Admin/Parametrage/Modules` : liste à plat, l'arborescence est reconstruite côté client. */

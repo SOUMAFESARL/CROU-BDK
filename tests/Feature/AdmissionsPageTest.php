@@ -52,7 +52,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
             $permissions = [...$permissions, ...AdmissionPermissions::slugs('view'), ...AdmissionPermissions::slugs('export')];
         }
         if (in_array('hebergement.admissions.validate', $permissions, true)) {
-            foreach (['valider', 'refuser', 'attente', 'approuver', 'publier', 'lever_refus', 'traiter', 'document', 'decision'] as $action) {
+            foreach (['valider', 'refuser', 'attente', 'approuver', 'publier', 'traiter', 'document', 'decision'] as $action) {
                 array_push($permissions, ...AdmissionPermissions::slugs($action));
             }
         }
@@ -75,16 +75,16 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
     public function test_les_permissions_distinguent_les_sous_onglets_et_leurs_actions(): void
     {
         $this->agentLimite([
-            AdmissionPermissions::slug('demandes'),
             AdmissionPermissions::slug('recevables'),
             AdmissionPermissions::slug('provisoire_admission'),
         ], granular: true);
 
         $page = $this->page('liste', ['etat' => 'recevables']);
-        $this->assertSame(['admission'], $page['props']['classement']['onglets']);
+        // Le droit des listes provisoires vaut pour les admissions et les réadmissions.
+        $this->assertSame(['admission', 'readmission'], $page['props']['classement']['onglets']);
         $this->assertNull($page['props']['classement']['exports']);
         $this->assertNull($page['props']['urls']['filtres']['toutes']);
-        $this->get(route(AdmissionPermissions::ROUTE.'admission', ['etat' => 'recevables', 'liste' => 'readmission']))->assertForbidden();
+        $this->get(route(AdmissionPermissions::ROUTE.'admission', ['etat' => 'refusees']))->assertForbidden();
         $this->get(route(AdmissionPermissions::ROUTE.'liste_provisoire_export', ['volet' => 'admission', 'format' => 'excel']))->assertForbidden();
     }
 
@@ -355,7 +355,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
     public function test_demande_irrecevable_rendue_recevable_par_derogation(): void
     {
-        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate']);
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.deroger']);
         $ids = fn (string $etat) => collect($this->page('liste', ['etat' => $etat])['props']['dossiers']['data'])->pluck('id')->all();
         // Nouveau bachelier : 9/20 = 180/400 sous le seuil du modèle CROU (200/400) → irrecevable.
         DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 9]);
@@ -383,7 +383,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
     public function test_pas_de_derogation_pour_une_demande_recevable(): void
     {
-        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate']);
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.deroger']);
         DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12]);
 
         $this->assertNull($this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['urls']['deroger']);
@@ -402,7 +402,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
     public function test_deroger_une_demande_irrecevable_la_place_en_tete_de_la_liste_provisoire(): void
     {
-        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate']);
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.deroger']);
         $this->tablesCommission();
         $this->dossier('other');
         DB::table('etudiants')->where('id_etudiant', 'other')->update(['name' => 'Yao Marc', 'nationalite' => 'IVOIRIENNE', 'date_naissance' => now()->subYears(20)->toDateString()]);
@@ -438,7 +438,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
     public function test_deroger_une_demande_refusee_la_rouvre(): void
     {
-        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate', 'hebergement.admissions.validate']);
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.deroger', 'hebergement.admissions.validate']);
         $this->tablesCommission();
         DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 12, 'ville_bac' => 'Bondoukou']);
         $demande = DB::table('demande')->where('etudiant_id', 'student');
@@ -446,6 +446,8 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         // Rejetée par la commission depuis la liste provisoire : « Demandes refusées ».
         $this->post(route('admin.dossiers.transition', $demande->value('id_demande')), ['etat' => 'refuse', 'motif' => 'Désistement constaté.'])->assertRedirect();
         $this->assertSame(['student'], $ids('refusees'));
+        // Le seul droit de déroger suffit : le bouton affiché s'applique, sans droit de décider sur le dossier.
+        $this->agentLimite(['hebergement.admissions.personal', 'hebergement.admissions.documents', 'hebergement.admissions.history', 'hebergement.admissions.derogations.deroger']);
 
         $url = $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['urls']['deroger'];
         $this->assertNotNull($url);
@@ -466,7 +468,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
 
     public function test_aucune_derogation_apres_l_approbation_de_la_liste_en_commission(): void
     {
-        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.validate']);
+        $this->agentEligibilite(['hebergement.admissions.eligibility', 'hebergement.admissions.derogations.deroger']);
         $this->tablesCommission();
         $this->dossier('other');
         DB::table('demande')->where('etudiant_id', 'student')->update(['niveau_etude_precedent_code' => 'TLE', 'niveau_etude_actuel_code' => 'L1', 'moyenne' => 9]);

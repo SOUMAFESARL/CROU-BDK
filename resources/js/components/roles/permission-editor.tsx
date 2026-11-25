@@ -49,6 +49,13 @@ export const ACTION_COLORS: Record<string, string> = {
     transmit: 'border-cyan-200 bg-cyan-50 text-cyan-800',
     close: 'border-rose-200 bg-rose-50 text-rose-800',
     traiter: 'border-teal-200 bg-teal-50 text-teal-800',
+    refuser: 'border-red-200 bg-red-50 text-red-700',
+    attente: 'border-amber-200 bg-amber-50 text-amber-800',
+    approuver: 'border-teal-200 bg-teal-50 text-teal-800',
+    publier: 'border-cyan-200 bg-cyan-50 text-cyan-800',
+    deroger: 'border-violet-200 bg-violet-50 text-violet-800',
+    document: 'border-teal-200 bg-teal-50 text-teal-800',
+    decision: 'border-teal-200 bg-teal-50 text-teal-800',
 };
 
 /** Case cochée dans la teinte de son action (mêmes regroupements que ACTION_COLORS). */
@@ -67,6 +74,13 @@ const ACTION_CHECKBOX_COLORS: Record<string, string> = {
     transmit: 'data-[state=checked]:border-cyan-600 data-[state=checked]:bg-cyan-600',
     close: 'data-[state=checked]:border-rose-600 data-[state=checked]:bg-rose-600',
     traiter: 'data-[state=checked]:border-teal-600 data-[state=checked]:bg-teal-600',
+    refuser: 'data-[state=checked]:border-red-600 data-[state=checked]:bg-red-600',
+    attente: 'data-[state=checked]:border-amber-500 data-[state=checked]:bg-amber-500',
+    approuver: 'data-[state=checked]:border-teal-600 data-[state=checked]:bg-teal-600',
+    publier: 'data-[state=checked]:border-cyan-600 data-[state=checked]:bg-cyan-600',
+    deroger: 'data-[state=checked]:border-violet-600 data-[state=checked]:bg-violet-600',
+    document: 'data-[state=checked]:border-teal-600 data-[state=checked]:bg-teal-600',
+    decision: 'data-[state=checked]:border-teal-600 data-[state=checked]:bg-teal-600',
 };
 
 /** Toutes les permissions d'un nœud et de ses descendants, dans l'ordre d'affichage. */
@@ -236,7 +250,7 @@ type NodeProps = {
 
 function PermissionGrid({ permissions, selected, disabled, onToggle }: NodeProps & { permissions: ModulePermission[] }) {
     return (
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(12rem,100%),1fr))] gap-1.5">
             {permissions.map((permission) => {
                 const checked = selected.has(permission.id);
 
@@ -252,7 +266,7 @@ function PermissionGrid({ permissions, selected, disabled, onToggle }: NodeProps
                         )}
                     >
                         <Checkbox checked={checked} disabled={disabled} className={ACTION_CHECKBOX_COLORS[permission.action]} onCheckedChange={(value) => onToggle([permission.id], value === true)} />
-                        <span className="min-w-0 truncate" title={permission.description ?? permission.label}>{permission.label}</span>
+                        <span className="min-w-0">{permission.label}</span>
                     </label>
                 );
             })}
@@ -287,7 +301,7 @@ function PermissionNode({ node, selected, disabled, onToggle, forceOpen }: NodeP
                     className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left text-sm text-gray-900 hover:text-primary focus-visible:outline-none"
                 >
                     <ChevronRight {...ICON} className={cn('shrink-0 text-muted transition-transform', expanded && 'rotate-90')} aria-hidden />
-                    <span className="truncate">{node.name}</span>
+                    <span className="min-w-0">{node.name}</span>
                     <span className="ml-auto shrink-0 text-xs text-muted tabular-nums">
                         {count}/{permissions.length}
                     </span>

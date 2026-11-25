@@ -84,10 +84,10 @@ class User extends Authenticatable
             return false;
         }
 
-        $this->role->loadMissing('permissions.applicationModule');
+        $this->role->loadMissing('permissions.applicationModule.parent.parent.parent');
 
         return $this->role->permissions->contains(fn ($item) =>
-            $item->slug === $permission && (bool) $item->applicationModule?->is_active
+            $item->slug === $permission && (bool) $item->applicationModule?->estActif()
         );
     }
 

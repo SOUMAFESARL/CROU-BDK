@@ -620,7 +620,7 @@ function ModuleCatalog({ tree, modulesUrl }: { tree: ModuleNode[]; modulesUrl: s
                                     <span className="flex size-9 shrink-0 items-center justify-center rounded-brand bg-soft text-primary" aria-hidden>
                                         <Icon {...ICON} />
                                     </span>
-                                    <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">{root.name}</h3>
+                                    <h3 className="min-w-0 flex-1 text-sm font-medium text-gray-900">{root.name}</h3>
                                     <Badge variant="neutral" className="px-2 font-semibold">
                                         {collectPermissions(root).length} action(s)
                                     </Badge>
@@ -669,7 +669,7 @@ function CatalogNode({ node }: { node: ModuleNode }) {
                 className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-900 hover:text-primary focus-visible:ring-2 focus-visible:ring-secondary focus-visible:outline-none"
             >
                 <ChevronRight {...ICON} className={cn('shrink-0 text-muted transition-transform', open && 'rotate-90')} aria-hidden />
-                <span className="truncate">{node.name}</span>
+                <span className="min-w-0">{node.name}</span>
                 <span className="ml-auto shrink-0 text-xs text-muted tabular-nums">{collectPermissions(node).length}</span>
             </button>
             {open && (

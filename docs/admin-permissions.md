@@ -44,6 +44,25 @@ La migration `2026_11_24_000006_add_reclamations_permissions.php` ajoute le modu
 | `admin.hebergement.reclamations.configuration`, `.periodes.store`, `.periodes.update`, `.periodes.destroy` | `hebergement.reclamations.configure` |
 | `admin.hebergement.reclamations.traiter` | `hebergement.reclamations.traiter` |
 
+La migration `2026_11_25_000001_ranger_droits_admissions_en_sous_modules.php` range les droits du module **« Campagnes et admissions »** (`hebergement.admissions`) : le module ne garde que ses droits de base (`view`, `create`, `update`, `delete`, `validate`, `personal`, `documents`, `history`) et chaque onglet devient un sous-module, comme « Dérogations d’admission » (sauf « Campagnes » : la liste des campagnes s’ouvre avec « Consulter » du module, `hebergement.admissions.view`). Les droits existants sont déplacés (les rôles les gardent) : `hebergement.admissions.commission_validees_view` devient `hebergement.admissions.commission-validees.view`, et « Valider » y est l’action commune `validate`. Les slugs se lisent toujours par `App\Services\AdmissionPermissions::slug($onglet, $action)`.
+
+| Sous-module (`hebergement.admissions.…`) | Droits |
+| --- | --- |
+| `derogations` — Dérogations d’admission | `deroger` (bouton « Déroger » de la fiche, appliqué sur-le-champ, et levée des refus automatiques dans les listes consultables) |
+| `demandes` — Liste des demandes (onglet « Toutes les demandes ») | `view` |
+| ↳ `recevables` — Demandes recevables | `view` |
+| ↳ ↳ `recevables-demandes` — Liste des demandes recevables | `view` |
+| ↳ ↳ `provisoire` — Listes provisoires (admissions et réadmissions) | `view`, `validate`, `refuser`, `attente`, `export` |
+| ↳ `rejetees` — Demandes irrecevables | `view` |
+| ↳ `refusees` — Demandes refusées | `view` |
+| `commission` — Décision de la commission | `view`, `approuver` (bouton « Approuver la liste ») |
+| ↳ `commission-validees` — Demandes validées | `view`, `refuser`, `attente` |
+| ↳ `commission-attente` — File d’attente | `view`, `validate`, `refuser` |
+| `definitives` — Listes définitives (demandes validées et file d’attente) | `view`, `publier`, `export` |
+| `dossier` — Dossier de candidature | `traiter`, `document`, `decision` |
+
+Un sous-onglet exige aussi le droit « Consulter » de ses onglets parents (`AdmissionPermissions::PARENTS`) ; les onglets de la « Liste des demandes » s’ouvrent chacun avec leur propre droit « Consulter ». Désactiver un module coupe aussi les droits de ses sous-modules (`ApplicationModule::estActif()` ; les grands modules à la racine ne sont pas pris en compte).
+
 Attribuer les droits nécessaires dans **Paramètres → Rôles et permissions**. Créer un utilisateur exige `utilisateurs.create` et `parametrage.roles.assign`. Modifier son rôle exige aussi `parametrage.roles.assign`. Seul le rôle 1 peut affecter le rôle 1 ou modifier un compte qui le possède.
 
 Validation ciblée :

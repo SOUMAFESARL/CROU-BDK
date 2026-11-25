@@ -44,7 +44,6 @@ export default function NiveauxEtude({ elements, stats, filters, urls }: Props) 
     return (
         <ReferentielPage
             titre="Niveaux d’étude"
-            description="Cycles et niveaux proposés dans les demandes de logement (niveau actuel et précédent)."
             singulier="niveau d’étude"
             un="un niveau d’étude"
             champs={CHAMPS}
@@ -57,6 +56,7 @@ export default function NiveauxEtude({ elements, stats, filters, urls }: Props) 
             icone={<GraduationCap {...ICON} />}
             usage={(n) => ({ total: n.demandes, libelle: 'demande(s) de logement' })}
             ajoutDirect
+            actionsEnTete
             colonnesAvant={[
                 {
                     key: 'ordre',

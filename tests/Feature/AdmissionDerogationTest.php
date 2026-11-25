@@ -53,6 +53,8 @@ class AdmissionDerogationTest extends TestCase
         $repo->shouldReceive('findWithRelations')->andReturnUsing(fn () => Etudiant::findOrFail('student'));
         $repo->shouldReceive('verifierEligibilite')->andReturnUsing(fn () => $this->evaluation);
         $this->mock(\App\Http\Services\Eligibilite\ConformiteDemande::class)->shouldReceive('evaluer')->andReturnUsing(fn () => $this->conformite);
+        // Droit renommé par la migration 2026_11_25_000001.
+        DB::table('permissions')->where('slug', 'hebergement.admissions.derogations.validate')->update(['slug' => 'hebergement.admissions.derogations.deroger']);
         $this->service = app(AdmissionDerogationService::class);
     }
 
@@ -82,7 +84,7 @@ class AdmissionDerogationTest extends TestCase
         $this->assertTrue($this->service->canApprove($this->actor('chef', 3)));
         $this->assertFalse($this->service->canApprove($this->actor('admin', 1)));
         $this->assertFalse($this->service->canApprove(null));
-        DB::table('role_permission')->insert(['role_id' => 1, 'permission_id' => DB::table('permissions')->where('slug', 'hebergement.admissions.derogations.validate')->value('id')]);
+        DB::table('role_permission')->insert(['role_id' => 1, 'permission_id' => DB::table('permissions')->where('slug', 'hebergement.admissions.derogations.deroger')->value('id')]);
         $this->assertFalse($this->service->canApprove($this->actor('superadmin', 1)));
     }
 
