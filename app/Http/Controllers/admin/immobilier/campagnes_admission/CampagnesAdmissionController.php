@@ -17,7 +17,6 @@ use App\Repositories\Interfaces\EtudiantRepositoryInterface;
 use App\Http\Services\CampagneValidationService;
 use App\Models\Campagne;
 use App\Services\AdminAccess;
-use App\Services\AdmissionResultDiffusion;
 use App\Services\AdmissionPermissions;
 use Illuminate\Support\Facades\DB;
 use App\Services\AdminViewAccess;
@@ -145,7 +144,8 @@ class CampagnesAdmissionController extends Controller
         $campagnes = $parCampagne ? Campagne::query()->orderByDesc('created_at')->get() : null;
         $campagne = $parCampagne ? $this->campagneSelectionnee($request, $campagnes) : $this->campagneActive();
         // Conformité de la dernière demande de chaque étudiant aux critères de sa campagne : compteurs et listes filtrées.
-        $population = $repository->getPopulationDemandes();
+        // Les étudiants admis à loger (ou déjà logés) restent dans les listes définitives de leur campagne.
+        $population = $repository->getPopulationDemandes($this->campagneAdmis($parCampagne ? $campagne : null));
         if ($parCampagne) {
             $population = $this->populationCampagne($population, $campagne);
         }
@@ -226,7 +226,8 @@ class CampagnesAdmissionController extends Controller
                 'refus_automatique' => in_array((string) $etudiant->derniereDemande?->getKey(), $refusAutomatiques, true),
             ]),
             'stats' => [
-                'toutes' => $filtersUrls['toutes'] ? $population->count() : 0,
+                'toutes' => $filtersUrls['toutes']
+                    ? $population->filter(fn (Etudiant $etudiant) => in_array(Str::lower((string) $etudiant->statut_inscription), \App\Repositories\EtudiantRepository::STATUTS_DEMANDES, true))->count() : 0,
                 'recevables' => $filtersUrls['recevables'] ? count($classement['recevables']) : 0,
                 'rejetees' => $filtersUrls['rejetees'] ? count($classement['rejetees']) : 0,
                 'refusees' => $filtersUrls['refusees'] ? count($classement['refusees']) : 0,
@@ -789,17 +790,18 @@ class CampagnesAdmissionController extends Controller
     /**
      * Publication des listes définitives, « Demandes validées » et « File d'attente » ensemble (`volet` : `toutes` — les
      * volets ouverts — ou un type de demande ; classement recalculé côté serveur) : dans chaque onglet, chaque volet qui a
-     * des demandes approuvées et n'est pas encore publié (ou a reçu une approbation depuis sa publication) est publié ;
-     * les listes peuvent alors être téléchargées et leurs notifications sont enregistrées pour l’envoi.
+     * des demandes approuvées et n'est pas encore publié (ou a reçu une approbation depuis sa publication) est publié :
+     * les listes peuvent alors être téléchargées, les demandes validées passent dans « Admis à loger » et les étudiants
+     * peuvent consulter leur résultat (`ResultatsAdmission`). Aucun message n'est envoyé.
      */
-    public function publierListeDefinitive(Request $request, string $volet, AdmissionResultDiffusion $diffusion)
+    public function publierListeDefinitive(Request $request, string $volet, \App\Http\Services\Eligibilite\ResultatsAdmission $resultats)
     {
         $this->autoriserListe($request, 'definitive_validees', 'publier');
-        if (! Schema::hasTable('publication_liste_definitive') || ! Schema::hasColumn(AdmissionResultDiffusion::TABLE, 'body_html')) {
+        if (! Schema::hasTable('publication_liste_definitive') || ! $resultats->disponible()) {
             throw ValidationException::withMessages(['publication' => 'La publication n’est pas encore disponible : la base de données doit être mise à jour.']);
         }
         $admin = $request->user('admin');
-        $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes();
+        $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes($this->campagneAdmis());
         $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
         [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $this->campagneActive());
         $publies = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
@@ -808,7 +810,7 @@ class CampagnesAdmissionController extends Controller
             throw ValidationException::withMessages(['publication' => 'Aucune demande approuvée à publier.']);
         }
 
-        [$publiees, $notifications] = DB::transaction(function () use ($campagne, $listes, $publies, $admin, $population, $classement, $diffusion) {
+        [$publiees, $bilan] = DB::transaction(function () use ($campagne, $listes, $publies, $admin, $population, $classement, $resultats) {
             Campagne::query()->whereKey($campagne->getKey())->lockForUpdate()->firstOrFail();
 
             $etats = collect(['validees', 'attente'])
@@ -834,16 +836,10 @@ class CampagnesAdmissionController extends Controller
             ], $etat['a_publier']))->values()->all();
             DB::table('publication_liste_definitive')->upsert($publications, ['campagne_id', 'liste', 'volet'], ['date_publication', 'publiee_par', 'updated_at']);
 
-            $notifications = 0;
-            foreach ($etats as $liste => $etat) {
-                $notifications += $diffusion->prepare($campagne, $population, $classement, $listes['definitives'], $etat['a_publier'], $liste);
-            }
+            $bilan = $resultats->publier($campagne, $etats->flatMap(fn (array $etat) => $etat['a_publier'])->unique()->values()->all(), $population, $classement);
 
-            return [$etats->keys()->all(), $notifications];
+            return [$etats->keys()->all(), $bilan];
         }, 3);
-
-        // Envoi dès la réponse rendue, sans attendre le planificateur (`admissions:notifier`), qui reprend les restes.
-        defer(fn () => $diffusion->sendAll());
 
         $message = match ($publiees) {
             ['validees'] => 'Liste des demandes validées publiée : elle peut être téléchargée.',
@@ -853,11 +849,14 @@ class CampagnesAdmissionController extends Controller
 
         // Onglet « File d'attente » quand elle seule a été publiée.
         return redirect()->route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives'] + ($publiees === ['attente'] ? ['liste' => 'attente'] : []) + ($volet !== 'toutes' ? ['type' => $volet] : []))
-            ->with('success', $message.match (true) {
-                $notifications > 0 => ' Les notifications de résultats sont en cours d’envoi.',
-                ! in_array(true, AdmissionResultDiffusion::channels(\App\Models\ConfigApp::query()->first()), true) => ' Aucune notification programmée : l’e-mail et le SMS sont désactivés (Configurations système › Notifications).',
-                default => ' Aucune notification programmée : l’envoi des messages concernés est désactivé (Paramétrage › Configuration des messages).',
-            });
+            ->with('success', $message
+                .match ($bilan['admis']) {
+                    0 => '',
+                    1 => ' 1 étudiant passe dans « Admis à loger ».',
+                    default => ' '.$bilan['admis'].' étudiants passent dans « Admis à loger ».',
+                }
+                .' Les étudiants peuvent consulter leur résultat sur la plateforme.'
+                .($bilan['bloques'] !== [] ? ' Non admis à loger : '.implode(' ; ', $bilan['bloques']) : ''));
     }
 
     /**
@@ -1018,7 +1017,7 @@ class CampagnesAdmissionController extends Controller
         $this->autoriserListe($request, 'definitive_'.$liste, 'export');
         $admin = $request->user('admin');
         $personnel = app(AdminViewAccess::class)->allows($admin, 'admissions.personal');
-        $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes();
+        $population = app(\App\Repositories\EtudiantRepository::class)->getPopulationDemandes($this->campagneAdmis());
         $classement = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classer($population);
         [$campagne, $volets, $listes] = $this->listesProvisoires($population, $classement, $this->campagneActive());
         $exportes = $volet === 'toutes' ? $volets : array_values(array_intersect([$volet], $volets));
@@ -1456,6 +1455,18 @@ class CampagnesAdmissionController extends Controller
     private function campagneActive(): ?Campagne
     {
         return Campagne::where('statut', 'active')->orderByDesc('created_at')->first();
+    }
+
+    /**
+     * Campagne dont les étudiants admis à loger figurent dans les listes définitives : celle donnée, à défaut la
+     * campagne active, sinon celle de la demande la plus récente.
+     */
+    private function campagneAdmis(?Campagne $campagne = null): ?string
+    {
+        $campagne ??= $this->campagneActive()
+            ?? \App\Models\DemandeEtudiant::whereHas('campagne')->orderByDesc('created_at')->first()?->campagne;
+
+        return $campagne ? (string) $campagne->getKey() : null;
     }
 
     /**

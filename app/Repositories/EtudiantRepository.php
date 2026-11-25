@@ -3,7 +3,9 @@ namespace App\Repositories;
 
 use App\Models\Etudiant;
 use App\Repositories\Interfaces\EtudiantRepositoryInterface;
+use App\Http\Services\Eligibilite\RecevabiliteDemandes;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use App\Http\Services\DemandeService;
 use Illuminate\Database\Eloquent\Builder;
@@ -197,11 +199,19 @@ class EtudiantRepository implements EtudiantRepositoryInterface
     /**
      * Étudiants de la page « Admissions » ayant une demande, avec ce qu'il faut pour évaluer la conformité
      * de leur dernière demande aux critères de sa campagne (`RecevabiliteDemandes`).
+     * `$campagneAdmis` : avec, en plus, les étudiants de cette campagne approuvés en commission et admis à loger (ou
+     * déjà logés), qui restent dans les listes définitives.
      */
-    public function getPopulationDemandes(): \Illuminate\Database\Eloquent\Collection
+    public function getPopulationDemandes(?string $campagneAdmis = null): \Illuminate\Database\Eloquent\Collection
     {
         return Etudiant::with(['derniereDemande.campagne', 'derniereDemande.niveauEtudiantPrecedent', 'derniereDemande.niveauEtudiantActuel'])
-            ->whereIn(DB::raw('LOWER(statut_inscription)'), self::STATUTS_DEMANDES)
+            ->where(fn ($query) => $query->whereIn(DB::raw('LOWER(statut_inscription)'), self::STATUTS_DEMANDES)
+                ->when($campagneAdmis !== null && Schema::hasColumn('demande', 'date_approbation_commission'), fn ($q) => $q->orWhere(
+                    fn ($admis) => $admis->whereIn(DB::raw('LOWER(statut_inscription)'), ['en_verification', 'residents', 'archivee'])
+                        ->whereHas('derniereDemande', fn ($demande) => $demande->where('campagne_id', $campagneAdmis)
+                            ->whereIn('etat_dossier', RecevabiliteDemandes::ETATS_ADMIS)
+                            ->whereNotNull('date_approbation_commission')),
+                )))
             ->whereHas('derniereDemande')
             ->get();
     }

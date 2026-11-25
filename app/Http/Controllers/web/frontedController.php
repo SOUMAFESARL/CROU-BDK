@@ -84,6 +84,8 @@ class  frontedController extends Controller
             'registerUrl' => Campagne::admissionsOuvertes()->exists() ? route('etudiant.register') : null,
             // Lien vers le formulaire de réclamation, proposé uniquement pendant une période de réclamation ouverte.
             'reclamationUrl' => app(\App\Http\Services\ReclamationService::class)->periodeOuverte() ? route('etudiant.reclamation') : null,
+            // Lien vers les résultats d'admission, une fois une liste définitive publiée.
+            'resultatsUrl' => app(\App\Http\Services\Eligibilite\ResultatsAdmission::class)->campagnePubliee() ? route('etudiant.resultats') : null,
             'csrfToken' => csrf_token(),
             'oldEmail' => old('email'),
             'logoUrl' => systemLogo('admin/assets/images/logos/crou_bdk.jpeg'),
@@ -304,14 +306,14 @@ class  frontedController extends Controller
 }
 
     /**
-     * Le mot de passe est envoyé à l'e-mail saisi à l'étape « Identité » quand le dossier devient « Éligible »
-     * (`DossierWorkflow`). Seul un brouillon le reçoit dès l'inscription, l'étudiant devant se connecter pour le soumettre.
+     * Aucun mot de passe n'est envoyé pour une demande soumise : l'étudiant consulte son résultat sur `/resultats`.
+     * Seul un brouillon le reçoit dès l'inscription, l'étudiant devant se connecter pour le soumettre.
      * Retourne la phrase ajoutée au message de confirmation.
      */
     private function envoyerIdentifiants(\App\Models\Etudiant $etudiant, ?string $etatDossier): string
     {
         if ($etatDossier !== 'brouillon') {
-            return "Vos identifiants de connexion vous seront envoyés à {$etudiant->email1} dès que votre dossier sera déclaré éligible.";
+            return 'Après la publication de la liste définitive, vous pourrez consulter votre résultat sur la plateforme avec votre numéro de table au bac ou votre matricule.';
         }
 
         $envoye = app(\App\Http\Services\IdentifiantsEtudiant::class)->envoyer(

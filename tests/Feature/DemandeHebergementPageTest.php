@@ -235,7 +235,7 @@ class DemandeHebergementPageTest extends TestCase
         $this->assertSame('2025-2026', $requete->input('annee_academique_precedent'));
     }
 
-    public function test_le_mot_de_passe_est_envoye_a_l_email_saisi_dans_la_demande(): void
+    public function test_seul_un_brouillon_recoit_ses_identifiants(): void
     {
         Notification::fake();
         Schema::create('etudiants', function (Blueprint $t) {
@@ -248,7 +248,12 @@ class DemandeHebergementPageTest extends TestCase
         DB::table('etudiants')->insert(['id_etudiant' => 'e1', 'email1' => 'aya@exemple.com']);
         $etudiant = Etudiant::findOrFail('e1');
 
-        $message = (new \ReflectionMethod(frontedController::class, 'envoyerIdentifiants'))->invoke(app(frontedController::class), $etudiant);
+        $envoyer = fn (string $etat) => (new \ReflectionMethod(frontedController::class, 'envoyerIdentifiants'))->invoke(app(frontedController::class), $etudiant, $etat);
+        // Demande soumise : aucun identifiant, le résultat se consulte après la publication de la liste définitive.
+        $this->assertStringContainsString('consulter votre résultat', $envoyer('soumis'));
+        Notification::assertNothingSent();
+        // Brouillon : identifiants envoyés pour le compléter.
+        $message = $envoyer('brouillon');
 
         $this->assertStringContainsString('aya@exemple.com', $message);
         $motDePasse = null;

@@ -95,7 +95,7 @@ abstract class DossierTestCase extends TestCase
         ], $data));
     }
 
-    /** Attribution définitive ; un dossier encore « Éligible » est d'abord confirmé par l'étudiant. */
+    /** Attribution définitive ; un dossier encore « Éligible » est d'abord admis à loger. */
     protected function allocate(string $student = 'student', ?string $room = 'room'): ?AssignationChambre
     {
         if (\App\Models\DemandeEtudiant::where('etudiant_id', $student)->where('campagne_id', 'campaign')
@@ -106,11 +106,11 @@ abstract class DossierTestCase extends TestCase
             $room ? Chambre::findOrFail($room) : null);
     }
 
-    /** L'étudiant éligible confirme qu'il souhaite toujours être logé. */
+    /** Publication de la liste définitive : le dossier « Recevable » passe « Admis à loger ». */
     protected function confirm(string $student = 'student'): \App\Models\DemandeEtudiant
     {
         return $this->workflow->transition($this->workflow->current($student, 'campaign')->getKey(),
-            'confirme', 'etudiant', $student, 'Demande confirmée.');
+            'confirme', 'systeme', null, 'Publication de la liste définitive : admis à loger.');
     }
 
     /**

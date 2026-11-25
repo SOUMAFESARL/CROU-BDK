@@ -19,18 +19,27 @@ use Inertia\Inertia;
 class ResidentContratControler extends Controller
 {
     /** Filtres de la page : admis à loger (liste définitive publiée) et étudiants déjà logés. */
-    private const FILTRES = ['en_verification', 'residents'];
+    private const FILTRES = ['admis_a_loger', 'residents'];
+
+    /** Statut d'inscription (`EtudiantRepository`) de chaque filtre. */
+    private const STATUTS = ['admis_a_loger' => 'en_verification', 'residents' => 'residents'];
 
     public function __construct(protected EtudiantService $etudiantService) {}
 
     public function liste(Request $request, ?string $etat = null)
     {
+        // Ancienne adresse de la liste « Admis à loger » (liens enregistrés).
+        if ($etat === 'en_verification' && ! $request->wantsJson()) {
+            return redirect()->route('admin.hebergement.residents_contrat.admission', ['etat' => 'admis_a_loger'] + $request->query());
+        }
+
         try {
             if (! $request->wantsJson()) {
                 return $this->pageResidents($request, $etat ?? $request->get('etat'));
             }
 
-            $result = $this->etudiantService->getListeEtudiantsWithStats($etat ?? $request->get('etat'));
+            $etat ??= $request->get('etat');
+            $result = $this->etudiantService->getListeEtudiantsWithStats(self::STATUTS[$etat] ?? $etat);
 
             return response()->json(app(\App\Services\AdminViewData::class)->filter($result, $request->user('admin')));
         } catch (\Exception $e) {
@@ -73,7 +82,7 @@ class ResidentContratControler extends Controller
         $choixCampagne = $request->filled('campagne') ? ['campagne' => $toutes ? 'toutes' : $campagneId] : [];
 
         $recherche = trim((string) $request->query('q', ''));
-        $page = $repository->getAdmissionsPage($etat, 10, $recherche, null, null, $campagneId);
+        $page = $repository->getAdmissionsPage(self::STATUTS[$etat], 10, $recherche, null, null, $campagneId);
         $page->getCollection()->load(['assignationsChambre' => fn ($q) => $q->where('statut', 'confirmee')
             ->with(['chambre.batiment', 'chambre.cite'])]);
 
@@ -92,29 +101,24 @@ class ResidentContratControler extends Controller
                     'date' => $etudiant->created_at?->format('Y-m-d H:i'),
                     'personnel' => $personnel ? [
                         'telephone' => $etudiant->telephone1,
-                        'adresse' => $etudiant->adresse,
-                        'region' => $etudiant->region?->name,
-                        'ville' => $etudiant->ville?->name,
                         'date_naissance' => $etudiant->date_naissance?->toDateString(),
                     ] : null,
-                    'demandes' => $historique ? (int) $etudiant->demandes_count : null,
+                    // Résidents logés seulement : nombre de demandes, chambre et contrat.
+                    'demandes' => $historique && $etat === 'residents' ? (int) $etudiant->demandes_count : null,
                     'chambre' => $assignation ? [
                         'numero' => $chambre?->numero_chambre,
                         'lieu' => collect([$chambre?->batiment?->name, $chambre?->cite?->name])->filter()->implode(' · ') ?: null,
                     ] : null,
                     'urls' => [
                         'dossier' => $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant]),
-                        'traiter' => $etat === 'en_verification'
-                            ? $url('admin.hebergement.campagnes_admission.show', ['id' => $etudiant->id_etudiant])
-                            : null,
-                        // Dossier confirmé par l'étudiant : attribution de la chambre (formulaire présélectionné sur l'étudiant).
-                        'attribuer' => $etat === 'en_verification' && $etudiant->derniereDemande?->etat_dossier === 'confirme'
+                        // Étudiant admis à loger : attribution de la chambre (formulaire présélectionné sur l'étudiant).
+                        'attribuer' => $etat === 'admis_a_loger' && $etudiant->derniereDemande?->etat_dossier === 'confirme'
                             ? $url('admin.allocation.allocate-form', [
                                 'campagneId' => $etudiant->derniereDemande->campagne_id,
                                 'etudiant_id' => $etudiant->id_etudiant,
                             ])
                             : null,
-                        'contrat' => $url('admin.etudiant.contrat', ['etudiant' => $etudiant->id_etudiant]),
+                        'contrat' => $etat === 'residents' ? $url('admin.etudiant.contrat', ['etudiant' => $etudiant->id_etudiant]) : null,
                         'modifier' => $modifiable
                             ? route('admin.hebergement.residents_contrat.update_etudiant', ['etudiant' => $etudiant->id_etudiant])
                             : null,
@@ -125,7 +129,7 @@ class ResidentContratControler extends Controller
             }),
             'stats' => [
                 'residents' => $repository->compterAdmissions('residents', $campagneId),
-                'en_verification' => $repository->compterAdmissions('en_verification', $campagneId),
+                'admis_a_loger' => $repository->compterAdmissions(self::STATUTS['admis_a_loger'], $campagneId),
             ],
             'etat' => $etat,
             'filters' => ['q' => $recherche, 'campagne' => $toutes ? 'toutes' : (string) $campagneId],

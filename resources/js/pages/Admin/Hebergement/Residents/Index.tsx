@@ -1,5 +1,5 @@
 import { Link, router } from '@inertiajs/react';
-import { BedDouble, CirclePlay, ClipboardCheck, Eye, FileText, ListChecks, Pencil, Search, UserPlus, Users, X } from 'lucide-react';
+import { BedDouble, CirclePlay, Eye, FileText, ListChecks, Pencil, Search, UserPlus, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
@@ -15,24 +15,25 @@ import { dateFr, initiales, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
 
-type Filtre = 'en_verification' | 'residents';
+type Filtre = 'admis_a_loger' | 'residents';
 
 type Resident = {
     id: string;
     name: string;
     numero_demande: string | null;
     date: string | null;
-    personnel: { telephone: string | null; adresse: string | null; region: string | null; ville: string | null; date_naissance: string | null } | null;
+    personnel: { telephone: string | null; date_naissance: string | null } | null;
+    /** Résidents logés seulement, comme le contrat. */
     demandes: number | null;
     chambre: { numero: string | null; lieu: string | null } | null;
-    urls: { dossier: string | null; traiter: string | null; attribuer: string | null; contrat: string | null; modifier: string | null };
+    urls: { dossier: string | null; attribuer: string | null; contrat: string | null; modifier: string | null };
     /** Valeurs du formulaire de modification (envoyées seulement avec le droit de modifier). */
     edition: ValeursEtudiant | null;
 };
 
 type Props = {
     residents: Paginated<Resident>;
-    stats: { residents: number; en_verification: number };
+    stats: { residents: number; admis_a_loger: number };
     etat: Filtre;
     /** `campagne` : campagne choisie dans le bandeau (`toutes` : aucun filtre). */
     filters: { q: string; campagne: string };
@@ -55,7 +56,7 @@ const TOUTES = 'toutes';
 const nomCampagne = (campagne: CampagneOption) => [campagne.libelle || 'Campagne', campagne.annee].filter(Boolean).join(' ');
 
 const TITRES: Record<Filtre, string> = {
-    en_verification: 'Admis à loger (liste définitive publiée)',
+    admis_a_loger: 'Admis à loger (liste définitive publiée)',
     residents: 'Résidents logés',
 };
 
@@ -88,7 +89,7 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
     }, [recherche]);
 
     const vide = (valeur: string | null | undefined) => valeur || <span className="text-muted">—</span>;
-    // Vue « Résidents logés » allégée pour éviter le défilement horizontal du tableau.
+    // Chambre, demandes et contrat : résidents logés ; date de naissance : admis à loger.
     const vueResidents = etat === 'residents';
 
     const colonnesTableau: DataTableColumn<Resident>[] = [
@@ -126,38 +127,31 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
             : []),
         ...(colonnes.personnel && !vueResidents
             ? ([
-                  { key: 'adresse', header: 'Adresse', cell: (r) => vide(r.personnel?.adresse) },
-                  {
-                      key: 'region',
-                      header: 'Région / Ville',
-                      cell: (r) => (
-                          <>
-                              {vide(r.personnel?.region)}
-                              {r.personnel?.ville && <p className="text-xs text-muted">{r.personnel.ville}</p>}
-                          </>
-                      ),
-                  },
                   { key: 'naissance', header: 'Date de naissance', className: 'whitespace-nowrap', cell: (r) => dateFr(r.personnel?.date_naissance) },
               ] satisfies DataTableColumn<Resident>[])
             : []),
-        ...(colonnes.historique
+        ...(colonnes.historique && vueResidents
             ? ([{ key: 'demandes', header: 'Demandes', className: 'text-center tabular-nums', headClassName: 'text-center', cell: (r) => nombre(r.demandes) }] satisfies DataTableColumn<Resident>[])
             : []),
-        {
-            key: 'chambre',
-            header: 'Chambre',
-            cell: (r) =>
-                r.chambre ? (
-                    <div className="min-w-28">
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-soft px-2.5 py-0.5 text-xs font-medium text-primary">
-                            <BedDouble className="size-3.5" aria-hidden /> {r.chambre.numero ?? 'N/A'}
-                        </span>
-                        {r.chambre.lieu && <p className="mt-1 text-xs text-muted">{r.chambre.lieu}</p>}
-                    </div>
-                ) : (
-                    <span className="inline-flex rounded-full bg-surface px-2.5 py-0.5 text-xs font-medium text-muted ring-1 ring-gray-200">Sans chambre</span>
-                ),
-        },
+        ...(vueResidents
+            ? ([
+                  {
+                      key: 'chambre',
+                      header: 'Chambre',
+                      cell: (r) =>
+                          r.chambre ? (
+                              <div className="min-w-28">
+                                  <span className="inline-flex items-center gap-1.5 rounded-brand bg-soft px-2.5 py-0.5 text-xs font-medium text-primary">
+                                      <BedDouble className="size-3.5" aria-hidden /> {r.chambre.numero ?? 'N/A'}
+                                  </span>
+                                  {r.chambre.lieu && <p className="mt-1 text-xs text-muted">{r.chambre.lieu}</p>}
+                              </div>
+                          ) : (
+                              <span className="inline-flex rounded-brand bg-surface px-2.5 py-0.5 text-xs font-medium text-muted ring-1 ring-gray-200">Sans chambre</span>
+                          ),
+                  },
+              ] satisfies DataTableColumn<Resident>[])
+            : []),
         {
             key: 'actions',
             header: <span className="sr-only">Actions</span>,
@@ -165,7 +159,6 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
             cell: (r) => (
                 <RowActions>
                     {r.urls.attribuer && <RowAction label="Attribuer une chambre" icon={BedDouble} href={r.urls.attribuer} tone="success" />}
-                    {r.urls.traiter && <RowAction label="Traiter la demande" icon={ClipboardCheck} href={r.urls.traiter} tone="success" />}
                     {r.urls.modifier && r.edition && <RowAction label="Modifier les informations" icon={Pencil} onClick={() => setEnEdition(r)} tone="edit" />}
                     {r.urls.contrat && <RowAction label="Consulter le contrat (PDF)" icon={FileText} href={r.urls.contrat} newTab />}
                     {r.urls.dossier && <RowAction label="Voir le dossier" icon={Eye} href={r.urls.dossier} tone="view" />}
@@ -230,11 +223,11 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                 items={[
                     { key: 'residents', label: 'Résidents', value: nombre(stats.residents), tone: 'green', href: urls.filtres?.residents, extra: 'Déjà logés' },
                     {
-                        key: 'en_verification',
+                        key: 'admis_a_loger',
                         label: 'Admis à loger',
-                        value: nombre(stats.en_verification),
+                        value: nombre(stats.admis_a_loger),
                         tone: 'blue',
-                        href: urls.filtres?.en_verification,
+                        href: urls.filtres?.admis_a_loger,
                         extra: campagneActive ? `Campagne ${campagneActive.annee}` : 'Toutes campagnes',
                     },
                 ]}
@@ -256,7 +249,7 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                                     type="search"
                                     value={recherche}
                                     onChange={(event) => setRecherche(event.target.value)}
-                                    placeholder="Rechercher par nom, n° de demande ou chambre…"
+                                    placeholder={vueResidents ? 'Rechercher par nom, n° de demande ou chambre…' : 'Rechercher par nom ou n° de demande…'}
                                     aria-label="Rechercher un étudiant"
                                     icon={<Search />}
                                     className="h-10"

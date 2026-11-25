@@ -96,17 +96,12 @@ class StudentDashboardTest extends TestCase
         $this->assertSame(route('etudiants.validation-demande', ['idDemande' => 'request']), $props['demande']['decision']['url']);
         $this->assertStringStartsWith('2026-11-30T23:59:59', $props['demande']['echeanceIso']);
 
-        $this->assertSame('proposition', $props['demande']['decision']['type']);
-
-        // Dossier éligible : l'étudiant confirme (ou refuse) son intérêt, sans chambre proposée.
-        $demande->etat_dossier = 'eligible';
-        $props = app(EtudiantDashboard::class)->props($this->etudiant($demande), $campagne, [], collect());
-        $this->assertSame('consentement', $props['demande']['decision']['type']);
-        $this->assertNull($props['demande']['decision']['assignationId']);
-
-        $demande->etat_dossier = 'confirme';
-        $props = app(EtudiantDashboard::class)->props($this->etudiant($demande), $campagne, [], collect());
-        $this->assertNull($props['demande']['decision']);
+        // Dossier recevable ou admis à loger : aucune réponse attendue de l'étudiant.
+        foreach (['eligible', 'confirme'] as $etat) {
+            $demande->etat_dossier = $etat;
+            $props = app(EtudiantDashboard::class)->props($this->etudiant($demande), $campagne, [], collect());
+            $this->assertNull($props['demande']['decision']);
+        }
     }
 
     public function test_refusal_without_reason_returns_a_field_error(): void

@@ -6,6 +6,7 @@ use App\Http\Controllers\admin\auth\AuthController;
 use App\Http\Controllers\web\frontedController;
 use App\Http\Controllers\web\EtudiantPasswordResetController;
 use App\Http\Controllers\web\ReclamationPubliqueController;
+use App\Http\Controllers\web\ResultatPublicController;
 use App\Http\Controllers\MapController;
 // Routes d'authentification admin
 Route::get('/admin/login', [AuthController::class, 'index'])->name('login');
@@ -54,6 +55,12 @@ Route::controller(frontedController::class)->group(function () {
 Route::controller(ReclamationPubliqueController::class)->group(function () {
     Route::get('/reclamation', 'create')->name('etudiant.reclamation');
     Route::post('/reclamation', 'store')->middleware('throttle:10,1')->name('etudiant.reclamation.store');
+});
+
+// Résultats d'admission, après la publication des listes définitives (limite large : un campus partage une adresse IP).
+Route::controller(ResultatPublicController::class)->group(function () {
+    Route::get('/resultats', 'create')->name('etudiant.resultats');
+    Route::post('/resultats', 'show')->middleware('throttle:60,1')->name('etudiant.resultats.show');
 });
 
 // Mot de passe oublié (étudiants)

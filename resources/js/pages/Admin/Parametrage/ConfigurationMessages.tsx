@@ -176,6 +176,11 @@ export default function ConfigurationMessages({ labels, messages, formatted, def
                 </p>
             )}
 
+            <p className="mb-4 flex items-start gap-2 rounded-brand border border-accent/50 bg-accent/10 px-3 py-2.5 text-sm text-gray-800">
+                <Info {...ICON} className="mt-0.5 shrink-0" aria-hidden />
+                <span>Envoi suspendu : la publication des listes définitives n’envoie plus de message. Les étudiants consultent leur résultat sur la plateforme.</span>
+            </p>
+
             <section aria-labelledby="types-envoi" className="mb-4 rounded-brand border bg-white p-4">
                 <div className="flex flex-wrap items-center gap-2">
                     <h2 id="types-envoi" className="mr-1 text-sm font-medium text-gray-900">

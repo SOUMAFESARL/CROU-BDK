@@ -5,14 +5,14 @@ namespace App\Notifications;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-/** Identifiants de l'espace étudiant envoyés à l'adresse saisie dans la demande (au passage en « Éligible », ou dès l'inscription pour un brouillon). */
+/** Identifiants de l'espace étudiant envoyés à l'adresse saisie dans la demande (brouillon ; envoi après paiement à venir). */
 class EtudiantIdentifiantsNotification extends Notification
 {
     public function __construct(
         private readonly string $email,
         private readonly string $motDePasse,
         private readonly string $urlConnexion,
-        private readonly string $introduction = 'Votre demande d’hébergement a été jugée éligible. Connectez-vous à l’espace étudiant pour confirmer que vous souhaitez toujours être logé(e) (ou refuser) ; une chambre ne vous sera attribuée qu’après cette confirmation. Vos identifiants :',
+        private readonly string $introduction = 'Voici vos identifiants pour accéder à l’espace étudiant :',
     ) {
     }
 

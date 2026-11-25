@@ -460,7 +460,7 @@ export function TableauClassement({ classement, toolbar, filtre }: { classement:
             }
           : {
                 titre: 'Valider ce dossier ?',
-                texte: `Le dossier de ${nom} passe en « Recevable » et rejoint les demandes validées de la décision de la commission ; l’étudiant reçoit ses accès et doit confirmer sa demande.`,
+                texte: `Le dossier de ${nom} passe en « Recevable » et rejoint les demandes validées de la décision de la commission.`,
                 bouton: 'Valider',
                 icone: <CircleCheck className="size-4" aria-hidden />,
             };

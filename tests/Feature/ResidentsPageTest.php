@@ -66,7 +66,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('Admin/Hebergement/Residents/Index', $page['component']);
         $props = $page['props'];
         $this->assertSame('residents', $props['etat']);
-        $this->assertSame(['residents' => 2, 'en_verification' => 0], $props['stats']);
+        $this->assertSame(['residents' => 2, 'admis_a_loger' => 0], $props['stats']);
         $this->assertSame(['personnel' => false, 'historique' => false], $props['colonnes']);
         $this->assertSame(10, $props['residents']['per_page']);
 
@@ -79,7 +79,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertStringContainsString('/contrat', $urls['contrat']);
         $this->assertArrayNotHasKey('allouer', $urls);
         $this->assertNotNull($urls['dossier']);
-        $this->assertNull($urls['traiter']);
+        $this->assertArrayNotHasKey('traiter', $urls);
         $this->assertNotNull($props['urls']['attributions']);
     }
 
@@ -188,20 +188,28 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('Konan Awa', DB::table('etudiants')->where('id_etudiant', 'student')->value('name'));
     }
 
-    public function test_dossiers_en_verification_proposent_le_traitement(): void
+    public function test_liste_des_admis_a_loger_sans_chambre_ni_contrat(): void
     {
-        $this->agent(['hebergement.residents.view']);
+        $this->agent(['hebergement.residents.view', 'hebergement.admissions.history']);
         DB::table('etudiants')->where('id_etudiant', 'other')->update(['statut_inscription' => 'en_verification']);
 
-        $props = $this->page('en_verification', ['campagne' => 'toutes'])['props'];
+        $props = $this->page('admis_a_loger', ['campagne' => 'toutes'])['props'];
+        $this->assertSame(['admis_a_loger', 1], [$props['etat'], $props['stats']['admis_a_loger']]);
 
         $this->assertSame(1, $props['residents']['total']);
-        $this->assertNotNull($props['residents']['data'][0]['urls']['traiter']);
-        // Pas encore confirmé par l'étudiant : pas d'attribution.
+        // Nombre de demandes et contrat : résidents logés seulement ; suivi du dossier conservé.
+        $ligne = $props['residents']['data'][0];
+        $this->assertNull($ligne['demandes']);
+        $this->assertNull($ligne['urls']['contrat']);
+        $this->assertNotNull($ligne['urls']['dossier']);
+        // Ancienne adresse : redirigée, avec la campagne choisie.
+        $this->get('/admin/gestion-hebergement/residents_contrat/liste/en_verification?campagne=toutes')
+            ->assertRedirect(route('admin.hebergement.residents_contrat.admission', ['etat' => 'admis_a_loger', 'campagne' => 'toutes']));
+        // Pas encore admis à loger (liste définitive non publiée) : pas d'attribution.
         $this->assertNull($props['residents']['data'][0]['urls']['attribuer']);
     }
 
-    public function test_dossier_confirme_par_l_etudiant_propose_l_attribution_de_chambre(): void
+    public function test_dossier_admis_a_loger_propose_l_attribution_de_chambre(): void
     {
         $dossier = $this->dossier('other');
         $this->workflow->admin($dossier->getKey(), 'eligible');
@@ -209,12 +217,12 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertSame('en_verification', DB::table('etudiants')->where('id_etudiant', 'other')->value('statut_inscription'));
 
         $this->agent(['hebergement.residents.view', 'hebergement.attributions.assign']);
-        $urls = $this->page('en_verification')['props']['residents']['data'][0]['urls'];
+        $urls = $this->page('admis_a_loger')['props']['residents']['data'][0]['urls'];
         $this->assertSame(route('admin.allocation.allocate-form', ['campagneId' => 'campaign', 'etudiant_id' => 'other']), $urls['attribuer']);
 
         // Sans le droit d'attribuer : pas d'icône.
         $this->agent(['hebergement.residents.view']);
-        $this->assertNull($this->page('en_verification')['props']['residents']['data'][0]['urls']['attribuer']);
+        $this->assertNull($this->page('admis_a_loger')['props']['residents']['data'][0]['urls']['attribuer']);
     }
 
     public function test_choix_de_la_campagne(): void
@@ -234,8 +242,8 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         // Autre campagne : liste et indicateurs vides, choix conservé par les liens des indicateurs.
         $props = $this->page('residents', ['campagne' => 'ancienne'])['props'];
         $this->assertSame(0, $props['residents']['total']);
-        $this->assertSame(['residents' => 0, 'en_verification' => 0], $props['stats']);
-        $this->assertStringContainsString('campagne=ancienne', $props['urls']['filtres']['en_verification']);
+        $this->assertSame(['residents' => 0, 'admis_a_loger' => 0], $props['stats']);
+        $this->assertStringContainsString('campagne=ancienne', $props['urls']['filtres']['admis_a_loger']);
 
         // Toutes les campagnes : aucun filtre.
         $props = $this->page('residents', ['campagne' => 'toutes'])['props'];

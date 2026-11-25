@@ -42,7 +42,7 @@ class AllocationChambreService
             }
             $dossier = app(DossierWorkflow::class)->current($etudiant->getKey(), $campagne->getKey());
             if ($dossier->etat_dossier !== 'confirme') {
-                throw \Illuminate\Validation\ValidationException::withMessages(['etat_dossier'=>'Seul un dossier confirmé par l’étudiant peut recevoir une chambre.']);
+                throw \Illuminate\Validation\ValidationException::withMessages(['etat_dossier'=>'Seul un étudiant admis à loger (liste définitive publiée) peut recevoir une chambre.']);
             }
             app(DossierWorkflow::class)->eligible($dossier);
             return $chambreSpecifique

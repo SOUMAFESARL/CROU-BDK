@@ -34,13 +34,14 @@ use Illuminate\Support\Facades\Schema;
  *   une annulation par l'étudiant ou un refus automatique (barème) n'en fait pas partie.
  * - « validée » : demande recevable dont le dossier est passé « Recevable » (`eligible`), validée par un agent depuis
  *   une liste provisoire (ou par une dérogation approuvée) ; elle sort des demandes recevables pour la « Décision de la
- *   commission » et y reste jusqu'à son approbation (ou la confirmation de l'étudiant).
+ *   commission » et y reste jusqu'à son approbation.
  * - « en attente » : demande recevable mise en attente par la commission depuis une liste provisoire
  *   (`demande.date_attente_commission`, dossier encore « Soumis » / « En étude » et aucune transition depuis) ; elle sort
  *   des demandes recevables pour la « Décision de la commission », où elle sera validée ou rejetée.
  * - « définitive » : demande validée approuvée en commission (`demande.date_approbation_commission`, postérieure à la
  *   dernière validation du dossier : un dossier rejeté puis revalidé doit être approuvé à nouveau) ; elle passe de la
- *   « Décision de la commission » à la « Liste définitive ».
+ *   « Décision de la commission » à la « Liste définitive » et y reste une fois publiée, quand l'étudiant est admis à
+ *   loger puis reçoit sa chambre (`ETATS_ADMIS`).
  *
  * Le classement est le même pour tous les agents : la situation disciplinaire (note de conduite, sanction bloquante)
  * est toujours prise en compte, même si l'agent ne peut pas la consulter.
@@ -68,6 +69,9 @@ class RecevabiliteDemandes
     /** État du dossier d'une demande validée (`DossierWorkflow`, « Recevable »). */
     public const ETAT_VALIDE = 'eligible';
 
+    /** États du dossier d'une demande admise à loger (liste définitive publiée) : `confirme`, puis chambre attribuée. */
+    public const ETATS_ADMIS = ['confirme', 'pre_attribue', 'accepte', 'attribue_definitif', 'cloture'];
+
     /** États du dossier d'une demande refusée par l'administration (`DossierWorkflow`). */
     public const ETATS_REFUS = ['refuse', 'annule'];
 
@@ -87,7 +91,7 @@ class RecevabiliteDemandes
         $demandes = $etudiants->map(fn (Etudiant $etudiant) => $etudiant->derniereDemande)->filter()->all();
         $refusParAgent = $this->refusParAgent($demandes);
         $derogations = $this->derogationsApprouvees($demandes);
-        $approuvees = $this->approbationsCommission($demandes);
+        $approuvees = $this->approbationsCommission($demandes, [self::ETAT_VALIDE, ...self::ETATS_ADMIS]);
         $attentes = $this->misesEnAttente($demandes);
         $resultat = ['recevables' => [], 'rejetees' => [], 'refusees' => [], 'validees' => [], 'en_attente' => [], 'definitives' => [], 'hors_liste' => []];
         $classes = $etudiants->mapWithKeys(fn (Etudiant $etudiant) => [
@@ -219,6 +223,12 @@ class RecevabiliteDemandes
         if (in_array((string) $demande->getKey(), $refusParAgent, true)) {
             return self::REFUSEE;
         }
+        // Demande approuvée en commission et admise à loger : elle reste dans la liste définitive.
+        $approuvees ??= $this->approbationsCommission([$demande], [self::ETAT_VALIDE, ...self::ETATS_ADMIS]);
+        $approuvee = in_array((string) $demande->getKey(), $approuvees, true);
+        if ($approuvee && in_array($demande->etat_dossier, self::ETATS_ADMIS, true)) {
+            return self::DEFINITIVE;
+        }
         // Dérogation approuvée : recevable quels que soient les critères non conformes.
         $derogations ??= $this->derogationsApprouvees([$demande]);
         if (in_array((string) $demande->getKey(), $derogations, true)) {
@@ -243,9 +253,7 @@ class RecevabiliteDemandes
         }
         // Demande recevable validée par l'administration : « Décision de la commission », puis, une fois approuvée
         // en commission, « Liste définitive ».
-        $approuvees ??= $this->approbationsCommission([$demande]);
-
-        return in_array((string) $demande->getKey(), $approuvees, true) ? self::DEFINITIVE : self::VALIDEE;
+        return $approuvee ? self::DEFINITIVE : self::VALIDEE;
     }
 
     /**

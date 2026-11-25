@@ -81,7 +81,6 @@ export default function Demande(props: DemandeProps) {
         contenu = (
             <Carte surtitre={`Campagne ${props.campagne.annee}`} titre="Demande enregistrée">
                 <Notice icone={CheckCircle2}>{flash.success}</Notice>
-                <p className="mt-3 text-sm text-muted">Vous pourrez suivre l’avancement de votre dossier depuis votre espace étudiant avec les identifiants reçus par e-mail.</p>
             </Carte>
         );
     } else if (!demarre) {

@@ -1,6 +1,6 @@
 import { usePage } from '@inertiajs/react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Eye, EyeOff, FilePlus2, KeyRound, Loader2, Lock, LogIn, Mail, MessageSquareWarning, RefreshCw } from 'lucide-react';
+import { ClipboardCheck, Eye, EyeOff, FilePlus2, KeyRound, Loader2, Lock, LogIn, Mail, MessageSquareWarning, RefreshCw } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
@@ -18,6 +18,8 @@ export type LoginPageProps = {
     registerUrl?: string | null;
     /** Lien vers le formulaire de réclamation (null hors période de réclamation ouverte). */
     reclamationUrl?: string | null;
+    /** Lien vers les résultats d'admission (null tant qu'aucune liste définitive n'est publiée). */
+    resultatsUrl?: string | null;
     csrfToken: string;
     oldEmail: string | null;
     logoUrl: string;
@@ -72,6 +74,7 @@ export function LoginPage({
     forgotUrl,
     registerUrl,
     reclamationUrl,
+    resultatsUrl,
     csrfToken,
     oldEmail,
     logoUrl,
@@ -253,6 +256,16 @@ export function LoginPage({
                     {submitting ? 'Connexion…' : 'Se connecter'}
                 </Button>
             </form>
+
+            {resultatsUrl && (
+                <div className="mt-6 rounded-brand border border-dashed border-secondary bg-soft px-4 py-3 text-center text-sm">
+                    <p className="text-muted">Les résultats d’admission sont publiés.</p>
+                    <a href={resultatsUrl} className="mt-1 inline-flex items-center gap-1.5 font-semibold text-primary hover:underline">
+                        <ClipboardCheck className="size-4" />
+                        Consulter mon résultat
+                    </a>
+                </div>
+            )}
 
             {registerUrl && (
                 <div className="mt-6 rounded-brand border border-dashed border-secondary bg-soft px-4 py-3 text-center text-sm">

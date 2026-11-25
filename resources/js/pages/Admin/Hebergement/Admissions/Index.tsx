@@ -636,7 +636,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                                       classement.validationGroupee.validees,
                                   )} dans « Demandes validées » et ${nombre(
                                       classement.validationGroupee.attente ?? 0,
-                                  )} dans « File d’attente ». Chaque dossier validé passe en « Recevable » et l’étudiant reçoit ses accès.`}
+                                  )} dans « File d’attente ». Chaque dossier validé passe en « Recevable ».`}
                             {erreurValidation && (
                                 <p role="alert" className="mt-2 text-xs font-medium text-red-600">
                                     {erreurValidation}
@@ -671,7 +671,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                                 classement.approbation.validees + classement.approbation.attente > 1 ? 'seront approuvées et passeront' : 'sera approuvée et passera'
                             } dans les listes définitives (classées dans leur onglet).${
                                 classement.approbation.attente > 0
-                                    ? ' Les dossiers de la file d’attente passent en « Recevable » : les étudiants reçoivent leurs accès et doivent confirmer leur demande.'
+                                    ? ' Les dossiers de la file d’attente passent en « Recevable ».'
                                     : ''
                             }`}
                             {erreurApprobation && (
@@ -715,7 +715,7 @@ export default function AdmissionsIndex({ dossiers, stats, etat, classement, fil
                                 classement.publication.validees > 0 && classement.publication.attente > 0
                                     ? 'seront publiées : elles pourront ensuite être téléchargées'
                                     : 'sera publiée : elle pourra ensuite être téléchargée'
-                            } en Excel ou en PDF. Les étudiants concernés seront notifiés de leur résultat, selon les messages activés dans « Configuration des messages ».`}
+                            } en Excel ou en PDF. Les étudiants des demandes validées passeront dans « Admis à loger » et chacun pourra consulter son résultat sur la plateforme. Aucun message ne leur est envoyé.`}
                             {erreurPublication && (
                                 <p role="alert" className="mt-2 text-xs font-medium text-red-600">
                                     {erreurPublication}

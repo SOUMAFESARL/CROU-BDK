@@ -12,6 +12,7 @@ use Illuminate\Queue\InteractsWithQueue;
 /**
  * Envoi des identifiants de l'espace étudiant hors de la requête : un serveur SMTP lent ne doit pas bloquer
  * la soumission de la demande (dépassement des 30 s de PHP, sans réponse ni message de confirmation).
+ * N'est plus programmé depuis le 25/11/2026 (envoi prévu après le paiement de la caution et de l'avance).
  */
 class EnvoyerIdentifiantsEtudiant implements ShouldQueue
 {

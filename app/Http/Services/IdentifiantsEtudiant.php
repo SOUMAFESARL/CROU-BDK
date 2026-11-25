@@ -9,7 +9,9 @@ use Illuminate\Support\Str;
 
 /**
  * Création et envoi du mot de passe de l'espace étudiant à l'e-mail saisi dans la demande (`email1`).
- * Un compte qui possède déjà un mot de passe n'est jamais modifié (réadmission, second passage en « Éligible »).
+ * Plus d'envoi à la validation ni à la publication (25/11/2026) : il est prévu après le paiement de la caution et de
+ * l'avance d'une nouvelle demande d'admission. Seul un brouillon reçoit encore ses identifiants à l'inscription.
+ * Un compte qui possède déjà un mot de passe n'est jamais modifié (réadmission).
  */
 class IdentifiantsEtudiant
 {

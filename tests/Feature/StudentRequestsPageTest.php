@@ -67,17 +67,15 @@ class StudentRequestsPageTest extends \Tests\Support\DossierTestCase
         $this->assertNull($dossier['decision']);
     }
 
-    public function test_eligible_dossier_asks_the_student_to_confirm_and_keeps_history(): void
+    public function test_eligible_dossier_expects_no_answer_and_keeps_history(): void
     {
-        $dossier = $this->eligibleRequest();
+        $this->eligibleRequest();
 
         $props = $this->props()['dossier'];
 
         $this->assertSame('eligible', $props['etat']['code']);
         $this->assertSame([], $props['actions']);
-        $this->assertSame('consentement', $props['decision']['type']);
-        $this->assertNull($props['decision']['assignationId']);
-        $this->assertSame(route('etudiants.validation-demande', ['idDemande' => $dossier->getKey()]), $props['decision']['url']);
+        $this->assertNull($props['decision']);
         $this->assertNull($props['proposition']);
         $this->assertSame(['fait', 'fait', 'en_cours', 'a_venir', 'a_venir'], array_column($props['etapes'], 'statut'));
         $this->assertSame('Critères vérifiés.', collect($props['historique'])->firstWhere('etat', 'Recevable')['motif']);
@@ -91,7 +89,6 @@ class StudentRequestsPageTest extends \Tests\Support\DossierTestCase
         $props = $this->props()['dossier'];
 
         $this->assertSame('pre_attribue', $props['etat']['code']);
-        $this->assertSame('proposition', $props['decision']['type']);
         $this->assertSame((string) $assignment->getKey(), $props['decision']['assignationId']);
         $this->assertSame(route('etudiants.validation-demande', ['idDemande' => $dossier->getKey()]), $props['decision']['url']);
         $this->assertStringContainsString('Chambre room', $props['proposition']['chambre']);

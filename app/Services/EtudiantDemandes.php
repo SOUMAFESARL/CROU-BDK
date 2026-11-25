@@ -95,7 +95,7 @@ class EtudiantDemandes
                 'chambre' => collect(['Chambre '.$chambre->numero_chambre, $chambre->batiment?->name, $chambre->cite?->name])->filter()->implode(' · '),
                 'limite' => $etat === 'pre_attribue' && $proposition->date_fin ? $proposition->date_fin->format('d/m/Y à H:i') : null,
             ] : null,
-            // Confirmer son intérêt (éligible) ou répondre à une proposition : même chemin que le tableau de bord (ReponseProposition).
+            // Répondre à une proposition (ancien parcours) : même chemin que le tableau de bord (ReponseProposition).
             'decision' => app(EtudiantDashboard::class)->decision($demande, $campagne instanceof Campagne ? $campagne : null),
             'actions' => $this->actions($etat),
             'transitionUrl' => route('etudiants.dossiers.transition', $demande->getKey()),
@@ -124,7 +124,7 @@ class EtudiantDemandes
             'ton' => match (true) {
                 in_array($etat, ['confirme', 'accepte', 'attribue_definitif'], true) => 'success',
                 in_array($etat, ['refuse', 'expire'], true) => 'danger',
-                in_array($etat, ['incomplet', 'eligible', 'pre_attribue'], true) => 'warning',
+                in_array($etat, ['incomplet', 'pre_attribue'], true) => 'warning',
                 in_array($etat, ['annule', 'cloture', 'brouillon'], true) => 'neutral',
                 default => 'info',
             },
@@ -166,8 +166,8 @@ class EtudiantDemandes
             'soumis' => 'Votre dossier a été reçu. Il sera étudié par le service Logement.',
             'en_etude' => 'Votre dossier est en cours d’étude par le service Logement.',
             'incomplet' => 'Votre dossier est incomplet. Complétez les éléments signalés dans l’historique, puis soumettez-le à nouveau.',
-            'eligible' => 'Votre dossier est éligible. Confirmez que vous souhaitez toujours être logé(e) cette année, ou refusez si vous n’êtes plus intéressé(e).',
-            'confirme' => 'Vous avez confirmé votre demande. Une chambre vous sera attribuée par le service Logement selon les places disponibles.',
+            'eligible' => 'Votre dossier est recevable. Le résultat sera consultable après la publication de la liste définitive.',
+            'confirme' => 'Vous êtes admis(e) à loger. Effectuez votre paiement à la comptabilité du CROU pour avoir accès à votre chambre.',
             'pre_attribue' => 'Une chambre vous est proposée. Acceptez ou refusez la proposition avant la date limite.',
             'accepte' => 'Vous avez accepté la proposition. La validation définitive reste à effectuer par le service Logement.',
             'attribue_definitif' => 'Votre attribution est définitive. Approuvez votre contrat pour obtenir votre rendez-vous d’entrée.',

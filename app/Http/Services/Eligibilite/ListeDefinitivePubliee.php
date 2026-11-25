@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Schema;
  * propose avant l'attribution de leur chambre (paiements hors loyer).
  *
  * Un étudiant y figure quand sa dernière demande :
- * - est « Recevable » (`eligible`) ou confirmée par l'étudiant (`confirme`, « Admis à loger ») ;
+ * - est « Recevable » (`eligible`) ou admise à loger par la publication (`confirme`, `ResultatsAdmission`) ;
  * - a été approuvée en commission depuis les « Demandes validées » (`liste_approbation_commission` = `validees` ou vide —
  *   la file d'attente n'en fait pas partie), approbation encore valable (`RecevabiliteDemandes::approbationsCommission`) ;
  * - appartient à un volet (admission / réadmission) dont la liste a été publiée après cette approbation
@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\Schema;
  */
 class ListeDefinitivePubliee
 {
-    /** États du dossier d'un étudiant de la liste définitive : « Recevable », puis « Confirmé » (admis à loger). */
+    /** États du dossier d'un étudiant de la liste définitive : « Recevable », puis « Admis à loger ». */
     public const ETATS = ['eligible', 'confirme'];
 
     /** Liste publiée (`publication_liste_definitive.liste`) : les demandes validées, pas la file d'attente. */
@@ -32,7 +32,7 @@ class ListeDefinitivePubliee
 
     /**
      * Limite une requête d'étudiants aux candidats (filtre SQL) : sans affectation confirmée, dernière demande approuvée
-     * depuis les « Demandes validées », dossier « Recevable » ou « Confirmé ». `publies()` fait le contrôle complet.
+     * depuis les « Demandes validées », dossier « Recevable » ou « Admis à loger ». `publies()` fait le contrôle complet.
      */
     public function candidats(Builder $query): Builder
     {

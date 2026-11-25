@@ -58,8 +58,6 @@ type Demande = {
     documents: { id: string; nom: string; statut: 'valide' | 'rejete' | 'en_attente' }[];
     decision: Proposition | null;
     acceptee: boolean;
-    /** L'étudiant a déjà répondu (confirmé / accepté) : le délai de réponse n'a plus lieu d'être affiché. */
-    repondue: boolean;
 };
 
 type TableauDeBordProps = {
@@ -210,7 +208,7 @@ function VueResident({ resident, statut, anneeAcademique, aujourdHui }: TableauD
     );
 }
 
-/** Ordre du traitement : la vérification ne commence qu'après la confirmation de l'étudiant. */
+/** Ordre du traitement : la vérification est franchie à l'admission (liste définitive publiée). */
 const ETAPES = ['Soumission', 'Étude du dossier', 'Vérification', 'Attribution', 'Validation'];
 
 /** Jours restants avant l'échéance (fin de journée), recalculés chaque minute. */
@@ -249,10 +247,10 @@ function VueDemande({ demande, statut, anneeAcademique, aujourdHui }: TableauDeB
                 date={aujourdHui}
             />
 
-            <div className={cn('grid grid-cols-2 gap-3', demande.repondue ? 'lg:grid-cols-3' : 'lg:grid-cols-4')}>
+            <div className={cn('grid grid-cols-2 gap-3', demande.decision ? 'lg:grid-cols-4' : 'lg:grid-cols-3')}>
                 <StatCard compact label="Numéro de demande" value={demande.numero ?? '—'} tone="blue" />
                 <StatCard compact label="Soumise le" value={demande.soumiseLe ?? '—'} tone="green" />
-                {!demande.repondue && (
+                {demande.decision && (
                     <StatCard compact
                         label="Délai de validation"
                         value={demande.echeance ?? '—'}
@@ -265,26 +263,17 @@ function VueDemande({ demande, statut, anneeAcademique, aujourdHui }: TableauDeB
             </div>
 
             {/* Décision attendue de l'étudiant : placée avant le détail pour être vue en premier. */}
-            {(demande.decision || !demande.repondue) && (
+            {demande.decision && (
                 <section className="flex flex-col gap-3 rounded-brand border bg-white p-4 md:p-5">
-                    {demande.decision && (
-                        <>
-                            <p className="text-sm text-gray-900">
-                                {demande.decision.type === 'consentement'
-                                    ? 'Votre dossier est éligible. Souhaitez-vous toujours être logé(e) cette année ?'
-                                    : `Une chambre vous est proposée${demande.decision.chambre ? ` : ${demande.decision.chambre}` : ''}.`}
-                            </p>
-                            <ReponseProposition proposition={demande.decision} />
-                        </>
-                    )}
-
-                    {!demande.repondue && (
-                        <Notice icone={Info}>
-                            <strong className="font-medium">Important :</strong> vous devez accepter ou refuser cette demande avant le{' '}
-                            <strong className="font-medium">{demande.echeanceCourte ?? 'une date à préciser'}</strong>. Passé ce délai, votre demande sera
-                            traitée automatiquement.
-                        </Notice>
-                    )}
+                    <p className="text-sm text-gray-900">
+                        {`Une chambre vous est proposée${demande.decision.chambre ? ` : ${demande.decision.chambre}` : ''}.`}
+                    </p>
+                    <ReponseProposition proposition={demande.decision} />
+                    <Notice icone={Info}>
+                        <strong className="font-medium">Important :</strong> vous devez accepter ou refuser cette demande avant le{' '}
+                        <strong className="font-medium">{demande.echeanceCourte ?? 'une date à préciser'}</strong>. Passé ce délai, votre demande sera
+                        traitée automatiquement.
+                    </Notice>
                 </section>
             )}
 

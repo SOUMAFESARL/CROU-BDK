@@ -7,7 +7,7 @@ export const LIBELLES_ETAT_DOSSIER: Record<string, string> = {
     incomplet: 'Incomplet',
     en_etude: 'En étude',
     eligible: 'Recevable',
-    confirme: 'Confirmé par l’étudiant',
+    confirme: 'Admis à loger',
     pre_attribue: 'Pré-attribué',
     accepte: 'Accepté par l’étudiant',
     attribue_definitif: 'Attribué définitif',

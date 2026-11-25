@@ -20,7 +20,7 @@ use Tests\TestCase;
 
 class DossierWorkflowTest extends \Tests\Support\DossierTestCase
 {
-    public function test_full_cycle_requires_student_confirmation_before_definitive_allocation(): void
+    public function test_full_cycle_requires_the_published_list_before_definitive_allocation(): void
     {
         $dossier=$this->dossier('student',true);
         $this->assertSame('brouillon',$dossier->etat_dossier);
@@ -28,15 +28,15 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->workflow->admin($dossier->getKey(),'incomplet','Certificat à fournir.');
         $this->workflow->transition($dossier->getKey(),'soumis','etudiant','student','Certificat ajouté.');
         $this->workflow->admin($dossier->getKey(),'eligible');
-        // Éligible : liste « En attente » tant que l'étudiant n'a pas confirmé.
+        // Éligible : liste « En attente » tant que la liste définitive n'est pas publiée.
         $this->assertSame('en_attente',Etudiant::findOrFail('student')->statut_inscription);
         try {
             $this->service->allocateChambre(Etudiant::findOrFail('student'),Campagne::findOrFail('campaign'),Chambre::findOrFail('room'));
-            $this->fail('Attribution sans confirmation de l’étudiant');
+            $this->fail('Attribution avant la publication');
         } catch (ValidationException $e) { $this->assertArrayHasKey('etat_dossier',$e->errors()); }
         $this->assertDatabaseCount('assignation_chambres',0);
         $this->confirm();
-        // Confirmé : liste « En vérification », prêt pour l'attribution.
+        // Admis à loger : prêt pour l'attribution.
         $this->assertSame('confirme',$dossier->fresh()->etat_dossier);
         $this->assertSame('en_verification',Etudiant::findOrFail('student')->statut_inscription);
         $assignment=$this->allocate();
@@ -47,13 +47,15 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->assertSame('residents',Etudiant::findOrFail('student')->statut_inscription);
         $this->assertSame(['brouillon','soumis','incomplet','soumis','eligible','confirme','attribue_definitif'],
             $dossier->transitions()->pluck('nouvel_etat')->all());
-        $this->assertDatabaseHas('dossier_transitions',['demande_id'=>$dossier->getKey(),'nouvel_etat'=>'confirme','acteur_type'=>'etudiant','acteur_id'=>'student']);
+        $this->assertDatabaseHas('dossier_transitions',['demande_id'=>$dossier->getKey(),'nouvel_etat'=>'confirme','acteur_type'=>'systeme']);
     }
-    public function test_only_the_student_can_confirm_their_eligible_dossier(): void
+    public function test_neither_the_student_nor_an_agent_can_confirm_an_eligible_dossier(): void
     {
         $dossier=$this->eligibleRequest();
         try {$this->workflow->transition($dossier->getKey(),'confirme','etudiant','other');$this->fail('Autre étudiant autorisé');}
         catch(\Symfony\Component\HttpKernel\Exception\HttpException $e) {$this->assertSame(403,$e->getStatusCode());}
+        try {$this->workflow->transition($dossier->getKey(),'confirme','etudiant','student');$this->fail('Étudiant autorisé');}
+        catch(ValidationException $e) {$this->assertArrayHasKey('etat_dossier',$e->errors());}
         try {$this->workflow->admin($dossier->getKey(),'confirme');$this->fail('Agent autorisé');}
         catch(\Symfony\Component\HttpKernel\Exception\HttpException $e) {$this->assertSame(403,$e->getStatusCode());}
         $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
@@ -69,7 +71,14 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->assertSame('annuler',Etudiant::findOrFail('student')->statut_inscription);
         $this->assertDatabaseCount('assignation_chambres',0);
     }
-    public function test_student_space_answer_confirms_or_refuses_an_eligible_dossier(): void
+    public function test_publication_admits_to_housing_even_once_the_campaign_is_closed(): void
+    {
+        $dossier=$this->eligibleRequest();
+        DB::table('campagne')->update(['statut'=>'terminer']);
+        $this->confirm();
+        $this->assertSame('confirme',$dossier->fresh()->etat_dossier);
+    }
+    public function test_student_space_no_longer_confirms_an_eligible_dossier(): void
     {
         $dossier=$this->eligibleRequest();
         $this->actingAs(Etudiant::findOrFail('student'),'etudiant');
@@ -77,23 +86,8 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $refus=$service->validerDemandeEtudiant('student',['action'=>'refuser'],$dossier->getKey());
         $this->assertFalse($refus['success']);
         $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
-        $this->assertTrue($service->validerDemandeEtudiant('student',['action'=>'accepter'],$dossier->getKey())['success']);
-        $this->assertSame('confirme',$dossier->fresh()->etat_dossier);
-        $this->assertDatabaseHas('dossier_transitions',['nouvel_etat'=>'confirme','acteur_type'=>'etudiant','motif'=>'Demande d’hébergement confirmée par l’étudiant.']);
-    }
-    public function test_student_space_is_limited_to_the_dashboard_until_confirmation(): void
-    {
-        $dossier=$this->eligibleRequest();
-        $this->actingAs(Etudiant::findOrFail('student'),'etudiant');
-        $this->assertTrue(\App\Services\EtudiantMenu::confirmationAttendue(Etudiant::findOrFail('student')));
-        $requete=\Illuminate\Http\Request::create('/etudiant/dashboard');
-        $requete->setUserResolver(fn($guard=null)=>auth($guard)->user());
-        $menu=app(\App\Services\EtudiantMenu::class)->groupes($requete);
-        $this->assertSame(['Tableau de bord'],collect($menu)->flatMap(fn($groupe)=>array_column($groupe['items'],'label'))->all());
-        $this->get(route('etudiants.dashboard',['section'=>'paiements']))->assertRedirect(route('etudiants.dashboard'));
-        $this->get(route('etudiants.documents.personal'))->assertRedirect(route('etudiants.dashboard'));
-        $this->workflow->transition($dossier->getKey(),'confirme','etudiant','student');
-        $this->assertFalse(\App\Services\EtudiantMenu::confirmationAttendue(Etudiant::findOrFail('student')));
+        $this->assertFalse($service->validerDemandeEtudiant('student',['action'=>'accepter'],$dossier->getKey())['success']);
+        $this->assertSame('eligible',$dossier->fresh()->etat_dossier);
     }
     public function test_student_menu_is_limited_to_the_dashboard_until_a_room_is_assigned(): void
     {
@@ -337,19 +331,16 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->postJson(route('admin.dossiers.transition',$dossier),['etat'=>'incomplet','motif'=>'Pièce manquante.'])->assertForbidden();
         $this->assertSame('soumis',$dossier->fresh()->etat_dossier);
     }
-    public function test_credentials_are_sent_once_when_the_request_becomes_eligible(): void
+    public function test_no_credentials_are_sent_when_the_request_becomes_eligible_or_admitted(): void
     {
         Schema::table('etudiants', function (Blueprint $t) { $t->string('email1')->nullable(); $t->string('password')->nullable(); });
         DB::table('etudiants')->where('id_etudiant','student')->update(['email1'=>'etudiant@example.com']);
         \Illuminate\Support\Facades\Notification::fake();
-        $dossier=$this->dossier();
+        \Illuminate\Support\Facades\Queue::fake();
+        $this->eligibleRequest();
+        $this->confirm();
         \Illuminate\Support\Facades\Notification::assertNothingSent();
-        $this->workflow->admin($dossier->getKey(),'eligible');
-        \Illuminate\Support\Facades\Notification::assertSentOnDemandTimes(\App\Notifications\EtudiantIdentifiantsNotification::class,1);
-        $this->assertNotNull(DB::table('etudiants')->where('id_etudiant','student')->value('password'));
-        // Un nouveau passage en « Éligible » ne remplace pas le mot de passe déjà transmis.
-        $this->workflow->admin($dossier->getKey(),'soumis','Réexamen.');
-        $this->workflow->admin($dossier->getKey(),'eligible');
-        \Illuminate\Support\Facades\Notification::assertSentOnDemandTimes(\App\Notifications\EtudiantIdentifiantsNotification::class,1);
+        \Illuminate\Support\Facades\Queue::assertNothingPushed();
+        $this->assertNull(DB::table('etudiants')->where('id_etudiant','student')->value('password'));
     }
 }

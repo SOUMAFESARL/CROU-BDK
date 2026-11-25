@@ -18,7 +18,7 @@ class EtudiantDashboard
     /**
      * Étapes de la frise « Progression du traitement » : Soumission, Étude du dossier, Vérification,
      * Attribution, Validation. Nombre d'étapes franchies selon l'état du dossier (DossierWorkflow) :
-     * l'étude n'est terminée qu'à « Éligible », la vérification commence avec la confirmation de l'étudiant.
+     * l'étude n'est terminée qu'à « Éligible », la vérification est franchie à l'admission (liste définitive publiée).
      */
     public const ETAPES_FRANCHIES = [
         'soumis' => 1, 'incomplet' => 1, 'en_etude' => 1,
@@ -179,28 +179,15 @@ class EtudiantDashboard
             ])->values()->all(),
             'decision' => $this->decision($demande, $campagne),
             'acceptee' => $statut === 'Acceptée',
-            // L'étudiant a déjà confirmé son intérêt (ou accepté l'offre) : plus de délai de réponse à afficher.
-            'repondue' => in_array($demande?->etat_dossier, ['confirme', 'accepte', 'attribue_definitif', 'cloture'], true),
         ];
     }
 
     /**
-     * Réponse attendue de l'étudiant, vérifiée par AcceptOrRefuseDemande :
-     * - `consentement` : dossier `eligible`, l'étudiant confirme (ou refuse) qu'il souhaite toujours être logé ;
-     * - `proposition` : dossier `pre_attribue` (ancien parcours), avec la pré-attribution exigée par DossierWorkflow.
+     * Réponse attendue de l'étudiant, vérifiée par AcceptOrRefuseDemande : proposition de chambre d'un dossier
+     * `pre_attribue` (ancien parcours), avec la pré-attribution exigée par DossierWorkflow.
      */
     public function decision($demande, ?Campagne $campagne): ?array
     {
-        if ($demande && $demande->etat_dossier === 'eligible') {
-            return [
-                'type' => 'consentement',
-                'url' => route('etudiants.validation-demande', ['idDemande' => $demande->getKey()]),
-                'assignationId' => null,
-                'chambre' => null,
-                'annee' => $campagne?->annee_campagne,
-                'limite' => null,
-            ];
-        }
         if (! $demande || $demande->etat_dossier !== 'pre_attribue' || ! $demande->assignation_id) {
             return null;
         }
@@ -208,7 +195,6 @@ class EtudiantDashboard
         $chambre = $proposition?->chambre;
 
         return [
-            'type' => 'proposition',
             'url' => route('etudiants.validation-demande', ['idDemande' => $demande->getKey()]),
             'assignationId' => (string) $demande->assignation_id,
             'chambre' => $chambre

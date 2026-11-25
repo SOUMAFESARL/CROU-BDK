@@ -28,6 +28,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         (require database_path('migrations/2026_11_23_000002_create_admission_result_deliveries_table.php'))->up();
         (require database_path('migrations/2026_11_24_000004_add_body_html_to_admission_result_deliveries.php'))->up();
         (require database_path('migrations/2026_10_14_000002_create_etudiant_password_reset_tokens_table.php'))->up();
+        (require database_path('migrations/2026_11_25_000002_create_resultats_admission_table.php'))->up();
         Schema::table('admission_derogations', function (Blueprint $t) {
             $t->string('etudiant_id')->nullable();
             $t->string('campagne_id')->nullable();
@@ -955,40 +956,18 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
             ->assertRedirect()->assertSessionHas('error');
         // Réadmissions vides : rien à publier.
         $this->post(route('admin.hebergement.campagnes_admission.liste_definitive_publier', ['volet' => 'readmission']))->assertSessionHasErrors('publication');
-        // Type d'envoi choisi dans les notifications : SMS et e-mail, avec un corps commun.
-        Schema::table('config_app', function (Blueprint $t) {
-            foreach (['email_enabled', 'sms_enabled'] as $colonne) {
-                $t->boolean($colonne)->nullable();
-            }
-            foreach (['admission_sms_templates', 'region_id', 'ville_id', 'website'] as $colonne) {
-                $t->text($colonne)->nullable();
-            }
-        });
-        DB::table('config_app')->updateOrInsert(['config_id' => 'ed3acb1a-d6f6-45c0-979a-b6bbbc08cd05'], [
-            'email_enabled' => true, 'sms_enabled' => true, 'website' => 'https://crou-bondoukou.ci',
-            'admission_sms_templates' => json_encode(['definitive' => 'Bravo {{Nom_etudiant}}, {{libelle_campagne}}-{{annee_campagne}} {{lien_plateforme}} {{Email_etudiant}} {{password_étudiant}}', 'formatted' => ['definitive' => '<p><strong>Bravo {{Nom_etudiant}}</strong> {{password_étudiant}}</p>'], 'emails' => ['definitive' => ['subject' => 'Résultat']]]),
-        ]);
-        DB::table('etudiants')->where('id_etudiant', 'other')->update(['email1' => 'other@example.com', 'name' => 'N\'Guessan Awa']);
-        if (! Schema::hasColumn('etudiants', 'password')) {
-            Schema::table('etudiants', fn (Blueprint $t) => $t->string('password')->nullable());
-        }
-        foreach (['libelle', 'annee_campagne'] as $colonne) {
-            if (! Schema::hasColumn('campagne', $colonne)) {
-                Schema::table('campagne', fn (Blueprint $t) => $t->string($colonne)->nullable());
-            }
-        }
-        DB::table('campagne')->where('id_campagne', 'campaign')->update(['libelle' => 'Admission', 'annee_campagne' => '2026-2027']);
-        // Publication : le téléchargement apparaît, le bouton « Publier » disparaît.
-        $this->post($publier)->assertRedirect(route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives']))->assertSessionHasNoErrors();
-        // Informations entre accolades remplies, sauf le mot de passe (à l'envoi seulement).
-        $texte = 'Bravo N\'Guessan Awa, Admission-2026-2027 https://crou-bondoukou.ci other@example.com {{password_étudiant}}';
-        $envoi = fn (string $type) => DB::table('admission_result_deliveries')->where('channel', $type)->where('resultat', 'definitive')->where('body', 'like', '%Guessan%')->get(['subject', 'body', 'body_html'])->map(fn ($e) => (array) $e)->all();
-        $this->assertSame([['subject' => 'Résultat', 'body' => $texte, 'body_html' => '<p><strong>Bravo N&#039;Guessan Awa</strong> {{password_étudiant}}</p>']], $envoi('email'));
-        $this->assertSame([['subject' => null, 'body' => $texte, 'body_html' => null]], $envoi('sms'));
-        // Envoi immédiat après la publication, sans planificateur ; le SMS sans passerelle n'est pas transmis.
-        $this->assertSame('sent', DB::table('admission_result_deliveries')->where('channel', 'email')->where('destination', 'other@example.com')->value('status'));
-        $this->assertNotNull(DB::table('etudiants')->where('id_etudiant', 'other')->value('password'));
-        $this->assertFalse(DB::table('admission_result_deliveries')->where('channel', 'sms')->where('status', 'sent')->exists());
+        // Publication : le téléchargement apparaît, le bouton « Publier » disparaît. Aucun message n'est envoyé.
+        \Illuminate\Support\Facades\Mail::fake();
+        $this->post($publier)->assertRedirect(route('admin.hebergement.campagnes_admission.admission', ['etat' => 'definitives']))->assertSessionHasNoErrors()
+            ->assertSessionHas('success', fn ($message) => str_contains($message, '2 étudiants passent dans « Admis à loger »'));
+        \Illuminate\Support\Facades\Mail::assertNothingSent();
+        $this->assertSame(0, DB::table('admission_result_deliveries')->count());
+        // Les demandes validées passent dans « Admis à loger » et restent dans la liste définitive, avec leurs rangs.
+        $this->assertSame(['confirme'], DB::table('demande')->distinct()->pluck('etat_dossier')->all());
+        $this->assertSame(['en_verification'], DB::table('etudiants')->distinct()->pluck('statut_inscription')->all());
+        $this->assertSame([['other', 1], ['student', 2]], $rangs($liste('definitives')));
+        $this->assertSame(['toutes' => 0, 'definitives' => 2], array_intersect_key($liste('definitives')['stats'], ['toutes' => 0, 'definitives' => 0]));
+        $this->assertSame(['admis' => 2], DB::table('resultats_admission')->get()->countBy('resultat')->all());
         // Une publication par volet ayant des demandes approuvées (ici les admissions seules).
         $this->assertSame(['admission'], DB::table('publication_liste_definitive')->pluck('volet')->all());
         $definitives = $liste('definitives');
@@ -1002,7 +981,7 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         // File d'attente vide, donc jamais publiée : pas de téléchargement.
         $this->get(route('admin.hebergement.campagnes_admission.liste_definitive_export', ['liste' => 'attente', 'volet' => 'admission', 'format' => 'excel']))->assertRedirect();
         $demande = DB::table('demande')->where('etudiant_id', 'other')->first();
-        $this->assertSame(['eligible', 'limite', 'validees'], [$demande->etat_dossier, $demande->approbation_commission_par, $demande->liste_approbation_commission]);
+        $this->assertSame(['confirme', 'limite', 'validees'], [$demande->etat_dossier, $demande->approbation_commission_par, $demande->liste_approbation_commission]);
         $this->assertNotNull($demande->date_approbation_commission);
 
         // Liste validée vide : rien à approuver.
@@ -1038,12 +1017,9 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $definitives = $liste('definitives')['classement'];
         $this->assertSame([false, $publier, 1], [$definitives['publication']['publiee'], $definitives['publication']['url'], $definitives['publication']['validees']]);
         $this->assertNull($definitives['exports']);
-        // Messages désactivés (Configuration des messages) : la liste est publiée sans notification.
-        DB::table('admission_result_deliveries')->delete();
-        DB::table('config_app')->update(['admission_sms_templates' => json_encode(['enabled' => ['definitive' => false, 'attente' => false, 'irrecevable_ou_refusee' => false]])]);
-        $this->post($publier)->assertRedirect()->assertSessionHasNoErrors()
-            ->assertSessionHas('success', fn ($message) => str_contains($message, 'l’envoi des messages concernés est désactivé'));
-        $this->assertSame(0, DB::table('admission_result_deliveries')->count());
+        $this->post($publier)->assertRedirect()->assertSessionHasNoErrors()->assertSessionHas('success');
+        // Le dossier réexaminé (« Soumis », liste clôturée) n'est plus admis.
+        $this->assertSame(['other' => 'recevable_non_admis', 'student' => 'admis'], DB::table('resultats_admission')->orderBy('etudiant_id')->pluck('resultat', 'etudiant_id')->all());
         $this->assertNotNull($liste('definitives')['classement']['exports']);
     }
 

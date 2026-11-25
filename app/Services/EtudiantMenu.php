@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\AssignationChambre;
-use App\Models\DemandeEtudiant;
 use App\Models\Etudiant;
 use Illuminate\Http\Request;
 
@@ -26,9 +25,8 @@ class EtudiantMenu
      */
     public function groupes(Request $request): array
     {
-        // Dossier éligible non encore confirmé (réponse attendue) ou aucune chambre affectée : seul le tableau de bord est proposé.
-        $etudiant = $request->user('etudiant');
-        if (self::confirmationAttendue($etudiant) || self::sansChambre($etudiant)) {
+        // Aucune chambre affectée : seul le tableau de bord est proposé.
+        if (self::sansChambre($request->user('etudiant'))) {
             return [['label' => 'Principal', 'items' => [[
                 'label' => 'Tableau de bord', 'icon' => 'layout-dashboard', 'href' => route('etudiants.dashboard'),
                 'page' => 'dashboard', 'react' => true, 'active' => $request->routeIs('etudiants.dashboard'),
@@ -81,15 +79,6 @@ class EtudiantMenu
         }
 
         return $resultat;
-    }
-
-    /** La dernière demande de l'étudiant est « Éligible » : il doit confirmer ou refuser avant d'accéder au reste de l'espace. */
-    public static function confirmationAttendue(?Etudiant $etudiant): bool
-    {
-        // `statut_inscription` vaut « en_attente » pour un dossier éligible (DossierWorkflow) : évite une requête dans les autres cas.
-        return $etudiant?->exists === true && strtolower((string) $etudiant->statut_inscription) === 'en_attente'
-            && DemandeEtudiant::where('etudiant_id', $etudiant->getKey())
-            ->latest('created_at')->orderByDesc('id_demande')->value('etat_dossier') === 'eligible';
     }
 
     /** L'étudiant n'a aucune chambre affectée (assignation confirmée, comme Etudiant::chambreActuelle). */

@@ -1,7 +1,6 @@
 <?php
 namespace App\Http\Services;
 
-use App\Jobs\EnvoyerIdentifiantsEtudiant;
 use App\Models\{AdmissionDerogation,AssignationChambre,Campagne,DemandeEtudiant,Etudiant};
 use App\Repositories\Interfaces\EtudiantRepositoryInterface;
 use Illuminate\Support\Facades\{Auth,DB};
@@ -11,7 +10,7 @@ class DossierWorkflow
 {
     public const LABELS = [
         'brouillon'=>'Brouillon','soumis'=>'Soumis','incomplet'=>'Incomplet','en_etude'=>'En étude',
-        'eligible'=>'Recevable','confirme'=>'Confirmé par l’étudiant','pre_attribue'=>'Pré-attribué','accepte'=>'Accepté par l’étudiant',
+        'eligible'=>'Recevable','confirme'=>'Admis à loger','pre_attribue'=>'Pré-attribué','accepte'=>'Accepté par l’étudiant',
         'attribue_definitif'=>'Attribué définitif','refuse'=>'Refusé','annule'=>'Annulé',
         'expire'=>'Expiré','cloture'=>'Clôturé',
     ];
@@ -20,8 +19,8 @@ class DossierWorkflow
     public const NEXT = [
         'brouillon'=>['soumis','annule'], 'soumis'=>['incomplet','eligible','refuse','annule','expire'],
         'incomplet'=>['soumis','annule','expire'], 'en_etude'=>['incomplet','eligible','refuse','annule','expire'],
-        // L'étudiant éligible confirme (ou refuse) son intérêt avant toute attribution de chambre ;
-        // l'attribution depuis « Confirmé » est définitive (pre_attribue/accepte : dossiers de l'ancien parcours).
+        // La publication de la liste définitive admet à loger (`confirme`) les demandes validées (`ResultatsAdmission`) ;
+        // l'attribution depuis « Admis à loger » est définitive (pre_attribue/accepte : dossiers de l'ancien parcours).
         'eligible'=>['confirme','soumis','refuse','annule','expire'],
         'confirme'=>['attribue_definitif','soumis','refuse','annule','expire'],
         'pre_attribue'=>['accepte','refuse','eligible','confirme','annule','expire'],
@@ -74,9 +73,9 @@ class DossierWorkflow
             }
             if ($kind==='etudiant') {
                 abort_unless((string)$actorId===(string)$student->getKey(),403);
-                if (!in_array($to,['soumis','confirme','accepte','refuse','annule'],true)
+                if ($to==='confirme') $this->invalid('Vous n’avez plus à confirmer votre demande : consultez votre résultat après la publication de la liste définitive.');
+                if (!in_array($to,['soumis','accepte','refuse','annule'],true)
                     || ($to==='soumis' && !in_array($from,['brouillon','incomplet'],true))
-                    || ($to==='confirme' && $from!=='eligible')
                     || ($to==='refuse' && !in_array($from,['eligible','pre_attribue'],true))
                     || ($to==='annule' && !in_array($from,['brouillon','soumis','incomplet'],true))) abort(403);
             } elseif ($kind==='admin') {
@@ -101,17 +100,20 @@ class DossierWorkflow
                     $reason=DecisionAutomatiqueDossier::PREFIXE_LEVEE.trim((string)$reason);
                 }
             } elseif ($kind==='systeme') {
-                // « Éligible » : décision automatique du barème, uniquement sur un dossier soumis.
-                if (!in_array($to,['soumis','eligible','expire','refuse','annule','cloture'],true)
+                // « Éligible » : décision automatique du barème, uniquement sur un dossier soumis ;
+                // « Admis à loger » : publication de la liste définitive (`ResultatsAdmission`).
+                if (!in_array($to,['soumis','eligible','confirme','expire','refuse','annule','cloture'],true)
                     || ($to==='soumis' && !in_array($from,['brouillon','incomplet'],true))
-                    || ($to==='eligible' && $from!=='soumis')) abort(403);
+                    || ($to==='eligible' && $from!=='soumis')
+                    || ($to==='confirme' && $from!=='eligible')) abort(403);
             } else abort(403);
             if (in_array($to,['incomplet','refuse','annule','expire'],true) || ($from==='refuse')) {
                 if (trim((string)$reason)==='') $this->invalid('Le motif de cette transition est obligatoire.');
             }
             if (in_array($to,['soumis','en_etude','eligible','confirme','pre_attribue','accepte','attribue_definitif'],true)) {
                 $campaign=Campagne::findOrFail($request->campagne_id);
-                if ($campaign->statut!=='active') $this->invalid('La campagne n’est plus active.');
+                // La liste définitive peut être publiée après la clôture de la campagne.
+                if ($campaign->statut!=='active' && !($to==='confirme' && $kind==='systeme')) $this->invalid('La campagne n’est plus active.');
                 if ($to==='soumis' && $kind!=='admin' && $campaign->date_echeance_demande
                     && \Carbon\Carbon::parse($campaign->date_echeance_demande)->endOfDay()->isPast()) {
                     $this->invalid('Le délai de dépôt est dépassé.');
@@ -181,16 +183,11 @@ class DossierWorkflow
             $latest=DemandeEtudiant::where('etudiant_id',$student->getKey())->latest('created_at')->orderByDesc('id_demande')->value('id_demande');
             if ($latest===$id) {
                 $student->update(['statut_inscription'=>match($to) {
-                    // Éligible : en attente de la confirmation de l'étudiant ; confirmé : en vérification (attribution).
+                    // Éligible : en attente de la publication ; confirmé : « Admis à loger » (paiement puis attribution).
                     'eligible'=>'en_attente','confirme','pre_attribue','accepte'=>'en_verification',
                     'attribue_definitif'=>'residents','refuse','annule','expire'=>'annuler',
                     'cloture'=>'archivee',default=>'demande',
                 }]);
-            }
-            // Le mot de passe de l'espace étudiant n'est créé et envoyé qu'au premier passage en « Éligible »,
-            // en file d'attente pour ne pas suspendre la requête à la disponibilité du serveur SMTP.
-            if ($to==='eligible' && app(IdentifiantsEtudiant::class)->aEnvoyer($student)) {
-                EnvoyerIdentifiantsEtudiant::dispatch($student->getKey())->afterCommit();
             }
             // Soumission par l'étudiant : éligibilité ou refus automatique selon le barème de la campagne.
             if ($to==='soumis' && $kind==='etudiant') {

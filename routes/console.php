@@ -20,7 +20,16 @@ Artisan::command('admissions:notifier {--watch : Traiter les résultats chaque m
     }
 })->purpose('Transmettre les notifications des résultats publiés.');
 
-\Illuminate\Support\Facades\Schedule::command('admissions:notifier')->everyMinute()->withoutOverlapping(30);
+// `admissions:notifier` n'est plus planifiée (25/11/2026) : la publication n'envoie plus de message, les étudiants
+// consultent leur résultat sur la plateforme (`/resultats`).
+
+Artisan::command('admissions:appliquer-publications', function (\App\Http\Services\Eligibilite\ResultatsAdmission $resultats) {
+    $bilan = $resultats->appliquerPublications();
+    $this->info($bilan['admis'].' étudiant(s) passé(s) dans « Admis à loger » ; résultats consultables sur /resultats.');
+    foreach ($bilan['bloques'] as $motif) {
+        $this->warn($motif);
+    }
+})->purpose('Appliquer les publications de listes définitives antérieures (résultats et « Admis à loger »).');
 
 \Illuminate\Support\Facades\Schedule::command('hebergement:entrees')->everyMinute()->withoutOverlapping();
 
