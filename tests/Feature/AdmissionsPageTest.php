@@ -523,6 +523,47 @@ class AdmissionsPageTest extends \Tests\Support\DossierTestCase
         $this->assertArrayNotHasKey('options', $props);
     }
 
+    public function test_fiche_de_demande_imprimable_avec_les_droits_sur_les_informations_et_les_documents(): void
+    {
+        Schema::dropIfExists('document_etudiant');
+        Schema::create('document_etudiant', function (Blueprint $t) {
+            $t->string('id_document')->primary();
+            foreach (['id_campagne', 'etudiant_id', 'type_document', 'chemin_fichier', 'statut'] as $colonne) {
+                $t->string($colonne)->nullable();
+            }
+            $t->timestamps();
+        });
+        $demande = \App\Models\DemandeEtudiant::where('etudiant_id', 'student')->firstOrFail();
+        $url = route(AdmissionPermissions::ROUTE.'fiche_demande', $demande->getKey());
+        $lien = fn () => $this->page('show', ['id' => 'student'], '/admin/gestion-hebergement/campagnes_admissions/student')['props']['urls']['fiche'];
+
+        // Il manque le droit sur les documents, puis celui sur les informations personnelles.
+        foreach (['hebergement.admissions.personal', 'hebergement.admissions.documents'] as $droit) {
+            $this->agentLimite([$droit]);
+            $this->assertNull($lien());
+            $this->get($url)->assertForbidden();
+        }
+
+        $this->agentLimite(['hebergement.admissions.personal', 'hebergement.admissions.documents']);
+        $this->assertSame($url, $lien());
+        $reponse = $this->get($url)->assertOk()->assertHeader('content-type', 'application/pdf');
+        // Aperçu dans la page par défaut ; téléchargement à la demande.
+        $this->assertStringStartsWith('inline', $reponse->headers->get('content-disposition'));
+        $telechargement = $this->get($url.'?telecharger=1')->assertOk()->headers->get('content-disposition');
+        $this->assertStringStartsWith('attachment', $telechargement);
+        $this->assertStringContainsString('fiche-demande-'.$demande->numero_demande.'.pdf', $telechargement);
+
+        // Sans aucun droit de consultation du dossier lui-même.
+        $this->agentLimite(['hebergement.admissions.personal', 'hebergement.admissions.documents'], granular: true);
+        $this->get($url)->assertForbidden();
+
+        // Un brouillon n'a pas de fiche.
+        $this->agentLimite(['hebergement.admissions.personal', 'hebergement.admissions.documents']);
+        DB::table('demande')->where('id_demande', $demande->getKey())->update(['etat_dossier' => 'brouillon']);
+        $this->assertNull($lien());
+        $this->get($url)->assertNotFound();
+    }
+
     public function test_l_administration_modifie_les_informations_saisies_par_l_etudiant(): void
     {
         $this->agentLimite(['hebergement.admissions.update']);

@@ -275,24 +275,11 @@ class CampagnesAdmissionController extends Controller
         $derniere = $etudiant->derniereDemande;
         $url = fn (string $route, array $parametres = []) => $access->allows($admin, $route) ? route($route, $parametres) : null;
         $permissions = app(AdmissionPermissions::class);
-        $voirAdmissions = $permissions->allows($admin, 'toutes');
-        if (!$voirAdmissions && $derniere) {
-            $classe = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classe($etudiant);
-            $scope = match ($classe) {
-                \App\Http\Services\Eligibilite\RecevabiliteDemandes::REJETEE => 'rejetees',
-                \App\Http\Services\Eligibilite\RecevabiliteDemandes::REFUSEE => 'refusees',
-                \App\Http\Services\Eligibilite\RecevabiliteDemandes::DEFINITIVE => 'definitive_'.($derniere->liste_approbation_commission === 'attente' ? 'attente' : 'validees'),
-                default => $this->scopeDossier($etudiant, $classe),
-            };
-            $voirAdmissions = ($scope && $permissions->allows($admin, $scope))
-                || ($classe === \App\Http\Services\Eligibilite\RecevabiliteDemandes::RECEVABLE && $permissions->allows($admin, 'recevables_demandes'));
-        }
+        $voirAdmissions = $this->voirAdmissions($admin, $etudiant);
         // Réclamations de l'étudiant (motif sous « Documents fournis ») : leur droit de consultation ouvre aussi la fiche,
         // sans donner les blocs personnels, documents et historique ni la dérogation.
         $reclamationService = app(\App\Http\Services\ReclamationService::class);
-        $reclamations = $vues->allows($admin, 'admissions.reclamations') && $reclamationService->disponible()
-            ? \App\Models\Reclamation::with('campagne')->where('etudiant_id', $etudiant->getKey())->orderByDesc('created_at')->get()
-            : collect();
+        $reclamations = $this->reclamationsVisibles($admin, $etudiant);
         abort_unless($voirAdmissions || $reclamations->isNotEmpty() || $admin->hasPermission('hebergement.residents.view'), 403);
         // Bouton « Déroger » : demande des listes « Demandes irrecevables » ou « Demandes refusées », tant que la liste
         // des demandes validées de son volet n'est pas approuvée en commission (`AdmissionDerogationService::obstacle`).
@@ -368,6 +355,9 @@ class CampagnesAdmissionController extends Controller
             'urls' => [
                 'admissions' => $url('admin.hebergement.campagnes_admission.admission'),
                 'deroger' => $deroger,
+                // Fiche de demande (PDF) identique à celle de l'étudiant.
+                'fiche' => $derniere && $this->voirFiche($admin) && app(\App\Http\Services\FicheDemandeService::class)->disponible($derniere)
+                    ? route('admin.hebergement.campagnes_admission.fiche_demande', $derniere->getKey()) : null,
                 // Fiche ouverte depuis la liste des réclamations : retour à cette liste.
                 'reclamations' => $request->query('origine') === 'reclamations' && $vues->allows($admin, 'admissions.reclamations')
                     ? $url('admin.hebergement.reclamations.liste') : null,
@@ -1280,6 +1270,66 @@ class CampagnesAdmissionController extends Controller
             \App\Http\Services\Eligibilite\RecevabiliteDemandes::EN_ATTENTE => 'commission_attente',
             default => null,
         };
+    }
+
+    /**
+     * Fiche de demande (PDF) telle que proposée à l'étudiant (`FicheDemandeService`). Même accès que la page du dossier,
+     * avec les droits sur les informations personnelles et sur les documents, que la fiche reprend.
+     */
+    public function ficheDemande(Request $request, string $demande, \App\Http\Services\FicheDemandeService $fiche)
+    {
+        $admin = $request->user('admin');
+        $dossier = DemandeEtudiant::findOrFail($demande);
+        $etudiant = app(\App\Services\AdminStudentView::class)->find((string) $dossier->etudiant_id, $admin);
+        abort_unless($this->voirFiche($admin) && (
+            $this->voirAdmissions($admin, $etudiant)
+            || $this->reclamationsVisibles($admin, $etudiant)->isNotEmpty()
+            || $admin->hasPermission('hebergement.residents.view')
+        ), 403);
+        abort_unless($fiche->disponible($dossier), 404);
+
+        // Affichée dans la page (aperçu, impression), ou enregistrée avec ?telecharger=1.
+        $pdf = $fiche->pdf($dossier);
+        $nom = $fiche->nomFichier($dossier);
+
+        return ($request->boolean('telecharger') ? $pdf->download($nom) : $pdf->stream($nom))->header('Cache-Control', 'private, no-store');
+    }
+
+    private function voirFiche($admin): bool
+    {
+        $vues = app(AdminViewAccess::class);
+
+        return app(AdminAccess::class)->allows($admin, 'admin.hebergement.campagnes_admission.fiche_demande')
+            && $vues->allows($admin, 'admissions.personal') && $vues->allows($admin, 'admissions.documents');
+    }
+
+    /** Droit de consulter le dossier par les admissions : « Toutes les demandes », ou la liste où il se trouve. */
+    private function voirAdmissions($admin, Etudiant $etudiant): bool
+    {
+        $permissions = app(AdmissionPermissions::class);
+        $derniere = $etudiant->derniereDemande;
+        $voirAdmissions = $permissions->allows($admin, 'toutes');
+        if (!$voirAdmissions && $derniere) {
+            $classe = app(\App\Http\Services\Eligibilite\RecevabiliteDemandes::class)->classe($etudiant);
+            $scope = match ($classe) {
+                \App\Http\Services\Eligibilite\RecevabiliteDemandes::REJETEE => 'rejetees',
+                \App\Http\Services\Eligibilite\RecevabiliteDemandes::REFUSEE => 'refusees',
+                \App\Http\Services\Eligibilite\RecevabiliteDemandes::DEFINITIVE => 'definitive_'.($derniere->liste_approbation_commission === 'attente' ? 'attente' : 'validees'),
+                default => $this->scopeDossier($etudiant, $classe),
+            };
+            $voirAdmissions = ($scope && $permissions->allows($admin, $scope))
+                || ($classe === \App\Http\Services\Eligibilite\RecevabiliteDemandes::RECEVABLE && $permissions->allows($admin, 'recevables_demandes'));
+        }
+
+        return $voirAdmissions;
+    }
+
+    /** Réclamations de l'étudiant, si l'agent a le droit de les consulter. */
+    private function reclamationsVisibles($admin, Etudiant $etudiant): \Illuminate\Support\Collection
+    {
+        return app(AdminViewAccess::class)->allows($admin, 'admissions.reclamations') && app(\App\Http\Services\ReclamationService::class)->disponible()
+            ? \App\Models\Reclamation::with('campagne')->where('etudiant_id', $etudiant->getKey())->orderByDesc('created_at')->get()
+            : collect();
     }
 
     public function deciderDansListe(Request $request, DemandeEtudiant $demande)

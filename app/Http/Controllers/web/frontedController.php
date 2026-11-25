@@ -150,6 +150,8 @@ class  frontedController extends Controller
             'villes' => Ville::orderBy('name')->get(['id', 'name', 'region_id'])
                 ->map(fn ($ville) => ['id' => (string) $ville->id, 'libelle' => (string) $ville->name, 'region' => (string) $ville->region_id])
                 ->values(),
+            // Demande qui vient d'être enregistrée : lien signé vers sa fiche PDF (écran de confirmation).
+            'ficheUrl' => session('ficheUrl'),
             'liens' => [
                 'envoyer' => route('register.post'),
                 'connexion' => route('etudiant.login'),
@@ -288,7 +290,13 @@ class  frontedController extends Controller
             ? 'Connectez-vous à votre espace étudiant avec vos identifiants habituels pour suivre votre demande.'
             : $this->envoyerIdentifiants($result['data'], $finalisation['data']['etat_dossier'] ?? null);
 
-        return back()->with('success', $finalisation['message'].' '.$suite);
+        $fiche = app(\App\Http\Services\FicheDemandeService::class);
+        $dossier = \App\Models\DemandeEtudiant::find($demande['data']['id_demande'] ?? null);
+
+        return back()
+            ->with('success', $finalisation['message'].' '.$suite)
+            // Compte existant reconnu sans mot de passe : fiche sans les données personnelles déjà enregistrées.
+            ->with('ficheUrl', $dossier && $fiche->disponible($dossier) ? $fiche->lienPublic($dossier, $existant !== null) : null);
 
     } catch (\Exception $e) {
         DB::rollBack();

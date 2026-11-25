@@ -271,6 +271,8 @@ Route::middleware(['admin'])->group(function () {
             Route::delete('/campagnes/{id}', 'destroyCampagne')->name('destroy_campagne');
             Route::get('/validateDocument/{documentId}/{statut}/{message?}', 'valideDocument')->name('validate_document');
             Route::put('/etudiants/{etudiant}', 'updateEtudiant')->name('update_etudiant');
+            // Fiche de demande (PDF), la même que celle proposée à l'étudiant.
+            Route::get('/demandes/{demande}/fiche', 'ficheDemande')->name('fiche_demande');
             Route::get('/{id}',  'show')->name('show');
             Route::post('/traiter-demande/{id}',  'submitTraitement')->name('submit-traitement');
             Route::post('/refus-automatiques/eligibles', 'leverRefusAutomatiques')->name('lever_refus_automatiques');

@@ -26,6 +26,9 @@ class EtudiantPaiements
         'rembourse' => ['Remboursé', 'info'],
     ];
 
+    /** Onglets de la page (`?onglet=`) : « Situation » par défaut. */
+    public const ONGLETS = ['situation', 'loyers', 'en-ligne', 'historique'];
+
     private const MOIS = [1 => 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
     public function __construct(private OnlinePaymentService $paiementsEnLigne) {}
@@ -40,9 +43,14 @@ class EtudiantPaiements
             ->whereIn('statut_paiement', array_keys(self::STATUTS))
             ->when($statut, fn ($q) => $q->where('statut_paiement', $statut))
             ->latest('created_at')->orderByDesc('id_paiement')
-            ->paginate(10)->withPath(route('etudiants.dashboard'))->appends($request->except('page'));
+            ->paginate(10)->withPath(route('etudiants.dashboard'))->appends(['onglet' => 'historique'] + $request->except(['page', 'onglet']));
+
+        // Un ancien lien filtré ou paginé (sans `onglet`) ouvre directement l'historique.
+        $onglet = $request->query('onglet');
+        $parDefaut = $statut || $request->query('page') ? 'historique' : 'situation';
 
         return [
+            'onglet' => in_array($onglet, self::ONGLETS, true) ? $onglet : $parDefaut,
             'situation' => $this->situation($loyers),
             'reglement' => $this->reglement($id, (string) $etudiant->telephone1),
             'loyers' => $loyers->take(12)->map(fn (Loyer $loyer) => $this->loyer($loyer))->values()->all(),

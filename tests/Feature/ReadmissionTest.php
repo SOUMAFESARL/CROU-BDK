@@ -229,7 +229,7 @@ class ReadmissionTest extends \Tests\Support\DossierTestCase
         $this->assertSame('soumis',DemandeEtudiant::firstOrFail()->etat_dossier);
         // Filière saisie librement : ajoutée au référentiel puis enregistrée sur le dossier.
         $this->assertSame((string)DB::table('filiere')->where('name','Génie civil')->value('id_filiere'),(string)DemandeEtudiant::firstOrFail()->filiere_code);
-        $this->assertSame('Votre demande de réadmission a été soumise avec votre compte existant.',session('success'));
+        $this->assertSame('Votre demande de réadmission a été soumise avec votre compte existant. Vous pouvez télécharger votre fiche de demande.',session('success'));
     }
     public function test_admin_import_associates_existing_student_without_creating_an_account(): void
     {

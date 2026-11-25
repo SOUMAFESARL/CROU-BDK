@@ -14,6 +14,7 @@ Route::middleware(['etudiants'])->group(function () {
 
     Route::post('/dossiers/{demande}/transition', [\App\Http\Controllers\DossierWorkflowController::class,'student'])
         ->middleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class)->name('dossiers.transition');
+    Route::get('/demandes/{demande}/fiche', [\App\Http\Controllers\FicheDemandeController::class, 'etudiant'])->name('demandes.fiche');
     Route::get('/mon-contrat/approbation', [\App\Http\Controllers\etudiant\ContractApprovalController::class, 'show'])->name('contract.approval');
     Route::post('/mon-contrat/approbation', [\App\Http\Controllers\etudiant\ContractApprovalController::class, 'store'])
         ->middleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class)->name('contract.approve');

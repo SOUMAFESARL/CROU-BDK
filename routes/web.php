@@ -51,6 +51,10 @@ Route::controller(frontedController::class)->group(function () {
 
 });
 
+// Fiche de demande (PDF) proposée à la fin du formulaire public : lien signé temporaire (FicheDemandeService::lienPublic).
+Route::get('/demande/{demande}/fiche', [\App\Http\Controllers\FicheDemandeController::class, 'publique'])
+    ->middleware(['signed:relative', 'throttle:60,1'])->name('etudiant.demande.fiche');
+
 // Réclamation sur une demande d'hébergement (pendant une période de réclamation ouverte)
 Route::controller(ReclamationPubliqueController::class)->group(function () {
     Route::get('/reclamation', 'create')->name('etudiant.reclamation');

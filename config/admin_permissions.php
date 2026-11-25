@@ -44,6 +44,8 @@ return [
         'admin.hebergement.campagnes_admission.derogations.store' => 'hebergement.admissions.derogations.deroger',
         'admin.hebergement.campagnes_admission.destroy_campagne' => 'hebergement.admissions.delete',
         'admin.hebergement.campagnes_admission.edit_campagne' => 'hebergement.admissions.update',
+        // Mêmes droits que la page du dossier (show) ; le contrôleur exige aussi ceux sur les informations personnelles et les documents.
+        'admin.hebergement.campagnes_admission.fiche_demande' => [...AdmissionPermissions::slugs('view'), 'hebergement.admissions.view', 'hebergement.reclamations.view', 'hebergement.residents.view'],
         'admin.hebergement.campagnes_admission.lever_refus_automatiques' => 'hebergement.admissions.derogations.deroger',
         'admin.hebergement.campagnes_admission.liste_provisoire_export' => AdmissionPermissions::slugs('export'),
         'admin.hebergement.campagnes_admission.liste_provisoire_valider' => AdmissionPermissions::slug('provisoire_admission', 'valider'),

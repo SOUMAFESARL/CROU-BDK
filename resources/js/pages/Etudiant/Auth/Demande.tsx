@@ -1,6 +1,6 @@
 import { Head, usePage } from '@inertiajs/react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, FileText, Info, Loader2, LogIn, Mail, Phone, Send } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Download, FileText, Info, Loader2, LogIn, Mail, Phone, Send } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { type Control, Controller, type FieldPath, useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -43,6 +43,8 @@ type DemandeProps = {
     filieres: Option[];
     regions: Option[];
     villes: (Option & { region: string })[];
+    /** Fiche PDF de la demande qui vient d'être enregistrée (lien signé temporaire). */
+    ficheUrl: string | null;
     liens: { envoyer: string; connexion: string };
     logoUrl: string;
     year: number;
@@ -81,6 +83,21 @@ export default function Demande(props: DemandeProps) {
         contenu = (
             <Carte surtitre={`Campagne ${props.campagne.annee}`} titre="Demande enregistrée">
                 <Notice icone={CheckCircle2}>{flash.success}</Notice>
+                {props.ficheUrl && (
+                    <div className="mt-4 flex flex-col gap-3 rounded-brand border p-4 sm:flex-row sm:items-center">
+                        <span className="grid size-10 shrink-0 place-items-center rounded-brand bg-soft text-primary">
+                            <FileText {...ICON} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-gray-900">Votre fiche de demande</p>
+                            <p className="text-xs text-muted">Téléchargez-la maintenant et conservez-la : elle récapitule votre demande et porte son numéro.</p>
+                        </div>
+                        <a href={props.ficheUrl} className={cn(buttonVariants(), 'shrink-0 font-medium')}>
+                            <Download {...ICON} />
+                            Télécharger la fiche
+                        </a>
+                    </div>
+                )}
             </Carte>
         );
     } else if (!demarre) {
@@ -286,8 +303,8 @@ function Formulaire({
     const allerA = (cible: number) => afficher(cible);
     const manquants = champsManquants(schema, useWatch({ control }), CHAMPS_ETAPE, {
         ...Object.fromEntries(documents.map((document) => [`documents.${document.slug}`, document.nom])),
-        certifie: 'Certification de l’exactitude des informations',
-    });
+        // La certification n’est pas rappelée : la case est juste au-dessus du bouton d’envoi, qui reste désactivé sans elle.
+    }).filter((item) => item.cle !== 'certifie');
 
     const soumettre = handleSubmit(
         async (donnees) => {

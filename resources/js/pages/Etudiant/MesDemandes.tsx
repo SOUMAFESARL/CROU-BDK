@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { BedDouble, Check, ChevronRight, CircleDot, DoorOpen, FilePen, FilePlus, FolderOpen, History, Info as InfoIcone, Inbox, KeyRound, Loader2, Send, XCircle } from 'lucide-react';
+import { BedDouble, Check, ChevronRight, CircleDot, DoorOpen, Download, FilePen, FilePlus, FolderOpen, History, Info as InfoIcone, Inbox, KeyRound, Loader2, Send, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { DemandeSortie, type FormulaireSortie } from '@/components/etudiant/demande-sortie';
@@ -40,6 +40,8 @@ type Dossier = {
     proposition: { chambre: string; limite: string | null } | null;
     decision: Proposition | null;
     actions: Action[];
+    /** Fiche de demande (PDF) ; null pour un brouillon. */
+    ficheUrl: string | null;
     transitionUrl: string;
     historique: { id: number; date: string | null; etat: string; auteur: string; motif: string | null }[];
 };
@@ -61,7 +63,7 @@ type Sortie = {
 
 type MesDemandesProps = {
     dossier: Dossier | null;
-    autres: { id: string; annee: string | null; reference: string; soumiseLe: string | null; etat: Etat; moyenne: string | number | null; credits: string | number | null }[];
+    autres: { id: string; annee: string | null; reference: string; soumiseLe: string | null; etat: Etat; moyenne: string | number | null; credits: string | number | null; ficheUrl: string | null }[];
     sortie: Sortie;
     focusSortie: boolean;
     /** Déjà logé par le CROU : une nouvelle demande passe par la réadmission ; sinon par le formulaire public de la campagne ouverte. */
@@ -184,6 +186,12 @@ export default function MesDemandes({ dossier, autres, sortie, focusSortie, deja
                                                         .filter(Boolean)
                                                         .join(' · ')}
                                                 </p>
+                                                {demande.ficheUrl && (
+                                                    <a href={demande.ficheUrl} className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
+                                                        <Download {...ICON} />
+                                                        Fiche de demande
+                                                    </a>
+                                                )}
                                             </div>
                                         </li>
                                     ))}
@@ -262,8 +270,14 @@ function SuiviDossier({ dossier }: { dossier: Dossier }) {
                 </div>
             )}
 
-            {dossier.actions.length > 0 && (
+            {(dossier.ficheUrl || dossier.actions.length > 0) && (
                 <div className="flex flex-col gap-2 sm:flex-row">
+                    {dossier.ficheUrl && (
+                        <a href={dossier.ficheUrl} className={cn(buttonVariants({ variant: 'secondary' }), 'font-medium')}>
+                            <Download {...ICON} />
+                            Télécharger ma fiche de demande
+                        </a>
+                    )}
                     {dossier.actions.map((item) => (
                         <Button
                             key={item.etat}

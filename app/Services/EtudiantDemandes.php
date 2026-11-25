@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Http\Services\DossierWorkflow;
+use App\Http\Services\FicheDemandeService;
 use App\Models\AssignationChambre;
 use App\Models\Campagne;
 use App\Models\DemandeEtudiant;
@@ -53,6 +54,7 @@ class EtudiantDemandes
                 'etat' => $this->etat($demande->etat_dossier),
                 'moyenne' => $demande->moyenne,
                 'credits' => $demande->credit_valider,
+                'ficheUrl' => app(FicheDemandeService::class)->lienEspaceEtudiant($demande),
             ])->values()->all(),
             'sortie' => $this->sortie($etudiant),
             'focusSortie' => $focusSortie,
@@ -98,6 +100,8 @@ class EtudiantDemandes
             // Répondre à une proposition (ancien parcours) : même chemin que le tableau de bord (ReponseProposition).
             'decision' => app(EtudiantDashboard::class)->decision($demande, $campagne instanceof Campagne ? $campagne : null),
             'actions' => $this->actions($etat),
+            // Fiche de demande (PDF), dès que la demande est soumise.
+            'ficheUrl' => app(FicheDemandeService::class)->lienEspaceEtudiant($demande),
             'transitionUrl' => route('etudiants.dossiers.transition', $demande->getKey()),
             'historique' => $demande->transitions->sortByDesc('id')->map(fn ($transition) => [
                 'id' => $transition->getKey(),

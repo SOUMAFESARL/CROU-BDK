@@ -78,7 +78,7 @@ class ReadmissionPageController extends Controller
         }
 
         return redirect()->route('etudiants.dashboard', ['section' => 'demandes'])
-            ->with('success', 'Votre demande de réadmission a été soumise avec votre compte existant.');
+            ->with('success', 'Votre demande de réadmission a été soumise avec votre compte existant. Vous pouvez télécharger votre fiche de demande.');
     }
 
     /** « Libellé – année » ; l'un ou l'autre seul s'il manque une information. */

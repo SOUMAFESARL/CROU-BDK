@@ -126,6 +126,20 @@ class StudentPaymentsPageTest extends TestCase
         $this->assertSame(url('/etudiant/paiements-en-ligne/op-1'), $props['enLigne'][0]['url']);
     }
 
+    public function test_open_tab_comes_from_the_url_and_history_links_stay_on_history(): void
+    {
+        $this->assertSame('situation', $this->props()['onglet']);
+        $this->assertSame('loyers', $this->props(['onglet' => 'loyers'])['onglet']);
+        $this->assertSame('situation', $this->props(['onglet' => 'inconnu'])['onglet']);
+        $this->assertSame('historique', $this->props(['statut' => 'valide'])['onglet']);
+
+        DB::table('paiements')->insert(array_map(fn ($i) => ['id_paiement' => "p-$i", 'numero_paiement' => "PAY-1$i", 'resident_id' => 'student',
+            'mois' => null, 'methode_paiement' => null, 'statut_paiement' => 'valide', 'montant' => 100, 'created_at' => now()], range(1, 12)));
+        $suivant = $this->props(['onglet' => 'loyers'])['pagination']['suivant'];
+        $this->assertStringContainsString('onglet=historique', $suivant);
+        $this->assertStringNotContainsString('onglet=loyers', $suivant);
+    }
+
     public function test_nothing_is_payable_without_an_occupied_room(): void
     {
         DB::table('assignation_chambres')->update(['statut' => 'annulee']);

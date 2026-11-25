@@ -15,6 +15,7 @@ import {
     Loader2,
     MessageSquareWarning,
     PenLine,
+    Printer,
     Scale,
     ShieldAlert,
     TriangleAlert,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { ETATS_SANS_BADGE, EtatDossierBadge } from '@/components/dossier/etat-dossier-badge';
+import { FicheDemandeDialog } from '@/components/dossier/fiche-demande-dialog';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
@@ -114,8 +116,9 @@ type Props = {
     /**
      * `deroger` : bouton « Déroger » (demande des listes « Demandes irrecevables » ou « Demandes refusées », liste des
      * demandes validées de son volet pas encore approuvée en commission) ; null sinon ou sans le droit de déroger.
+     * `fiche` : fiche de demande (PDF) identique à celle de l'étudiant ; null pour un brouillon ou sans les droits.
      */
-    urls: { admissions: string | null; deroger: string | null; reclamations: string | null; resultats: string | null };
+    urls: { admissions: string | null; deroger: string | null; fiche: string | null; reclamations: string | null; resultats: string | null };
 };
 
 const ETATS_REGLE = {
@@ -144,6 +147,7 @@ export default function AdmissionShow(props: Props) {
     const retour = urls.reclamations ?? urls.resultats ?? urls.admissions;
     const libelleRetour = urls.reclamations ? 'Retour aux réclamations' : urls.resultats ? 'Retour aux résultats d’admission' : 'Retour aux admissions';
     const [aDeroger, setADeroger] = useState(false);
+    const [ficheOuverte, setFicheOuverte] = useState(false);
 
     return (
         <AdminLayout title="Traiter la demande">
@@ -164,7 +168,7 @@ export default function AdmissionShow(props: Props) {
                     </div>
                 }
                 actions={
-                    (retour || urls.deroger) && (
+                    (retour || urls.fiche || urls.deroger) && (
                         <>
                             {retour && (
                                 <Link
@@ -173,6 +177,11 @@ export default function AdmissionShow(props: Props) {
                                 >
                                     <ArrowLeft {...ICON} aria-hidden /> {libelleRetour}
                                 </Link>
+                            )}
+                            {urls.fiche && (
+                                <Button variant="secondary" className="h-10 px-4 font-medium" onClick={() => setFicheOuverte(true)} title="Voir la fiche de demande avant de l’imprimer">
+                                    <Printer {...ICON} aria-hidden /> Imprimer la fiche
+                                </Button>
                             )}
                             {urls.deroger && (
                                 <Button className="h-10 px-4" onClick={() => setADeroger(true)} title="Rendre la demande recevable par dérogation">
@@ -209,6 +218,14 @@ export default function AdmissionShow(props: Props) {
                 </aside>
             </div>
 
+            {urls.fiche && (
+                <FicheDemandeDialog
+                    url={urls.fiche}
+                    description={[demande?.numero && `N° ${demande.numero}`, etudiant.name].filter(Boolean).join(' · ')}
+                    open={ficheOuverte}
+                    onOpenChange={setFicheOuverte}
+                />
+            )}
             {urls.deroger && <DialogueDerogation url={urls.deroger} nom={etudiant.name} open={aDeroger} onOpenChange={setADeroger} />}
         </AdminLayout>
     );
