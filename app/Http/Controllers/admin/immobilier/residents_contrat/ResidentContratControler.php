@@ -133,7 +133,7 @@ class ResidentContratControler extends Controller
                         // Étudiant admis à loger : attribution de la chambre (formulaire présélectionné sur l'étudiant),
                         // une fois payées la caution et l'avance exigées.
                         'attribuer' => $admis && ($paiement['paye'] ?? false) && $etudiant->derniereDemande?->etat_dossier === 'confirme'
-                            ? $url('admin.allocation.allocate-form', [
+                            ? $url('admin.hebergement.residents_contrat.attribution', [
                                 'campagneId' => $etudiant->derniereDemande->campagne_id,
                                 'etudiant_id' => $etudiant->id_etudiant,
                             ])
@@ -160,9 +160,6 @@ class ResidentContratControler extends Controller
             'campagneActive' => $campagne ? ['id' => $campagneId, 'annee' => $campagne->annee_campagne] : null,
             'urls' => [
                 'admissionDirecte' => $url('admin.etudiant.admission_directe'),
-                // Suivi des attributions de la campagne choisie (toutes les campagnes : campagne active).
-                'attributions' => ($suivi = $campagne ?? app(CampagneValidationService::class)->getCampagneActive())
-                    ? $url('admin.allocation.show', ['campagneId' => $suivi->id_campagne]) : null,
                 'filtres' => $access->allows($admin, 'admin.hebergement.residents_contrat.admission')
                     ? collect(self::FILTRES)->mapWithKeys(fn ($f) => [$f => route('admin.hebergement.residents_contrat.admission', ['etat' => $f] + $choixCampagne)])
                     : null,

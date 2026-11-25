@@ -118,9 +118,6 @@
                         @endadminroute
 
                     </li>
-                    @adminroute('admin.allocation.index')
-                 {{--   <li><a href="{{ route('admin.allocation.index') }}" class="flex items-center gap-2 px-2 py-2"><i class="fa-solid fa-bed"></i><span>Attribution des chambres</span></a></li> --}}
-                    @endadminroute
                     @adminroute('admin.hebergement.maintenance.index')
                  {{----   <li><a href="{{ route('admin.hebergement.maintenance.index') }}" class="flex items-center gap-2 px-2 py-2"><i class="fa-solid fa-screwdriver-wrench"></i><span>Maintenance</span></a></li> --------}}
                     @endadminroute

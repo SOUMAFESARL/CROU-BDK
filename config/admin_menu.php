@@ -38,15 +38,14 @@ return [
         'label' => 'Gestion Hébergement',
         'icon' => 'building-2',
         'route' => 'admin.hebergement.index',
-        'active' => ['admin.hebergement.*', 'admin.allocation.*', 'admin.housing-entry.*', 'admin.map'],
-        // Ordre du cycle de vie : parc → admission → attribution → séjour → départ → pilotage.
+        'active' => ['admin.hebergement.*', 'admin.housing-entry.*', 'admin.map'],
+        // Ordre du cycle de vie : parc → admission → séjour → départ → pilotage.
         'children' => [
             ['label' => 'Parc immobilier', 'icon' => 'building', 'route' => 'admin.hebergement.parc-immobilier.index', 'active' => ['admin.hebergement.parc-immobilier.*', 'admin.map'], 'color' => 'green', 'description' => 'Cités, bâtiments, chambres'],
             ['label' => 'Équipements', 'icon' => 'toolbox', 'route' => 'admin.hebergement.equipements.index', 'active' => ['admin.hebergement.equipements.*'], 'color' => 'amber', 'description' => 'Inventaire et affectations'],
             ['label' => 'Campagnes & admission', 'icon' => 'clipboard-list', 'route' => 'admin.hebergement.campagnes_admission.campagnes', 'active' => ['admin.hebergement.campagnes_admission.*'], 'color' => 'purple', 'description' => 'Campagnes et dossiers de candidature'],
             ['label' => 'Résultats d’admission', 'icon' => 'clipboard-check', 'route' => 'admin.hebergement.resultats.index', 'active' => ['admin.hebergement.resultats.*'], 'color' => 'green', 'description' => 'Demandes publiées par statut'],
             ['label' => 'Réclamations', 'icon' => 'message-square-warning', 'route' => 'admin.hebergement.reclamations.index', 'active' => ['admin.hebergement.reclamations.*'], 'color' => 'amber', 'description' => 'Réclamations sur les demandes'],
-            ['label' => 'Attribution des chambres', 'icon' => 'bed-double', 'route' => 'admin.allocation.index', 'active' => ['admin.allocation.*'], 'color' => 'green', 'description' => 'Affecter les lits'],
             ['label' => 'Résidents & contrats', 'icon' => 'users', 'route' => 'admin.hebergement.residents_contrat.admission', 'params' => ['etat' => 'residents'], 'active' => ['admin.hebergement.residents_contrat.*'], 'color' => 'green', 'description' => 'Suivi des résidents'],
             ['label' => 'Paiements loyer', 'icon' => 'wallet', 'route' => 'admin.hebergement.paiements.index', 'active' => ['admin.hebergement.paiements.*'], 'color' => 'green', 'description' => 'Encaissements et soldes'],
             ['label' => 'Vie résidentielle', 'icon' => 'houses', 'route' => 'admin.hebergement.vie_residentielle.index', 'active' => ['admin.hebergement.vie_residentielle.index'], 'color' => 'amber', 'description' => 'Vie dans les cités'],

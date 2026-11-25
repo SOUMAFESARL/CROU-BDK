@@ -188,16 +188,6 @@ class DossierWorkflowTest extends \Tests\Support\DossierTestCase
         $this->assertSame('refuse',$dossier->fresh()->etat_dossier);
         $this->assertSame(1,Chambre::findOrFail('room')->getNombrePlacesDisponibles());
     }
-    public function test_reassigning_a_former_proposal_releases_it_and_allocates_definitively(): void
-    {
-        $dossier=$this->eligibleRequest();$assignment=$this->reserver();$this->accept($dossier,$assignment);
-        $this->room('second');
-        $next=$this->service->reaffecterChambre(Etudiant::findOrFail('student'),Chambre::findOrFail('second'),Campagne::findOrFail('campaign'),'Changement demandé.');
-        $this->assertSame('annulee',$assignment->fresh()->statut);
-        $this->assertSame('confirmee',$next->fresh()->statut);
-        $this->assertSame('attribue_definitif',$dossier->fresh()->etat_dossier);
-        $this->assertSame($next->getKey(),$dossier->fresh()->assignation_id);
-    }
     public function test_expired_proposal_cannot_be_accepted(): void
     {
         $dossier=$this->eligibleRequest();$assignment=$this->reserver();

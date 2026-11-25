@@ -42,7 +42,7 @@ use App\Http\Controllers\admin\parametrage\LegalDocumentController;
 use App\Http\Controllers\preferenceController;
 use App\Http\Controllers\admin\Etudiant\etudiantController;
 use App\Http\Controllers\admin\immobilier\residents_contrat\ResidentContratControler;
-use App\Http\Controllers\admin\immobilier\residents_contrat\AllocationChambreController;
+use App\Http\Controllers\admin\immobilier\residents_contrat\AttributionChambreController;
 use App\Http\Controllers\admin\immobilier\ReportingHebergementController;
 use App\Http\Controllers\admin\immobilier\reclamations\ReclamationController;
 use App\Http\Controllers\admin\immobilier\resultats\ResultatController;
@@ -445,6 +445,14 @@ Route::middleware(['admin'])->group(function () {
             Route::get('/liste/{etat?}', 'liste')->name('admission');
             Route::put('/etudiants/{etudiant}', 'updateEtudiant')->name('update_etudiant');
 
+            // Attribution d'une chambre à un étudiant admis à loger.
+            Route::controller(AttributionChambreController::class)->prefix('attribution/{campagneId}')->group(function () {
+                Route::get('/', 'allocateForm')->name('attribution');
+                Route::post('/', 'allocate')->name('attribution.store');
+                Route::post('/pmr', 'confirmerPmr')
+                    ->middleware(['admin', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])->name('attribution.pmr');
+            });
+
         });
 
 
@@ -711,56 +719,6 @@ Route::middleware(['admin'])->group(function () {
 
 
         });
-
-
-    Route::prefix('allocation-chambres')->name('allocation.')->group(function () {
-        Route::post('/campagne/{campagneId}/pmr', [AllocationChambreController::class, 'confirmerPmr'])
-            ->middleware(['admin', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])->name('pmr');
-
-
-        // Index
-        Route::get('/', [AllocationChambreController::class, 'index'])->name('index');
-
-        // Détails d'une campagne
-        Route::get('/campagne/{campagneId}', [AllocationChambreController::class, 'show'])->name('show');
-
-        // Formulaire d'allocation
-        Route::get('/campagne/{campagneId}/allocate', [AllocationChambreController::class, 'allocateForm'])
-            ->name('allocate-form');
-
-        // Allouer une chambre (POST)
-        Route::post('/campagne/{campagneId}/allocate', [AllocationChambreController::class, 'allocate'])
-            ->name('allocate');
-
-        // Allocation automatique (POST)
-        Route::post('/campagne/{campagneId}/allocate-all', [AllocationChambreController::class, 'allocateAll'])
-            ->name('allocate-all');
-
-        // Confirmer une assignation (POST)
-        Route::post('/campagne/{campagneId}/confirm', [AllocationChambreController::class, 'confirm'])
-            ->name('confirm');
-
-        // Annuler une assignation (POST)
-        Route::post('/campagne/{campagneId}/cancel', [AllocationChambreController::class, 'cancel'])
-            ->name('cancel');
-
-        // Réaffecter (POST)
-        Route::post('/campagne/{campagneId}/reassign', [AllocationChambreController::class, 'reassign'])
-            ->name('reassign');
-
-        // Retirer une chambre (POST)
-        Route::post('/campagne/{campagneId}/remove', [AllocationChambreController::class, 'remove'])
-            ->name('remove');
-
-        // Statistiques
-        Route::get('/campagne/{campagneId}/statistics', [AllocationChambreController::class, 'statistics'])
-            ->name('statistics');
-
-
-        // Export CSV
-        Route::get('/campagne/{campagneId}/export-csv', [AllocationChambreController::class, 'exportCsv'])
-            ->name('export-csv');
-    });
 
 
     // Routes pour la carte interactive

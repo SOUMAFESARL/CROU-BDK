@@ -1,5 +1,5 @@
 import { Link, router } from '@inertiajs/react';
-import { BedDouble, CirclePlay, Eye, FileText, ListChecks, Search, UserPlus, Users, X } from 'lucide-react';
+import { BedDouble, CirclePlay, Eye, FileText, Search, UserPlus, Users, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
@@ -54,7 +54,7 @@ type Props = {
     campagnes: CampagneOption[];
     /** Campagne choisie (par défaut la campagne active ; `null` : toutes les campagnes). */
     campagneActive: { id: string; annee: string } | null;
-    urls: { admissionDirecte: string | null; attributions: string | null; filtres: Record<Filtre, string> | null };
+    urls: { admissionDirecte: string | null; filtres: Record<Filtre, string> | null };
 };
 
 type CampagneOption = { id: string; libelle: string | null; annee: string | null; active: boolean };
@@ -207,22 +207,10 @@ export default function ResidentsIndex({ residents, stats, etat, filters, colonn
                     )
                 }
                 actions={
-                    (urls.attributions || urls.admissionDirecte) && (
-                        <>
-                            {urls.attributions && (
-                                <Link
-                                    href={urls.attributions}
-                                    className="inline-flex h-10 items-center gap-2 rounded-brand border border-gray-300 bg-white px-4 text-sm font-medium text-muted hover:bg-surface hover:text-primary"
-                                >
-                                    <ListChecks {...ICON} aria-hidden /> Suivi des attributions
-                                </Link>
-                            )}
-                            {urls.admissionDirecte && (
-                                <Link href={urls.admissionDirecte} className={cn(buttonVariants({ size: 'sm' }), 'h-10 px-4')}>
-                                    <UserPlus {...ICON} aria-hidden /> Enregistrer un étudiant déjà logé
-                                </Link>
-                            )}
-                        </>
+                    urls.admissionDirecte && (
+                        <Link href={urls.admissionDirecte} className={cn(buttonVariants({ size: 'sm' }), 'h-10 px-4')}>
+                            <UserPlus {...ICON} aria-hidden /> Enregistrer un étudiant déjà logé
+                        </Link>
                     )
                 }
             />

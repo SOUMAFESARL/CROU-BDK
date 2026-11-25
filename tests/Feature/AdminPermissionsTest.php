@@ -308,7 +308,7 @@ class AdminPermissionsTest extends TestCase
         $this->assertSame($count, DB::table('permissions')->count());
         $this->assertSame(1, DB::table('role_permission')->where('role_id', 2)->count());
         // Permissions ajoutées par les migrations suivantes (même principe : rôle 1 seulement).
-        foreach (['2026_10_17_000001_add_campagne_update_delete_permissions.php', '2026_11_10_000002_add_eligibilite_permissions.php', '2026_11_13_000002_add_discipline_configure_permission.php', '2026_11_23_000003_add_types_paiement_permissions.php', '2026_11_24_000001_add_admission_screen_permissions.php', '2026_11_24_000006_add_reclamations_permissions.php', '2026_11_24_000009_rename_reclamations_update_permission_to_traiter.php', '2026_11_25_000001_ranger_droits_admissions_en_sous_modules.php', '2026_11_25_000004_add_resultats_permissions.php', '2026_11_25_000007_add_resultats_admettre_permission.php'] as $suivante) {
+        foreach (['2026_10_17_000001_add_campagne_update_delete_permissions.php', '2026_11_10_000002_add_eligibilite_permissions.php', '2026_11_13_000002_add_discipline_configure_permission.php', '2026_11_23_000003_add_types_paiement_permissions.php', '2026_11_24_000001_add_admission_screen_permissions.php', '2026_11_24_000006_add_reclamations_permissions.php', '2026_11_24_000009_rename_reclamations_update_permission_to_traiter.php', '2026_11_25_000001_ranger_droits_admissions_en_sous_modules.php', '2026_11_25_000004_add_resultats_permissions.php', '2026_11_25_000007_add_resultats_admettre_permission.php', '2026_11_25_000008_remove_attributions_module.php'] as $suivante) {
             (require database_path('migrations/'.$suivante))->up();
         }
         $this->assertSame(1, DB::table('role_permission')->where('role_id', 2)->count());
@@ -317,6 +317,45 @@ class AdminPermissionsTest extends TestCase
                 $this->assertTrue(DB::table('permissions')->where('slug', $slug)->exists(), $slug);
             }
         }
+    }
+
+    public function test_migration_remplace_le_module_attributions_par_les_droits_des_residents(): void
+    {
+        Schema::table('modules', function (Blueprint $t) {
+            $t->string('slug')->nullable();
+            $t->string('name')->nullable();
+            $t->integer('parent_id')->nullable();
+            $t->text('actions')->nullable();
+            $t->timestamps();
+        });
+        Schema::table('permissions', function (Blueprint $t) {
+            $t->string('module')->nullable();
+            $t->string('action')->nullable();
+            $t->string('name')->nullable();
+            $t->text('description')->nullable();
+            $t->timestamps();
+        });
+        DB::table('modules')->insert([
+            ['id' => 80, 'slug' => 'hebergement.attributions', 'name' => 'Attribution des chambres', 'actions' => '["view","assign","validate","export"]', 'is_active' => true],
+            ['id' => 90, 'slug' => 'hebergement.residents', 'name' => 'Résidents et contrats', 'actions' => '["view"]', 'is_active' => true],
+        ]);
+        foreach (['view' => 2, 'assign' => 2, 'validate' => 3, 'export' => 3] as $action => $role) {
+            $id = DB::table('permissions')->insertGetId(['slug' => 'hebergement.attributions.'.$action, 'module_id' => 80]);
+            DB::table('role_permission')->insert(['role_id' => $role, 'permission_id' => $id]);
+        }
+
+        $migration = require database_path('migrations/2026_11_25_000008_remove_attributions_module.php');
+        $migration->up();
+        $migration->up();
+
+        $this->assertFalse(DB::table('modules')->where('slug', 'hebergement.attributions')->exists());
+        $this->assertFalse(DB::table('permissions')->where('slug', 'like', 'hebergement.attributions.%')->exists());
+        $this->assertSame('["view","attribuer","pmr"]', DB::table('modules')->where('id', 90)->value('actions'));
+        // Chaque rôle garde exactement le droit équivalent.
+        $roles = fn (string $slug) => DB::table('role_permission')->join('permissions', 'permissions.id', '=', 'role_permission.permission_id')
+            ->where('slug', $slug)->where('role_id', '!=', 1)->pluck('role_id')->all();
+        $this->assertEquals([2], $roles('hebergement.residents.attribuer'));
+        $this->assertEquals([3], $roles('hebergement.residents.pmr'));
     }
 
     public function test_menu_hides_unavailable_modules(): void

@@ -2,18 +2,22 @@
 
 Les écrans existants sont conservés. Une section repliable de confirmation PMR est ajoutée au formulaire d'attribution et une case au formulaire d'admission directe. L'import accepte la colonne facultative `pmr_confirme` (Oui/Non), ajoutée en fin du modèle pour préserver les colonnes existantes. L'agent qui importe confirme les informations de son fichier.
 
+## Écran
+
+La page « Attribution des chambres » (liste des campagnes, suivi, attribution automatique de masse, confirmation, annulation, réaffectation, statistiques, export CSV) est supprimée depuis le 25/11/2026, avec son menu et son module de droits `hebergement.attributions`. Seul le formulaire « Attribuer une chambre » est conservé, dans « Résidents & contrats » (`Admin/Hebergement/Residents/Attribution`, `AttributionChambreController`), avec les droits `hebergement.residents.attribuer` et `hebergement.residents.pmr` (vérification PMR). La migration `2026_11_25_000008_remove_attributions_module.php` les donne aux rôles qui avaient respectivement `hebergement.attributions.assign` et `.validate`. La liste « Admis à loger » exige `hebergement.residents.view`.
+
 ## Règles appliquées
 
 - Chambre, bâtiment et cité doivent être actifs et cohérents. La cité doit appartenir à la campagne, qui peut ne plus être active (25/11/2026) : un étudiant admis à loger peut recevoir sa chambre après la clôture.
 - Les restrictions hommes/femmes/mixte sont vérifiées aux trois niveaux à partir du référentiel et du genre de l'étudiant. Un référentiel manquant ou inconnu bloque l'attribution et doit être complété.
 - Une chambre « mixte » (aux trois niveaux) suit le sexe de ses premiers occupants : une nouvelle attribution, manuelle ou automatique, est refusée si la chambre est déjà occupée ou réservée par un étudiant de l'autre sexe. L'admission directe (régularisation) et la confirmation d'une réservation existante ne sont pas concernées.
-- Le formulaire d'attribution (`admin.allocation.allocate-form`) ne propose que les chambres du sexe de l'étudiant (ou mixtes sans occupant de l'autre sexe), et les chambres PMR uniquement si son statut PMR est confirmé et enregistré. La chambre choisie est retirée si elle devient incompatible après un changement d'étudiant ou de statut PMR.
+- Le formulaire d'attribution (`admin.hebergement.residents_contrat.attribution`, ouvert depuis « Résidents & contrats › Admis à loger ») ne propose que les chambres du sexe de l'étudiant (ou mixtes sans occupant de l'autre sexe), et les chambres PMR uniquement si son statut PMR est confirmé et enregistré. La chambre choisie est retirée si elle devient incompatible après un changement d'étudiant ou de statut PMR.
 - Une chambre PMR exige `pmr_confirme`, sauf pour l'admission directe (régularisation d'un étudiant déjà installé dans la chambre, formulaire et import). Aucune conversion du champ historique `autiste` n'est effectuée. La confirmation et son retrait enregistrent l'agent et la date.
 - Les assignations `en_attente` et `confirmee` sans date de fin passée consomment une place, toutes campagnes confondues. Les propositions futures sont également réservées : ce lot n'introduit pas de calendrier de séjours successifs.
 - Les places occupées affichées restent les occupations confirmées en cours ; les places disponibles retranchent aussi les réservations. L'état d'une chambre partiellement occupée reste compatible avec les écrans existants.
 - La création verrouille l'étudiant puis la cité, le bâtiment et la chambre, dans une transaction. Le comptage des places utilise une lecture verrouillée pour éviter un instantané périmé sous MySQL REPEATABLE READ.
 - La confirmation revérifie les règles et exclut sa propre réservation du comptage. Une réservation annulée ou expirée ne peut pas être confirmée. La confirmation répétée est sans effet supplémentaire.
-- Une réaffectation échouée restaure l'ancienne attribution par annulation de la transaction. Une annulation ne supprime pas les états maintenance/fermeture.
+- Une annulation ne supprime pas les états maintenance/fermeture.
 - Les admissions directes et les imports utilisent le même contrôle. Une réservation empêche aussi la désactivation du parc concerné.
 
 ## Installation

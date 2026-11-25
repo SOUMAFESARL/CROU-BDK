@@ -20,11 +20,6 @@ interface AssignationChambreRepositoryInterface
     public function getByEtudiant($etudiantId, $campagneId);
 
     /**
-     * Obtenir les assignations d'une campagne
-     */
-    public function getByCampagne($campagneId);
-
-    /**
      * Obtenir les assignations d'une chambre
      */
     public function getByChambre($chambreId);

@@ -37,18 +37,6 @@ class AssignationChambreRepository implements AssignationChambreRepositoryInterf
     }
 
     /**
-     * Obtenir les assignations d'une campagne
-     */
-    public function getByCampagne($campagneId)
-    {
-      //  dd($campagneId);
-        return AssignationChambre::withDefaultRelations()->where('campagne_id', $campagneId)
-            ->where('statut', '!=', 'annulee')
-            ->with(['etudiant', 'chambre', 'dossier'])
-            ->get();
-    }
-
-    /**
      * Obtenir les assignations d'une chambre
      */
     public function getByChambre($chambreId)

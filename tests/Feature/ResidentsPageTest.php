@@ -59,7 +59,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
 
     public function test_liste_des_residents_avec_chambre_confirmee(): void
     {
-        $this->agent(['hebergement.residents.view', 'hebergement.attributions.assign', 'hebergement.attributions.view']);
+        $this->agent(['hebergement.residents.view', 'hebergement.residents.attribuer']);
 
         $page = $this->page('residents', ['campagne' => 'toutes']);
 
@@ -80,7 +80,6 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->assertArrayNotHasKey('allouer', $urls);
         $this->assertNotNull($urls['dossier']);
         $this->assertArrayNotHasKey('traiter', $urls);
-        $this->assertNotNull($props['urls']['attributions']);
     }
 
     public function test_actions_masquees_sans_droits_et_filtre_inconnu(): void
@@ -93,7 +92,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $urls = collect($props['residents']['data'])->firstWhere('id', 'student')['urls'];
         $this->assertArrayNotHasKey('allouer', $urls);
         $this->assertNotNull($urls['contrat']);
-        $this->assertNull($props['urls']['attributions']);
+        $this->assertArrayNotHasKey('attributions', $props['urls']);
         $this->assertNull($props['urls']['admissionDirecte']);
     }
 
@@ -211,9 +210,9 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         $this->confirm('other');
         $this->assertSame('en_verification', DB::table('etudiants')->where('id_etudiant', 'other')->value('statut_inscription'));
 
-        $this->agent(['hebergement.residents.view', 'hebergement.attributions.assign']);
+        $this->agent(['hebergement.residents.view', 'hebergement.residents.attribuer']);
         $urls = $this->page('admis_a_loger')['props']['residents']['data'][0]['urls'];
-        $this->assertSame(route('admin.allocation.allocate-form', ['campagneId' => 'campaign', 'etudiant_id' => 'other']), $urls['attribuer']);
+        $this->assertSame(route('admin.hebergement.residents_contrat.attribution', ['campagneId' => 'campaign', 'etudiant_id' => 'other']), $urls['attribuer']);
 
         // Sans le droit d'attribuer : pas d'icône.
         $this->agent(['hebergement.residents.view']);
@@ -243,7 +242,7 @@ class ResidentsPageTest extends \Tests\Support\DossierTestCase
         });
         $payer = fn (string $type, int $montant) => DB::table('paiements')->insert(['id_paiement' => $type, 'resident_id' => 'other',
             'type_paiement' => $type, 'statut_paiement' => 'valide', 'montant' => $montant, 'created_at' => now()->addMinute()]);
-        $this->agent(['hebergement.residents.view', 'hebergement.residents.update', 'hebergement.attributions.assign',
+        $this->agent(['hebergement.residents.view', 'hebergement.residents.update', 'hebergement.residents.attribuer',
             'hebergement.paiements.view']);
         $ligne = fn () => $this->page('admis_a_loger')['props']['residents']['data'][0];
 

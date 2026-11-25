@@ -232,7 +232,7 @@ class ResultatController extends Controller
     {
         return $admin !== null && $this->access->allows($admin, AdmissionPermissions::ROUTE.'show')
             && (app(AdmissionPermissions::class)->allows($admin, 'toutes')
-                || $admin->hasPermission('hebergement.residents.view') || $admin->hasPermission('hebergement.attributions.view'));
+                || $admin->hasPermission('hebergement.residents.view'));
     }
 
     /**

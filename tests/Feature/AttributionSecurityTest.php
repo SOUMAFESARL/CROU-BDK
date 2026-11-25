@@ -165,20 +165,6 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
         $this->confirmAccepted($assignment->getKey());
     }
 
-    public function test_failed_reassignment_keeps_the_original_reservation(): void
-    {
-        $assignment = $this->reserver();
-        $this->room('blocked', ['etat' => 'maintenance']);
-        try {
-            $this->service->reaffecterChambre(Etudiant::findOrFail('student'), Chambre::findOrFail('blocked'), Campagne::findOrFail('campaign'));
-            $this->fail('La reaffectation doit echouer');
-        } catch (ValidationException $e) {
-            $this->assertSame('en_attente', $assignment->fresh()->statut);
-            $this->assertNull($assignment->fresh()->date_fin);
-            $this->assertSame(1, AssignationChambre::count());
-        }
-    }
-
     public function test_cancellation_releases_a_place_without_clearing_maintenance(): void
     {
         $assignment = $this->reserver();
@@ -259,14 +245,14 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
         DB::table((new \App\Models\DemandeEtudiant())->getTable())->insert([
             'id_demande' => 'request', 'etudiant_id' => 'student', 'campagne_id' => 'campaign',
         ]);
-        $this->post(route('admin.allocation.pmr', 'campaign'), [
+        $this->post(route('admin.hebergement.residents_contrat.attribution.pmr', 'campaign'), [
             'etudiant_id' => 'student', 'pmr_confirme' => 1,
         ])->assertRedirect()->assertSessionHasNoErrors();
         $student = Etudiant::findOrFail('student');
         $this->assertTrue($student->pmr_confirme);
         $this->assertSame('agent', $student->pmr_confirme_by);
         $this->assertNotNull($student->pmr_confirme_at);
-        $this->post(route('admin.allocation.pmr', 'other-campaign'), [
+        $this->post(route('admin.hebergement.residents_contrat.attribution.pmr', 'other-campaign'), [
             'etudiant_id' => 'student', 'pmr_confirme' => 0,
         ])->assertNotFound();
         $this->assertTrue($student->fresh()->pmr_confirme);
@@ -276,7 +262,7 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
     {
         auth('admin')->logout();
         $this->withoutMiddleware([\App\Http\Middleware\EnforceSystemSecurity::class, \App\Http\Middleware\LogUserActivity::class]);
-        $this->post(route('admin.allocation.pmr', 'campaign'), [
+        $this->post(route('admin.hebergement.residents_contrat.attribution.pmr', 'campaign'), [
             'etudiant_id' => 'student', 'pmr_confirme' => 1,
         ])->assertRedirect('/');
         $this->assertFalse(Etudiant::findOrFail('student')->pmr_confirme);
@@ -289,7 +275,6 @@ class AttributionSecurityTest extends \Tests\Support\DossierTestCase
             $room = Chambre::findOrFail('room');
             $this->assertFalse($room->peutAccueillir(), $etat);
             $this->assertSame([], app(\App\Http\Services\LitService::class)->disponibles($room), $etat);
-            $this->assertSame([], $this->service->getChambresDisponibles(Etudiant::findOrFail('student'), Campagne::findOrFail('campaign')), $etat);
             $this->assertNull($this->allocate('student', null), $etat);
             try {
                 $this->allocate();

@@ -293,7 +293,7 @@ class CampagnesAdmissionController extends Controller
         $reclamations = $vues->allows($admin, 'admissions.reclamations') && $reclamationService->disponible()
             ? \App\Models\Reclamation::with('campagne')->where('etudiant_id', $etudiant->getKey())->orderByDesc('created_at')->get()
             : collect();
-        abort_unless($voirAdmissions || $reclamations->isNotEmpty() || $admin->hasPermission('hebergement.residents.view') || $admin->hasPermission('hebergement.attributions.view'), 403);
+        abort_unless($voirAdmissions || $reclamations->isNotEmpty() || $admin->hasPermission('hebergement.residents.view'), 403);
         // Bouton « Déroger » : demande des listes « Demandes irrecevables » ou « Demandes refusées », tant que la liste
         // des demandes validées de son volet n'est pas approuvée en commission (`AdmissionDerogationService::obstacle`).
         $routeDeroger = 'admin.hebergement.campagnes_admission.derogations.store';

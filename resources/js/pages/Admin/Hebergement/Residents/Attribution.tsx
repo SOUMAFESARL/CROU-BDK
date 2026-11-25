@@ -4,7 +4,6 @@ import { Accessibility, ArrowLeft, Check, CircleCheck, CircleX, DoorOpen, Info, 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
-import { lienContour, type CampagneAllocation } from '@/components/allocations/shared';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button } from '@/components/ui/button';
@@ -50,11 +49,11 @@ type ChambreOption = {
 };
 
 type Props = {
-    campagne: CampagneAllocation;
+    campagne: { id: string; annee: string };
     etudiants: EtudiantOption[];
     chambres: ChambreOption[];
     etudiantInitial: string;
-    urls: { show: string | null; allocate: string | null; pmr: string | null };
+    urls: { retour: string | null; allocate: string | null; pmr: string | null };
 };
 
 const schema = z
@@ -120,8 +119,12 @@ function controles(etudiant: EtudiantOption | undefined, chambre: ChambreOption 
     return lignes;
 }
 
-/** Attribution d'une chambre à un étudiant (remplace `allocation_form.blade.php` et `allocation-chambres.js`). */
-export default function AllocationAllocate({ campagne, etudiants, chambres, etudiantInitial, urls }: Props) {
+/** Lien-bouton secondaire (bordure grise). */
+const lienContour =
+    'inline-flex h-10 items-center gap-2 rounded-brand border border-gray-300 bg-white px-4 text-sm font-medium text-muted transition-colors hover:bg-surface hover:text-primary';
+
+/** Attribution d'une chambre à un étudiant admis à loger. */
+export default function ResidentsAttribution({ campagne, etudiants, chambres, etudiantInitial, urls }: Props) {
     const initial = etudiants.some((etudiant) => etudiant.id === etudiantInitial) ? etudiantInitial : '';
     const {
         control,
@@ -171,9 +174,9 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                     </>
                 }
                 actions={
-                    urls.show && (
-                        <Link href={urls.show} className={lienContour}>
-                            <ArrowLeft {...ICON} aria-hidden /> Suivi de la campagne
+                    urls.retour && (
+                        <Link href={urls.retour} className={lienContour}>
+                            <ArrowLeft {...ICON} aria-hidden /> Admis à loger
                         </Link>
                     )
                 }
@@ -220,7 +223,7 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                                 )}
                             </Section>
 
-                            <Section icone={Route} titre="2. Mode d’attribution" description="Le choix automatique applique les mêmes règles que l’attribution de masse.">
+                            <Section icone={Route} titre="2. Mode d’attribution" description="Laissez l’application choisir la chambre ou choisissez-la vous-même.">
                                 <Controller
                                     control={control}
                                     name="allocation_type"
@@ -333,8 +336,8 @@ export default function AllocationAllocate({ campagne, etudiants, chambres, etud
                             )}
                         </div>
                         <div className="flex flex-col-reverse gap-2 border-t bg-surface/50 px-5 py-4 sm:flex-row sm:justify-end">
-                            {urls.show && (
-                                <Link href={urls.show} className={lienContour}>
+                            {urls.retour && (
+                                <Link href={urls.retour} className={lienContour}>
                                     Annuler
                                 </Link>
                             )}
