@@ -269,6 +269,8 @@ Route::middleware(['admin'])->group(function () {
             Route::get('/campagnes/{id}/modifier', 'editCampagne')->name('edit_campagne');
             Route::put('/campagnes/{id}', 'updateCampagne')->name('update_campagne');
             Route::delete('/campagnes/{id}', 'destroyCampagne')->name('destroy_campagne');
+            // Affiche ou masque le lien « Faire une demande d'hébergement » de la page de connexion, sans changer les dates.
+            Route::patch('/campagnes/{id}/lien-demande', 'lienDemandeCampagne')->name('lien_demande_campagne');
             Route::get('/validateDocument/{documentId}/{statut}/{message?}', 'valideDocument')->name('validate_document');
             Route::put('/etudiants/{etudiant}', 'updateEtudiant')->name('update_etudiant');
             // Fiche de demande (PDF), la même que celle proposée à l'étudiant.

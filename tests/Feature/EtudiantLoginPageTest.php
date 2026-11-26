@@ -26,6 +26,7 @@ class EtudiantLoginPageTest extends TestCase
             $table->string('statut')->nullable();
             $table->date('periode_debut')->nullable();
             $table->date('periode_fin')->nullable();
+            $table->boolean('lien_demande_masque')->default(false);
             $table->timestamps();
             $table->softDeletes();
         });
@@ -52,6 +53,19 @@ class EtudiantLoginPageTest extends TestCase
         ]);
 
         $this->assertSame(route('etudiant.register'), $this->loginPageProps()['registerUrl']);
+    }
+
+    public function test_lien_de_demande_masque_par_l_administration_pendant_la_periode(): void
+    {
+        DB::table('campagne')->insert([
+            'id_campagne' => 'c1',
+            'statut' => 'active',
+            'periode_debut' => today()->subDay()->toDateString(),
+            'periode_fin' => today()->addDay()->toDateString(),
+            'lien_demande_masque' => true,
+        ]);
+
+        $this->assertNull($this->loginPageProps()['registerUrl']);
     }
 
     public function test_lien_de_demande_masque_hors_periode_d_admission(): void

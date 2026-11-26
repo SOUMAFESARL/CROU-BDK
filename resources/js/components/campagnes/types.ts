@@ -60,6 +60,8 @@ export type CampagneItem = {
     periode_fin: string | null;
     /** Date de la validation automatique en lot ; null = chaque dossier est décidé dès sa réception. */
     date_validation_auto: string | null;
+    /** Lien « Faire une demande d'hébergement » masqué sur la page de connexion étudiant (dates inchangées). */
+    lien_demande_masque: boolean;
     criteres: {
         moyenne_min: number | null;
         pourcentage_validate: number | null;
@@ -78,6 +80,8 @@ export type CampagneItem = {
         destroy: string | null;
         /** Page « Critères de la campagne » (niveaux admission et/ou réadmission selon le type). */
         criteres: string | null;
+        /** Affiche ou masque le lien de demande de la page de connexion (PATCH `masque`). */
+        lienDemande: string | null;
     };
 };
 

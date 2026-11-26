@@ -29,7 +29,7 @@ class CampagnesPageTest extends TestCase
             foreach (['periode_debut', 'periode_fin', 'date_echeance_demande', 'date_echeance_contrat'] as $column) {
                 $t->date($column)->nullable();
             }
-            foreach (['admission', 'readmission', 'pmr', 'internationnaux', 'redoublement', 'is_participate', 'is_discipline'] as $column) {
+            foreach (['admission', 'readmission', 'pmr', 'internationnaux', 'redoublement', 'is_participate', 'is_discipline', 'lien_demande_masque'] as $column) {
                 $t->boolean($column)->nullable()->default(false);
             }
             $t->float('moyenne_min')->nullable(); $t->float('distance_min')->nullable(); $t->integer('pourcentage_validate')->nullable();
@@ -352,6 +352,27 @@ class CampagnesPageTest extends TestCase
         $this->assertNotNull(DB::table('campagne')->where('id_campagne', 'k2')->value('deleted_at'));
         $props = $this->page('campagnes', '/admin/gestion-hebergement/campagnes_admissions/campagnes')['props'];
         $this->assertSame(['k1'], array_column($props['campagnes']['data'], 'id'));
+    }
+
+    public function test_masquer_le_lien_de_demande_sans_changer_les_dates(): void
+    {
+        $this->withoutMiddleware();
+        $dates = DB::table('campagne')->where('id_campagne', 'k1')->first(['periode_debut', 'periode_fin']);
+
+        $this->from(route('admin.hebergement.campagnes_admission.campagnes'))
+            ->patch(route('admin.hebergement.campagnes_admission.lien_demande_campagne', 'k1'), ['masque' => true])
+            ->assertRedirect(route('admin.hebergement.campagnes_admission.campagnes'))
+            ->assertSessionHas('success');
+
+        $campagne = DB::table('campagne')->where('id_campagne', 'k1')->first();
+        $this->assertEquals(1, $campagne->lien_demande_masque);
+        $this->assertSame([$dates->periode_debut, $dates->periode_fin], [$campagne->periode_debut, $campagne->periode_fin]);
+
+        $props = $this->page('campagnes', '/admin/gestion-hebergement/campagnes_admissions/campagnes')['props'];
+        $this->assertTrue(collect($props['campagnes']['data'])->firstWhere('id', 'k1')['lien_demande_masque']);
+
+        $this->patch(route('admin.hebergement.campagnes_admission.lien_demande_campagne', 'k1'), ['masque' => false]);
+        $this->assertEquals(0, DB::table('campagne')->where('id_campagne', 'k1')->value('lien_demande_masque'));
     }
 
     public function test_une_campagne_avec_des_demandes_ne_peut_pas_etre_supprimee(): void

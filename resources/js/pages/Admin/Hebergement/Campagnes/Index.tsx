@@ -27,7 +27,10 @@ const FILTRES: { filtre: FiltreCampagne; label: string; titre: string; stat: key
 
 /** Liste des campagnes d'admission et de réadmission (remplace la vue Blade `campagnes.blade.php`). */
 export default function CampagnesIndex({ campagnes, stats, etat, filters, annees, urls }: CampagnesProps) {
-    const [details, setDetails] = useState<CampagneItem | null>(null);
+    // Identifiant seulement : le panneau suit les données rechargées (ex. lien de demande masqué depuis le panneau).
+    const [detailsId, setDetailsId] = useState<string | null>(null);
+    const details = campagnes.data.find((campagne) => campagne.id === detailsId) ?? null;
+    const setDetails = (campagne: CampagneItem | null) => setDetailsId(campagne?.id ?? null);
     const [suppression, setSuppression] = useState<CampagneItem | null>(null);
     const [traitement, setTraitement] = useState(false);
     const filtre = FILTRES.find((item) => item.filtre === etat) ?? FILTRES[0];

@@ -28,6 +28,7 @@ class Campagne extends Model
         'date_echeance_contrat' => 'date',
         'date_validation_auto' => 'date',
         'validation_auto_effectuee_at' => 'datetime',
+        'lien_demande_masque' => 'boolean',
         'admission' => 'boolean',
         //'old_bachelier' => 'boolean',
         'readmission' => 'boolean',
@@ -65,6 +66,7 @@ class Campagne extends Model
         'date_echeance_contrat',
         'date_validation_auto',
         'validation_auto_effectuee_at',
+        'lien_demande_masque',
         'statut',
         'admission',
        // 'old_bachelier',
@@ -180,6 +182,15 @@ class Campagne extends Model
             ->where('statut', 'active')
             ->whereDate('periode_debut', '<=', today())
             ->whereDate('periode_fin', '>=', today());
+    }
+
+    /** Campagnes ouvertes dont le lien « Faire une demande d'hébergement » est affiché sur la page de connexion. */
+    public function scopeLienDemandeVisible($query)
+    {
+        return $query->admissionsOuvertes()->when(
+            \Illuminate\Support\Facades\Schema::hasColumn('campagne', 'lien_demande_masque'),
+            fn ($q) => $q->where(fn ($q) => $q->whereNull('lien_demande_masque')->orWhere('lien_demande_masque', false)),
+        );
     }
 
     /** Validation automatique différée : la date fixée par l'admin n'est pas encore atteinte. */

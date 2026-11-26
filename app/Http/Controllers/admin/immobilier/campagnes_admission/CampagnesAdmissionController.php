@@ -1690,6 +1690,7 @@ class CampagnesAdmissionController extends Controller
                         'urls' => [
                             'edit' => $lien('admin.hebergement.campagnes_admission.edit_campagne', $campagne),
                             'destroy' => $lien('admin.hebergement.campagnes_admission.destroy_campagne', $campagne),
+                            'lienDemande' => $lien('admin.hebergement.campagnes_admission.lien_demande_campagne', $campagne),
                             'criteres' => $voirCriteres ? $vueCriteres->lienPage($admin, $campagne) : null,
                         ],
                     ];
@@ -1856,6 +1857,21 @@ class CampagnesAdmissionController extends Controller
             ->with('success', 'Campagne supprimée avec succès');
     }
 
+    /**
+     * Affiche ou masque le lien « Faire une demande d'hébergement » de la page de connexion étudiant,
+     * sans modifier les dates de la campagne.
+     */
+    public function lienDemandeCampagne(Request $request, string $id): RedirectResponse
+    {
+        $masque = $request->validate(['masque' => ['required', 'boolean']])['masque'];
+        $campagne = Campagne::active()->findOrFail($id);
+        $campagne->update(['lien_demande_masque' => (bool) $masque]);
+
+        return back()->with('success', $masque
+            ? 'Le lien « Faire une demande d’hébergement » est masqué sur la page de connexion.'
+            : 'Le lien « Faire une demande d’hébergement » est de nouveau affiché sur la page de connexion.');
+    }
+
     /** Ligne de la liste des campagnes, avec tout ce qu'affiche le panneau de détail. */
     private function campagneListe(Campagne $campagne): array
     {
@@ -1875,6 +1891,8 @@ class CampagnesAdmissionController extends Controller
             'periode_fin' => $date($campagne->periode_fin),
             // null : chaque dossier est décidé par le barème dès sa réception.
             'date_validation_auto' => $date($campagne->date_validation_auto),
+            // Lien « Faire une demande d'hébergement » masqué sur la page de connexion (dates inchangées).
+            'lien_demande_masque' => (bool) $campagne->lien_demande_masque,
             'criteres' => [
                 'moyenne_min' => $campagne->moyenne_min,
                 'pourcentage_validate' => $campagne->pourcentage_validate !== null ? (int) $campagne->pourcentage_validate : null,

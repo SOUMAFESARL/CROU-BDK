@@ -79,8 +79,9 @@ class  frontedController extends Controller
         return Inertia::render('Etudiant/Auth/Login', [
             'loginUrl' => route('login.etudiant'),
             'forgotUrl' => route('etudiant.password.request'),
-            // Lien vers le formulaire de demande, proposé uniquement pendant une période d'admission ouverte.
-            'registerUrl' => Campagne::admissionsOuvertes()->exists() ? route('etudiant.register') : null,
+            // Lien vers le formulaire de demande, proposé uniquement pendant une période d'admission ouverte,
+            // sauf si l'administration l'a masqué depuis le détail de la campagne.
+            'registerUrl' => Campagne::lienDemandeVisible()->exists() ? route('etudiant.register') : null,
             // Lien vers le formulaire de réclamation, proposé uniquement pendant une période de réclamation ouverte.
             'reclamationUrl' => app(\App\Http\Services\ReclamationService::class)->periodeOuverte() ? route('etudiant.reclamation') : null,
             // Lien vers les résultats d'admission, quand au moins une campagne publiée y est visible.

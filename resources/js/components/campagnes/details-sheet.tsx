@@ -1,9 +1,11 @@
-import { BedDouble, Building, Building2, CalendarCheck, CalendarClock, CalendarDays, CircleCheck, CircleX, FileText, FolderOpen, GraduationCap, Houses, ListChecks, X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { router } from '@inertiajs/react';
+import { BedDouble, Building, Building2, CalendarClock, CalendarDays, CircleCheck, CircleX, FileText, FolderOpen, GraduationCap, Houses, ListChecks, Loader2, LogIn, X } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { CONDITIONS, dureeJours, formatDate, NIVEAUX, nomCampagne, STATUTS_CAMPAGNE, TYPES_ADMISSION, typeCampagne, type CampagneItem, type Niveau, type StatutCampagne } from './types';
 
@@ -37,9 +39,6 @@ function Contenu({ campagne }: { campagne: CampagneItem }) {
     return (
         <>
             <header className="flex items-start gap-3 border-b px-5 py-4">
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-brand bg-soft text-primary" aria-hidden>
-                    <CalendarCheck {...ICON} />
-                </span>
                 <div className="min-w-0 flex-1">
                     <SheetDescription className="text-xs text-muted">Détail de la campagne</SheetDescription>
                     <SheetTitle className="truncate text-lg font-medium text-gray-900">{nomCampagne(campagne)}</SheetTitle>
@@ -78,6 +77,10 @@ function Contenu({ campagne }: { campagne: CampagneItem }) {
                             ['Validation automatique', campagne.date_validation_auto ? `Le ${formatDate(campagne.date_validation_auto)}` : 'Dès la réception'],
                         ]}
                     />
+                </Section>
+
+                <Section titre="Page de connexion" icon={<LogIn />}>
+                    <LienDemande campagne={campagne} />
                 </Section>
 
                 <Section titre="Critères d’éligibilité" icon={<GraduationCap />}>
@@ -150,6 +153,49 @@ function Contenu({ campagne }: { campagne: CampagneItem }) {
                 </SheetClose>
             </footer>
         </>
+    );
+}
+
+/**
+ * Interrupteur du lien « Faire une demande d'hébergement » de la page de connexion étudiant :
+ * le masquer ne change pas les dates de la campagne (le lien n'apparaît de toute façon que pendant la période ouverte).
+ */
+function LienDemande({ campagne }: { campagne: CampagneItem }) {
+    const [envoi, setEnvoi] = useState(false);
+    const visible = !campagne.lien_demande_masque;
+    const url = campagne.urls.lienDemande;
+
+    const basculer = (afficher: boolean) => {
+        if (!url) return;
+        router.patch(
+            url,
+            { masque: !afficher },
+            { preserveScroll: true, preserveState: true, onStart: () => setEnvoi(true), onFinish: () => setEnvoi(false) },
+        );
+    };
+
+    return (
+        <div className="flex items-start justify-between gap-4 rounded-brand border px-3.5 py-3">
+            <div className="min-w-0">
+                <label htmlFor={`lien-demande-${campagne.id}`} className="text-sm font-medium text-gray-900">
+                    Lien « Faire une demande d’hébergement »
+                </label>
+                <p className="mt-0.5 text-xs text-muted">
+                    {visible
+                        ? 'Affiché sur la page de connexion pendant la période d’admission.'
+                        : 'Masqué sur la page de connexion, même pendant la période d’admission. Les dates ne changent pas.'}
+                </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 pt-0.5">
+                {envoi && <Loader2 {...ICON} className="animate-spin text-muted" aria-hidden />}
+                <Switch
+                    id={`lien-demande-${campagne.id}`}
+                    checked={visible}
+                    onCheckedChange={basculer}
+                    disabled={!url || envoi}
+                />
+            </div>
+        </div>
     );
 }
 
