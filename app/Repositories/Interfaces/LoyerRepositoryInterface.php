@@ -79,11 +79,6 @@ interface LoyerRepositoryInterface
     public function updateSolde(string $loyerId): bool;
 
     /**
-     * Applique les pénalités pour tous les loyers en retard
-     */
-    public function appliquerPenalites(): int;
-
-    /**
      * Enregistre un paiement pour un loyer
      */
     public function enregistrerPaiement(string $loyerId, float $montant, ?string $datePaiement = null): bool;
@@ -113,6 +108,5 @@ public function getNombreLoyersEnRetard(): int;
 public function getTotalLoyersEnRetard(): float;
 public function getStatistiquesLoyers(?string $annee = null, ?string $mois = null, ?string $residence = null, ?string $campagne = null): array;
      public function getStatistiquesParResidence(): Collection;
-    public function getStatistiquesParResidenceFiltre(?string $mois = null, ?string $annee = null): Collection;
 
     }

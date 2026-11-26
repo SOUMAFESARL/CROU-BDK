@@ -71,6 +71,16 @@ export type ParcItem = CiteItem | BatimentItem | ChambreItem;
 
 export type ContexteElement = { id: string; name: string; statut: string; resume: Resume | null };
 
+/** Détail des KPI (`ParcImmobilierController::detailsIndicateurs`), chargé au clic sur un indicateur. */
+export type DetailsIndicateurs = {
+    cites: { id: string; name: string; code: string | null; statut: string; batiments: number; resume: Resume }[];
+    batiments: { id: string; name: string; cite_id: string | null; cite: string | null; statut: string; resume: Resume }[];
+    typesChambre: { name: string; chambres: number; disponibles: number; places: number }[];
+    categories: Record<string, number>;
+};
+
+export type Indicateur = 'cites' | 'batiments' | 'chambres' | 'occupation';
+
 export type ParcProps = {
     niveau: Niveau;
     items: Paginated<ParcItem>;
@@ -90,6 +100,7 @@ export type ParcProps = {
         places: number;
         occupants: number;
     };
+    detailsIndicateurs?: DetailsIndicateurs;
     typesChambre: { id: string; name: string }[];
     urls: {
         hebergement: string;

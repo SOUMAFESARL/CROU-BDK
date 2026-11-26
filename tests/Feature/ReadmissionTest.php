@@ -13,6 +13,8 @@ class ReadmissionTest extends \Tests\Support\DossierTestCase
         parent::setUp();
         Schema::table('etudiants',function(Blueprint $t){
             $t->string('telephone1')->nullable();$t->string('numero_piece')->nullable();$t->string('password')->nullable();
+            // Écrits par l'admission directe (import admin) : DossierWorkflow::admissionDirecte.
+            $t->boolean('is_validation')->default(false);$t->timestamp('date_validation')->nullable();$t->string('users_validation')->nullable();
         });
         Schema::table('campagne',function(Blueprint $t){
             $t->string('annee_campagne')->nullable();$t->boolean('readmission')->nullable();
@@ -242,7 +244,8 @@ class ReadmissionTest extends \Tests\Support\DossierTestCase
         ]);
         $this->assertSame(2,Etudiant::count());
         $this->assertSame('student',DemandeEtudiant::firstOrFail()->etudiant_id);
-        $this->assertSame('pre_attribue',DemandeEtudiant::firstOrFail()->etat_dossier);
+        // L'import admin est une admission directe : chambre attribuée définitivement (comme AdmissionImportTest).
+        $this->assertSame('attribue_definitif',DemandeEtudiant::firstOrFail()->etat_dossier);
         $this->assertSame('unchanged',Etudiant::findOrFail('student')->password);
         $this->assertSame('+225 07 01 02 03 04',Etudiant::findOrFail('student')->telephone1);
     }

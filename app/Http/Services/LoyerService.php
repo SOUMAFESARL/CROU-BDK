@@ -43,7 +43,9 @@ class LoyerService
             $reductions = $this->calculerReductions($etudiant);
             $moisFacturation = now()->month;
             $anneeFacturation = now()->year;
-            $dateLimitPaiement = Carbon::create($anneeFacturation, $moisFacturation, 10, 23, 59, 59);
+            // Échéance du calendrier des loyers de la campagne, sinon le 10 du mois.
+            $calendrier = app(\App\Services\CalendrierLoyer::class);
+            $dateLimitPaiement = $calendrier->echeance($calendrier->de($assignation->campagne), $moisFacturation, $anneeFacturation);
             
             // 3. Calculer les suppléments
             $supplements = $this->calculerSupplements($chambre);
@@ -86,7 +88,8 @@ class LoyerService
                 'reduction_sociale' => $reductions['sociale'],
                 'supplement_prestation' => $supplements,
                 'solde_restant' => $montantTotal + $caution,
-                'penalite_journaliere' => $this->getPenaliteJournaliere($montantEcheance),
+                // Aucune pénalité de retard ne s'applique aux loyers.
+                'penalite_journaliere' => 0,
                 'jours_retard_autorises' => 5,
                 'renouvellement_auto' => true,
                 'created_by' => getInfoAdmin()->users->id_user ?? 'system',
@@ -355,12 +358,6 @@ public function estEnRetard(Loyer $loyer)
         };
     }
 
-    private function getPenaliteJournaliere($montantEcheance)
-    {
-        // 2% du montant de l'échéance par jour de retard
-        return round($montantEcheance * 0.02, 2);
-    }
-
     /** Avance exigée à l'entrée : nombre de mois de loyer fixé par les critères de la campagne (volet de la demande). */
     private function getFraisInscription($chambre, int $moisAvance)
     {
@@ -384,9 +381,8 @@ public function estEnRetard(Loyer $loyer)
             ->where('date_prochain_paiement', '<', now())
             ->get();
 
+        // Aucune pénalité de retard ne s'applique : seul le statut des loyers impayés est mis à jour.
         foreach ($loyers as $loyer) {
-            $loyer->appliquerPenalites();
-            
             if ($loyer->solde_restant > 0) {
                 $joursRetard = now()->diffInDays($loyer->date_prochain_paiement);
                 if ($joursRetard > 30) {
@@ -564,19 +560,6 @@ private function calculerFacturation($dateDebut)
     public function updateSolde(string $loyerId): bool
     {
         return $this->loyerRepository->updateSolde($loyerId);
-    }
-
-    /**
-     * Applique les pénalités pour tous les loyers en retard
-     */
-    public function appliquerPenalites(): int
-    {
-        try {
-            return $this->loyerRepository->appliquerPenalites();
-        } catch (\Exception $e) {
-            Log::error('Erreur lors de l\'application des pénalités: ' . $e->getMessage());
-            throw $e;
-        }
     }
 
     /**
@@ -758,41 +741,6 @@ public function getNombreLoyersEnRetard(): int
 public function getQuery()
 {
     return $this->model->newQuery();
-}
-
-/**
- * Récupère les statistiques par résidence avec filtres
- */
-public function getStatistiquesParResidenceFiltre(?string $annee = null, ?string $mois = null, ?string $residence = null): array
-{
-    $stats = $this->loyerRepository->getStatistiquesParResidenceFiltre($annee, $mois, $residence);
-    
-    if ($stats->isEmpty()) {
-        return [];
-    }
-    
-    $result = [];
-    foreach ($stats as $item) {
-        $result[] = [
-            'residence' => $item->residence,
-            // Valeurs NUMÉRIQUES pour les calculs
-            'total_attendu' => (float) $item->total_attendu,
-            'total_encaisse' => (float) $item->total_encaisse,
-            'taux_recouvrement' => (float) $item->taux_recouvrement,
-            'total_impayes' => (float) $item->total_impayes,
-            'nb_residents' => (int) $item->nb_residents,
-            'loyer_moyen' => (float) $item->loyer_moyen,
-            'nb_en_retard' => (int) $item->nb_en_retard,
-            'alerte' => (bool) $item->alerte,
-            // Valeurs formatées pour l'affichage (optionnel)
-            'total_attendu_formate' => number_format($item->total_attendu, 0, ',', ' ') . ' FCFA',
-            'total_encaisse_formate' => number_format($item->total_encaisse, 0, ',', ' ') . ' FCFA',
-            'total_impayes_formate' => number_format($item->total_impayes, 0, ',', ' ') . ' FCFA',
-            'loyer_moyen_formate' => number_format($item->loyer_moyen, 0, ',', ' ') . ' FCFA',
-        ];
-    }
-    
-    return $result;
 }
 
 }

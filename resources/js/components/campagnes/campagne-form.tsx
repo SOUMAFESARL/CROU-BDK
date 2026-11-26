@@ -1,15 +1,18 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { router, usePage } from '@inertiajs/react';
-import { Building, CalendarDays, ClipboardCheck, Info, RefreshCw, UserPlus, Users } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Building, CalendarDays, ClipboardCheck, FileText, Info, Plus, RefreshCw, UserPlus, Users } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { formatDate, TYPES_CAMPAGNE, type CampagneFormValues, type CreateCampagneProps, type TypeCampagne } from '@/components/campagnes/types';
 import { AdminLayout } from '@/components/layout/admin-layout';
+import { DocumentFormulaire } from '@/components/parametrage-hebergement/document-form';
 import { ChoiceCard, RecapSection, ToggleCard } from '@/components/parc-immobilier/form/inputs';
 import { FormAlert, SectionTitle, useWizard, Wizard, type WizardStep } from '@/components/parc-immobilier/form/wizard';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
@@ -120,7 +123,7 @@ type CampagneFormProps = CreateCampagneProps & {
 };
 
 /** Assistant de saisie d'une campagne d'admission, en création comme en modification. */
-export function CampagneForm({ residences, documents, urls, campagne, dossiers = 0 }: CampagneFormProps) {
+export function CampagneForm({ residences, documents, ordreDocumentSuivant, urls, campagne, dossiers = 0 }: CampagneFormProps) {
     const { errors: serverErrors } = usePage<SharedProps>().props;
     // Toutes les étapes sont cliquables d'emblée, en création comme en modification (les champs vides sont tolérés ;
     // `allerA` bloque seulement sur une valeur saisie invalide dans une étape intermédiaire).
@@ -146,19 +149,22 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
     } = useForm<FormInput, unknown, FormOutput>({ resolver: zodResolver(schema), mode: 'onTouched', defaultValues: campagne ?? VALEURS_INITIALES });
 
     // Erreurs Laravel (`residences.0` → `residences`) : affichées sous les champs, retour à la première étape concernée.
+    // Les erreurs d'un autre formulaire (ajout de document, sac « document ») ne déplacent pas l'assistant.
     useEffect(() => {
         const champs = Object.keys(serverErrors);
         if (!champs.length) return;
         let premiere = STEPS.length - 1;
+        let concernee = false;
         champs.forEach((cle) => {
             const champ = cle.split('.')[0] as Champ;
             const index = STEPS.findIndex((step) => step.fields.includes(champ));
-            if (index >= 0) {
+            if (index >= 0 && typeof serverErrors[cle] === 'string') {
                 setError(champ, { message: serverErrors[cle] });
                 premiere = Math.min(premiere, index);
+                concernee = true;
             }
         });
-        wizard.goTo(premiere);
+        if (concernee || serverErrors.error || serverErrors.campagne) wizard.goTo(premiere);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [serverErrors]);
 
@@ -262,7 +268,26 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
         setValue(champ, suivantes, { shouldDirty: true, shouldValidate: !!errors[champ] });
     };
 
-    const nomsDocuments = documents.filter((document) => values.documents.includes(document.id)).map((document) => document.name);
+    const documentsChoisis = documents.filter((document) => values.documents.includes(document.id));
+
+    // Ajout d'un document sans quitter l'assistant : `document.store` revient sur cette page avec la liste à jour,
+    // et le document créé est coché d'office (la saisie de la campagne est conservée).
+    const [ajoutDocument, setAjoutDocument] = useState(false);
+    const documentsConnus = useRef(new Set(documents.map((document) => document.id)));
+    const cocherNouveaux = useRef(false);
+    useEffect(() => {
+        const nouveaux = documents.filter((document) => !documentsConnus.current.has(document.id)).map((document) => document.id);
+        documentsConnus.current = new Set(documents.map((document) => document.id));
+        if (cocherNouveaux.current && nouveaux.length) {
+            cocherNouveaux.current = false;
+            setValue('documents', [...new Set([...getValues('documents'), ...nouveaux])], { shouldDirty: true });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [documents]);
+    const ouvrirAjoutDocument = () => {
+        cocherNouveaux.current = true;
+        setAjoutDocument(true);
+    };
 
     return (
         <AdminLayout title={titre} breadcrumbs={breadcrumbs}>
@@ -459,9 +484,15 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
 
                             <Separator />
                             <div className="flex flex-wrap items-end justify-between gap-2">
-                                <SectionTitle hint="Pièces que l’étudiant doit fournir avec sa demande.">Documents requis</SectionTitle>
+                                <SectionTitle hint="Pièces que l’étudiant devra joindre à sa demande pour cette campagne.">Documents requis</SectionTitle>
                                 {documents.length > 0 && (
-                                    <span className="flex items-center gap-2 text-sm">
+                                    <span className="flex flex-wrap items-center gap-2 text-sm">
+                                        <span className="text-muted" aria-live="polite">
+                                            {values.documents.length} sélectionné(s) sur {documents.length}
+                                        </span>
+                                        <span className="text-muted" aria-hidden>
+                                            ·
+                                        </span>
                                         <button
                                             type="button"
                                             className="cursor-pointer text-primary hover:underline"
@@ -479,17 +510,32 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                 )}
                             </div>
                             {documents.length === 0 ? (
-                                <p className="text-sm text-muted">Aucun document configuré.</p>
+                                <div className="flex flex-col items-center gap-2 rounded-brand border border-dashed px-4 py-6 text-center">
+                                    <FileText size={18} strokeWidth={1.25} className="text-gray-400" aria-hidden />
+                                    <p className="text-sm text-muted">
+                                        Aucun document à fournir n’est encore paramétré.
+                                        {urls.documentStore ? ' Ajoutez-en un pour le demander dans cette campagne.' : ' Demandez à un administrateur du paramétrage d’en ajouter.'}
+                                    </p>
+                                </div>
                             ) : (
-                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" role="group" aria-label="Documents requis">
                                     {documents.map((document) => (
                                         <ToggleCard
                                             key={document.id}
                                             checked={values.documents.includes(document.id)}
                                             onChange={(coche) => basculer('documents', document.id, coche)}
                                             label={document.name}
+                                            description={document.requis ? 'Pièce obligatoire' : 'Pièce facultative'}
                                         />
                                     ))}
+                                </div>
+                            )}
+                            {urls.documentStore && (
+                                <div>
+                                    <Button type="button" variant="outline" size="sm" className="h-10" onClick={ouvrirAjoutDocument}>
+                                        <Plus className="size-4" aria-hidden />
+                                        Ajouter un document
+                                    </Button>
                                 </div>
                             )}
                         </>
@@ -539,13 +585,41 @@ export function CampagneForm({ residences, documents, urls, campagne, dossiers =
                                             </span>
                                         ) : null,
                                     ],
-                                    ['Documents requis', nomsDocuments.join(', ')],
+                                    [
+                                        'Documents requis',
+                                        documentsChoisis.length ? (
+                                            <span className="flex flex-wrap gap-1">
+                                                {documentsChoisis.map((document) => (
+                                                    <Badge key={document.id} variant={document.requis ? 'warning' : 'neutral'}>
+                                                        {document.name}
+                                                        {document.requis ? ' · obligatoire' : ' · facultatif'}
+                                                    </Badge>
+                                                ))}
+                                            </span>
+                                        ) : null,
+                                    ],
                                 ]}
                             />
                         </div>
                     )}
                 </Wizard>
             </form>
+
+            {urls.documentStore && (
+                <Dialog open={ajoutDocument} onOpenChange={setAjoutDocument}>
+                    <DialogContent className="max-w-xl">
+                        {ajoutDocument && (
+                            <DocumentFormulaire
+                                document={null}
+                                url={urls.documentStore}
+                                ordreSuivant={ordreDocumentSuivant}
+                                errorBag="document"
+                                onClose={() => setAjoutDocument(false)}
+                            />
+                        )}
+                    </DialogContent>
+                </Dialog>
+            )}
         </AdminLayout>
     );
 }

@@ -1750,7 +1750,7 @@ class CampagnesAdmissionController extends Controller
                 'index' => route('admin.hebergement.campagnes_admission.campagnes'),
                 'submit' => $access->allows($admin, 'admin.hebergement.campagnes_admission.post_campagnes')
                     ? route('admin.hebergement.campagnes_admission.post_campagnes') : null,
-            ],
+            ] + $this->urlsDocuments($admin, $access),
         ]);
     }
 
@@ -1781,7 +1781,7 @@ class CampagnesAdmissionController extends Controller
                 'index' => route('admin.hebergement.campagnes_admission.campagnes'),
                 'submit' => $access->allows($admin, 'admin.hebergement.campagnes_admission.update_campagne')
                     ? route('admin.hebergement.campagnes_admission.update_campagne', $campagne->id_campagne) : null,
-            ],
+            ] + $this->urlsDocuments($admin, $access),
         ]);
     }
 
@@ -1808,7 +1808,26 @@ class CampagnesAdmissionController extends Controller
                     'chambres' => (int) $cite->batiment->sum(fn ($batiment) => $batiment->chambresDisponibles->count()),
                 ])->values(),
             'documents' => $documents
-                ->map(fn ($document) => ['id' => (string) $document->id_document, 'name' => $document->name])->values(),
+                ->sortBy(fn ($document) => [(int) $document->ordre_affiche, $document->name])
+                ->map(fn ($document) => [
+                    'id' => (string) $document->id_document,
+                    'name' => $document->name,
+                    'requis' => (bool) $document->champs_requis,
+                ])->values(),
+            // Ordre proposé pour un document ajouté depuis l'assistant (à la suite des documents existants).
+            'ordreDocumentSuivant' => Document::count() + 1,
+        ];
+    }
+
+    /**
+     * Ajout d'un document à fournir sans quitter l'assistant (action `document.store`, qui revient sur la campagne),
+     * selon les droits de l'administrateur.
+     */
+    private function urlsDocuments($admin, AdminAccess $access): array
+    {
+        return [
+            'documentStore' => $access->allows($admin, 'admin.hebergement.parametrage-herb.document.store')
+                ? route('admin.hebergement.parametrage-herb.document.store') : null,
         ];
     }
 

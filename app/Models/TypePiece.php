@@ -13,6 +13,9 @@ class TypePiece extends Model
 
     protected  $table= 'type_piece';
 
+    /** La table n'a pas de colonnes created_at / updated_at. */
+    public $timestamps = false;
+
 
 
 }

@@ -125,177 +125,6 @@ class PaiementService
      */
 
 
-/**
- * Récupère les statistiques des paiements
- */
-public function getStatistiquesPaiements(?string $annee = null, ?string $mois = null, ?string $residence = null): array
-{
-    $query = $this->paiementRepository->getQuery()->where('type_paiement', 'loyer');
-    
-    if ($annee) {
-        $query->whereYear('date_paiement', $annee);
-    }
-    if ($mois) {
-        $query->whereMonth('date_paiement', $mois);
-    }
-    if ($residence) {
-        $query->where('cite_id', $residence);
-    }
-    
-    $totalEncaisse = $query->where('statut_paiement', 'valide')->sum('montant');
-    $nombrePaiements = $query->where('statut_paiement', 'valide')->count();
-    
-    return [
-        'total_encaisse' => $totalEncaisse,
-        'nombre_paiements' => $nombrePaiements,
-    ];
-}
-
-/**
- * Récupère l'évolution des paiements
- */
-public function getEvolutionPaiements(?string $annee = null, ?string $mois = null, ?string $residence = null): array
-{
-    $annee = $annee ?? date('Y');
-    $data = [];
-    
-    for ($i = 1; $i <= 12; $i++) {
-        $query = $this->paiementRepository->getQuery();
-        $query->where('statut_paiement', 'valide')
-              ->whereYear('date_paiement', $annee)
-              ->whereMonth('date_paiement', $i);
-        
-        if ($residence) {
-            $query->where('cite_id', $residence);
-        }
-        
-        $data[] = $query->sum('montant');
-    }
-    
-    return $data;
-}
-
-/**
- * Récupère l'évolution des montants attendus
- */
-public function getEvolutionAttendus(?string $annee = null, ?string $mois = null, ?string $residence = null): array
-{
-    $annee = $annee ?? date('Y');
-    $data = [];
-    
-    for ($i = 1; $i <= 12; $i++) {
-        $query = $this->loyerRepository->getQuery();
-        $query->where('statut', '!=', 'annule')
-              ->whereYear('created_at', $annee)
-              ->whereMonth('created_at', $i);
-        
-        if ($residence) {
-            $query->where('cite_id', $residence);
-        }
-        
-        $data[] = $query->sum('montant_total');
-    }
-    
-    return $data;
-}
-
-/**
- * Récupère les derniers paiements
- */
-public function getDerniersPaiements(int $limit = 10): array
-{
-    $paiements = $this->paiementRepository->getQuery()
-        ->with(['resident', 'cite'])
-        ->orderBy('created_at', 'desc')
-        ->limit($limit)
-        ->get();
-    
-    return $paiements->map(function ($paiement) {
-        return [
-            'id' => $paiement->id_paiement,
-            'numero' => $paiement->numero_paiement,
-            'resident' => $paiement->resident?->name ?? 'N/A',
-            'montant' => $paiement->montant,
-            'montant_formate' => number_format($paiement->montant, 0, ',', ' ') . ' FCFA',
-            'methode' => $paiement->methode_label,
-            'statut' => $paiement->statut_label,
-            'statut_badge' => $paiement->statut_badge,
-            'date' => $paiement->created_at?->format('d/m/Y H:i'),
-            'residence' => $paiement->cite?->name ?? 'N/A',
-        ];
-    })->toArray();
-}
-
-public function getStatistiquesParModePaiement(?string $annee = null, ?string $mois = null, ?string $residence = null): array
-{
-    $query = $this->paiementRepository->getQuery()
-        ->select(
-            'methode_paiement',
-            DB::raw('COUNT(*) as nombre'),
-            DB::raw('SUM(montant) as total'),
-            DB::raw('AVG(montant) as moyenne')
-        )
-        ->where('statut_paiement', 'valide')
-        ->where('type_paiement', 'loyer');
-    
-    if ($annee) {
-        $query->whereYear('date_paiement', $annee);
-    }
-    if ($mois) {
-        $query->whereMonth('date_paiement', $mois);
-    }
-    if ($residence) {
-        $query->where('cite_id', $residence);
-    }
-    
-    $results = $query->groupBy('methode_paiement')->get();
-    
-    $labels = [
-        'orange_money' => 'Orange Money',
-        'mtn_money' => 'MTN Money',
-        'moov_money' => 'Moov Money',
-        'especes' => 'Espèces',
-        'virement' => 'Virement bancaire',
-        'carte_bancaire' => 'Carte bancaire',
-        'autre' => 'Autre'
-    ];
-    
-    $colors = [
-        'orange_money' => '#f47b20',
-        'mtn_money' => '#ffcb00',
-        'moov_money' => '#00a651',
-        'especes' => '#1e7aa8',
-        'virement' => '#6a4d8a',
-        'carte_bancaire' => '#b13e3e',
-        'autre' => '#5b7b99'
-    ];
-    
-    $result = [];
-    foreach ($results as $item) {
-        $result[] = [
-            'methode' => $item->methode_paiement,
-            'libelle' => $labels[$item->methode_paiement] ?? $item->methode_paiement,
-            'couleur' => $colors[$item->methode_paiement] ?? '#5b7b99',
-            'nombre' => (int) $item->nombre,
-            'total' => (float) $item->total,
-            'total_formate' => number_format($item->total, 0, ',', ' ') . ' FCFA',
-            'moyenne' => (float) $item->moyenne,
-            'moyenne_formate' => number_format($item->moyenne, 0, ',', ' ') . ' FCFA',
-            'pourcentage' => 0 // Calculé après
-        ];
-    }
-    
-    // Calculer les pourcentages
-    $totalGeneral = array_sum(array_column($result, 'total'));
-    if ($totalGeneral > 0) {
-        foreach ($result as &$item) {
-            $item['pourcentage'] = round(($item['total'] / $totalGeneral) * 100, 1);
-        }
-    }
-    
-    return $result;
-}
-
 /** Seul le type « loyer » est réparti sur les loyers (arriérés, mois en cours, avances). */
 public const TYPE_LOYER = 'loyer';
 
@@ -582,12 +411,13 @@ protected function repartirPaiement(float $montant, float $arriereTotal, ?object
                 $montantRef = $loyerCible->montant_total;
                 
                 while ($montantRestant > 0) {
-                    $moisRef++;
-                    if ($moisRef > 12) {
-                        $moisRef = 1;
-                        $anneeRef++;
+                    // Mois suivant : le prochain du calendrier des loyers (ou le mois consécutif sans calendrier).
+                    $suivant = $this->moisSuivant($etudiantId, $moisRef, $anneeRef);
+                    if ($suivant === null) {
+                        break;
                     }
-                    
+                    ['mois' => $moisRef, 'annee' => $anneeRef] = $suivant;
+
                     $montantPourCeMois = min($montantRestant, $montantRef);
                     
                     $repartition['mois_futurs'][] = [
@@ -664,8 +494,8 @@ protected function getOrCreerLoyerParMois(string $etudiantId, int $mois, int $an
         $montantLoyer = 50000; // Valeur par défaut
     }
     
-    // Créer le loyer
-    $dateLimite = Carbon::create($annee, $mois, 10, 23, 59, 59);
+    // Créer le loyer (date limite : échéance du calendrier des loyers de la campagne, sinon le 10 du mois)
+    $dateLimite = $this->echeanceLoyer($etudiantId, $mois, $annee);
     
     $data = [
         'etudiant_id' => $etudiantId,
@@ -756,8 +586,8 @@ protected function getAnneeUniversitaire(int $annee): string
  */
 protected function creerLoyerMoisFutur(object $loyerTemplate, int $mois, int $annee, float $montantPaye, float $soldeRestant): object
 {
-    $dateLimite = Carbon::create($annee, $mois, 10, 23, 59, 59);
-    
+    $dateLimite = $this->echeanceLoyer($loyerTemplate->etudiant_id, $mois, $annee);
+
     // S'assurer que le montant de base est défini
     $montantBase = $loyerTemplate->montant_base ?? $loyerTemplate->montant_total ?? 0;
     $montantTotal = $loyerTemplate->montant_total ?? $montantBase;
@@ -812,7 +642,8 @@ protected function creerLoyerMoisFutur(object $loyerTemplate, int $mois, int $an
         'nombre_impayes' => 0,
         'date_dernier_paiement' => now(),
         'total_penalites' => 0,
-        'penalite_journaliere' => $loyerTemplate->penalite_journaliere ?? 0,
+        // Aucune pénalité de retard ne s'applique aux loyers.
+        'penalite_journaliere' => 0,
         'jours_retard_autorises' => $loyerTemplate->jours_retard_autorises ?? 5,
         'renouvellement_auto' => $loyerTemplate->renouvellement_auto ?? true,
         'periode_rappel_jours' => $loyerTemplate->periode_rappel_jours ?? 3,
@@ -1114,57 +945,42 @@ protected function creerLoyerMoisFutur(object $loyerTemplate, int $mois, int $an
 
 /**
  * Récupère le dernier mois payé pour un étudiant
- * Retourne le mois et l'année du dernier paiement effectué
+ * Retourne le mois et l'année du dernier paiement effectué (le mois en cours si aucun mois payé n'est connu)
  */
 protected function getDernierMoisPaye(string $etudiantId): ?array
 {
-    // Récupérer le dernier paiement validé
-    $dernierPaiement = $this->paiementRepository->getLastPaiementByEtudiant($etudiantId);
-    
-    if (!$dernierPaiement) {
-        // Aucun paiement trouvé, on commence par le mois en cours
-        return [
-            'mois' => (int) now()->format('m'),
-            'annee' => (int) now()->format('Y')
-        ];
-    }
-    
-    // Si le champ mois est un tableau (plusieurs mois payés)
-    if (is_array($dernierPaiement->mois) || is_object($dernierPaiement->mois)) {
-        $moisListe = (array) $dernierPaiement->mois;
-        if (!empty($moisListe)) {
-            // Prendre le dernier mois de la liste
-            $dernier = end($moisListe);
-            if (preg_match('/^(\d{2})-(\d{4})$/', $dernier, $matches)) {
-                return [
-                    'mois' => (int) $matches[1],
-                    'annee' => (int) $matches[2]
-                ];
-            }
-        }
-    }
-    
-    // Si c'est une chaîne simple
-    if (is_string($dernierPaiement->mois)) {
-        if (preg_match('/^(\d{2})-(\d{4})$/', $dernierPaiement->mois, $matches)) {
-            return [
-                'mois' => (int) $matches[1],
-                'annee' => (int) $matches[2]
-            ];
-        }
-    }
-    
-    // Par défaut, retourner le mois en cours
-    return [
+    return $this->dernierMoisPayeConnu($etudiantId) ?? [
         'mois' => (int) now()->format('m'),
-        'annee' => (int) now()->format('Y')
+        'annee' => (int) now()->format('Y'),
     ];
 }
 
 /**
- * Récupère le prochain mois à payer
- * Retourne le mois et l'année du prochain mois à payer
+ * Dernier mois payé (loyer ou avance) : dernier mois du dernier paiement validé ; null si aucun n'est connu.
  */
+protected function dernierMoisPayeConnu(string $etudiantId): ?array
+{
+    $dernierPaiement = $this->paiementRepository->getLastPaiementByEtudiant($etudiantId);
+    if (!$dernierPaiement) {
+        return null;
+    }
+
+    // Plusieurs mois payés : le dernier de la liste ; ou une chaîne simple « mm-aaaa ».
+    $moisListe = is_array($dernierPaiement->mois) || is_object($dernierPaiement->mois)
+        ? (array) $dernierPaiement->mois
+        : (is_string($dernierPaiement->mois) ? [$dernierPaiement->mois] : []);
+    $dernier = $moisListe ? end($moisListe) : null;
+
+    if (is_string($dernier) && preg_match('/^(\d{2})-(\d{4})$/', $dernier, $matches)) {
+        return [
+            'mois' => (int) $matches[1],
+            'annee' => (int) $matches[2],
+        ];
+    }
+
+    return null;
+}
+
 /** Prochain mois à payer (`mm-aaaa`) : le mois qui suit le dernier mois payé (loyer ou avance). */
 public function prochainMoisAPayer(string $etudiantId): string
 {
@@ -1174,7 +990,8 @@ public function prochainMoisAPayer(string $etudiantId): string
 }
 
 /**
- * Mois consécutifs (`mm-aaaa`) couverts par un paiement de loyer ou d'avance de `$nombre` mois : à partir du prochain mois à payer.
+ * Mois (`mm-aaaa`) couverts par un paiement de loyer ou d'avance de `$nombre` mois : à partir du prochain mois à payer.
+ * Avec un calendrier des loyers, seuls ses mois restants sont proposés (la liste peut être plus courte que `$nombre`).
  *
  * @return string[]
  */
@@ -1183,20 +1000,41 @@ public function moisConsecutifs(string $etudiantId, int $nombre): array
     return array_column($this->getMoisAPayer($etudiantId, max(0, $nombre)), 'libelle');
 }
 
+/**
+ * Prochain mois à payer. Avec un calendrier des loyers (App\Services\CalendrierLoyer) : le mois du calendrier qui suit
+ * le dernier mois payé ou, sans mois payé, le premier mois du calendrier à partir de l'entrée dans la chambre (ou du
+ * mois en cours avant l'attribution) ; sans calendrier : le mois qui suit le dernier mois payé.
+ */
 protected function getProchainMoisAPayer(string $etudiantId): array
 {
+    $calendrier = $this->calendrierLoyer($etudiantId);
+    if ($calendrier) {
+        $service = app(\App\Services\CalendrierLoyer::class);
+        $connu = $this->dernierMoisPayeConnu($etudiantId);
+        $cle = $connu
+            ? $service->moisApres($calendrier, sprintf('%04d-%02d', $connu['annee'], $connu['mois']))
+            : $service->moisDepuis($calendrier, $this->moisDeReference($etudiantId));
+        if ($cle) {
+            return ['mois' => (int) substr($cle, 5, 2), 'annee' => (int) substr($cle, 0, 4)];
+        }
+        // Plus aucun mois du calendrier à payer : mois qui suit le dernier mois du calendrier (jamais proposé).
+        $dernier = Carbon::createFromFormat('!Y-m', end($calendrier)['mois'])->addMonth();
+
+        return ['mois' => $dernier->month, 'annee' => $dernier->year];
+    }
+
     $dernier = $this->getDernierMoisPaye($etudiantId);
-    
+
     $mois = $dernier['mois'];
     $annee = $dernier['annee'];
-    
+
     // Passer au mois suivant
     $mois++;
     if ($mois > 12) {
         $mois = 1;
         $annee++;
     }
-    
+
     return [
         'mois' => $mois,
         'annee' => $annee
@@ -1204,31 +1042,81 @@ protected function getProchainMoisAPayer(string $etudiantId): array
 }
 
 /**
- * Récupère tous les mois à payer à partir d'une date donnée
+ * Récupère tous les mois à payer à partir du prochain mois à payer : mois consécutifs ou, avec un calendrier des loyers,
+ * ses mois restants (au plus `$nombreMois`).
  */
 protected function getMoisAPayer(string $etudiantId, int $nombreMois = 12): array
 {
     $prochain = $this->getProchainMoisAPayer($etudiantId);
     $moisListe = [];
-    
+
+    if ($calendrier = $this->calendrierLoyer($etudiantId)) {
+        $depart = sprintf('%04d-%02d', $prochain['annee'], $prochain['mois']);
+        foreach (array_column($calendrier, 'mois') as $cle) {
+            if ($cle < $depart || count($moisListe) >= $nombreMois) {
+                continue;
+            }
+            [$annee, $mois] = array_map('intval', explode('-', $cle));
+            $moisListe[] = ['mois' => $mois, 'annee' => $annee, 'libelle' => $this->formatMoisAnnee($mois, $annee)];
+        }
+
+        return $moisListe;
+    }
+
     $mois = $prochain['mois'];
     $annee = $prochain['annee'];
-    
+
     for ($i = 0; $i < $nombreMois; $i++) {
         $moisListe[] = [
             'mois' => $mois,
             'annee' => $annee,
             'libelle' => $this->formatMoisAnnee($mois, $annee)
         ];
-        
+
         $mois++;
         if ($mois > 12) {
             $mois = 1;
             $annee++;
         }
     }
-    
+
     return $moisListe;
+}
+
+/** Calendrier des loyers de la campagne de l'étudiant (`[]` sans calendrier configuré). */
+protected function calendrierLoyer(string $etudiantId): array
+{
+    return app(\App\Services\CalendrierLoyer::class)->pourEtudiant($etudiantId);
+}
+
+/**
+ * Mois de référence (`aaaa-mm`) du premier loyer quand aucun mois n'est encore payé : mois d'entrée dans la chambre
+ * (attribution confirmée), sinon le mois en cours.
+ */
+protected function moisDeReference(string $etudiantId): string
+{
+    $entree = AssignationChambre::where('etudiant_id', $etudiantId)->where('statut', 'confirmee')
+        ->latest('created_at')->value('date_assignation');
+
+    return Carbon::parse($entree ?? now())->format('Y-m');
+}
+
+/** Mois qui suit (mois, année) : le suivant du calendrier des loyers, ou le mois consécutif ; null si le calendrier est épuisé. */
+protected function moisSuivant(string $etudiantId, int $mois, int $annee): ?array
+{
+    if ($calendrier = $this->calendrierLoyer($etudiantId)) {
+        $cle = app(\App\Services\CalendrierLoyer::class)->moisApres($calendrier, sprintf('%04d-%02d', $annee, $mois));
+
+        return $cle ? ['mois' => (int) substr($cle, 5, 2), 'annee' => (int) substr($cle, 0, 4)] : null;
+    }
+
+    return $mois >= 12 ? ['mois' => 1, 'annee' => $annee + 1] : ['mois' => $mois + 1, 'annee' => $annee];
+}
+
+/** Date limite de paiement du loyer d'un mois : échéance du calendrier des loyers, sinon le 10 du mois. */
+protected function echeanceLoyer(string $etudiantId, int $mois, int $annee): Carbon
+{
+    return app(\App\Services\CalendrierLoyer::class)->echeance($this->calendrierLoyer($etudiantId), $mois, $annee);
 }
 
 
@@ -1314,13 +1202,6 @@ public function getKPIs(): array
             'trend' => '▲ +1,2%',
             'trend_class' => 'danger',
             'type' => 'danger',
-        ],
-        [
-            'label' => 'Pénalités',
-            'value' => number_format($statsLoyers['total_penalites'], 0, ',', ' ') . ' FCFA',
-            'trend' => '⚠️ Retards accumulés',
-            'trend_class' => 'warning',
-            'type' => 'warning',
         ],
         [
             'label' => 'Nombre de paiements',

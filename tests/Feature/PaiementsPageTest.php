@@ -101,10 +101,14 @@ class PaiementsPageTest extends TestCase
             $t->string('id_campagne')->primary();
             $t->string('libelle')->nullable();
             $t->string('annee_campagne')->nullable();
+            $t->integer('annee_debut')->nullable();
             $t->string('statut')->nullable();
+            $t->string('updated_by')->nullable();
             $t->timestamps();
             $t->softDeletes();
         });
+        // Calendrier des loyers de la campagne (onglet « Calendrier des loyers »).
+        (require database_path('migrations/2026_11_26_000001_add_calendrier_loyer_to_campagne_table.php'))->up();
         Schema::create('assignation_chambres', function (Blueprint $t) {
             $t->string('id_assignation')->primary();
             $t->string('campagne_id')->nullable();
@@ -113,6 +117,11 @@ class PaiementsPageTest extends TestCase
         Schema::create('loyers', function (Blueprint $t) {
             $t->string('id_loyer')->primary();
             $t->string('assignation_id')->nullable();
+            $t->integer('mois_facturation')->nullable();
+            $t->integer('annee_facturation')->nullable();
+            $t->decimal('total_paye', 12, 2)->default(0);
+            $t->decimal('solde_restant', 12, 2)->default(0);
+            $t->dateTime('date_limit_paiement')->nullable();
             $t->timestamps();
             $t->softDeletes();
         });
@@ -128,8 +137,8 @@ class PaiementsPageTest extends TestCase
         });
 
         DB::table('campagne')->insert([
-            ['id_campagne' => 'k0', 'libelle' => 'Campagne 2025-2026', 'annee_campagne' => '2025-2026', 'statut' => 'terminee', 'created_at' => now()->subYear()],
-            ['id_campagne' => 'k1', 'libelle' => 'Campagne 2026-2027', 'annee_campagne' => '2026-2027', 'statut' => 'active', 'created_at' => now()],
+            ['id_campagne' => 'k0', 'libelle' => 'Campagne 2025-2026', 'annee_campagne' => '2025-2026', 'annee_debut' => 2025, 'statut' => 'terminee', 'created_at' => now()->subYear()],
+            ['id_campagne' => 'k1', 'libelle' => 'Campagne 2026-2027', 'annee_campagne' => '2026-2027', 'annee_debut' => 2026, 'statut' => 'active', 'created_at' => now()],
         ]);
         DB::table('assignation_chambres')->insert([['id_assignation' => 'a0', 'campagne_id' => 'k0'], ['id_assignation' => 'a1', 'campagne_id' => 'k1']]);
         DB::table('loyers')->insert(['id_loyer' => 'l0', 'assignation_id' => 'a0']);
@@ -160,17 +169,6 @@ class PaiementsPageTest extends TestCase
             Paiement::with(['resident', 'chambre', 'cite'])->get(), 1, 20, 1, ['path' => '/admin/gestion-hebergement/paiements']
         ));
         $paiements->shouldReceive('getKPIs')->andReturn([['label' => 'Nombre de paiements', 'value' => 7]]);
-        $paiements->shouldReceive('getStatistiquesPaiements')->andReturn(['total_encaisse' => 40000, 'nombre_paiements' => 2]);
-        $paiements->shouldReceive('getEvolutionPaiements')->andReturn(array_fill(0, 12, 0));
-        $paiements->shouldReceive('getEvolutionAttendus')->andReturn(array_fill(0, 12, 1000));
-        $paiements->shouldReceive('getDerniersPaiements')->andReturn([[
-            'id' => 'p1', 'numero' => 'PAY-001', 'resident' => 'Awa Koné', 'montant' => 25000, 'montant_formate' => '25 000 FCFA',
-            'methode' => 'Espèces', 'statut' => 'En attente', 'statut_badge' => 'warning', 'date' => '15/10/2026 10:00', 'residence' => 'Cité Bondoukou',
-        ]]);
-        $paiements->shouldReceive('getStatistiquesParModePaiement')->andReturn([[
-            'methode' => 'especes', 'libelle' => 'Espèces', 'couleur' => '#1e7aa8', 'nombre' => 2, 'total' => 40000.0, 'total_formate' => '40 000 FCFA',
-            'moyenne' => 20000.0, 'moyenne_formate' => '20 000 FCFA', 'pourcentage' => 100.0,
-        ]]);
 
         $loyers = Mockery::mock(LoyerService::class);
         $loyers->shouldReceive('getStatistiquesParResidence')->andReturn(collect([[
@@ -185,7 +183,6 @@ class PaiementsPageTest extends TestCase
                 'nombre_en_retard' => 2, 'total_penalites' => 1500.0,
             ];
         });
-        $loyers->shouldReceive('getStatistiquesParResidenceFiltre')->andReturn([]);
 
         $etudiants = Mockery::mock(EtudiantService::class);
         $etudiants->shouldReceive('getAll')->andReturn(collect());
@@ -216,8 +213,19 @@ class PaiementsPageTest extends TestCase
         ]);
         // Mois abrégés dans le tableau.
         $this->assertSame('oct-2026', $ligne['mois']);
-        // `nombre_paiements` : paiements de la campagne datés du mois en cours (p1 n'a pas de date de paiement).
-        $this->assertEquals(['total_encaisse' => 40000, 'taux_recouvrement' => 40, 'impayes' => 60000, 'penalites' => 1500, 'nombre_paiements' => 0, 'nombre_retard' => 2], $props['kpis']);
+        // `total_encaisse` / `nombre_paiements` : paiements validés de la campagne (p1 est en attente).
+        // Aucune pénalité de retard : à la place, la prochaine échéance du calendrier des loyers (non configuré ici).
+        $this->assertEquals(['total_encaisse' => 0, 'taux_recouvrement' => 40, 'impayes' => 60000, 'prochaine_echeance' => null, 'nombre_paiements' => 0, 'nombre_retard' => 2], $props['kpis']);
+        // Encaissé : tous les types validés de la campagne (loyer, caution avant l'attribution…), pas les loyers facturés seuls.
+        DB::table('paiements')->where('id_paiement', 'p1')->update(['statut_paiement' => 'valide']);
+        DB::table('demande')->insert(['id_demande' => 'd0', 'etudiant_id' => 'e1', 'campagne_id' => 'k1', 'created_at' => now()->subWeek()]);
+        DB::table('paiements')->insert(['id_paiement' => 'p5', 'numero_paiement' => 'PAY-005', 'resident_id' => 'e1', 'montant' => 24000, 'type_paiement' => 'caution', 'methode_paiement' => 'especes', 'statut_paiement' => 'valide', 'created_at' => now()]);
+        $kpis = $this->page('index', 'Admin/Hebergement/Paiements/Index')['kpis'];
+        $this->assertEquals([49000, 2], [$kpis['total_encaisse'], $kpis['nombre_paiements']]);
+        DB::table('paiements')->where('id_paiement', 'p1')->update(['statut_paiement' => 'en_attente']);
+        DB::table('paiements')->where('id_paiement', 'p5')->delete();
+        DB::table('demande')->where('id_demande', 'd0')->delete();
+        $this->assertSame('paiements', $props['onglet']);
         // Sans choix explicite : la campagne active.
         $this->assertSame(['campagne' => 'k1', 'residence' => '', 'statut' => 'en_attente', 'mois' => '2026-10'], $props['filters']);
         $this->assertSame('k1', $this->campagneStats);
@@ -301,6 +309,41 @@ class PaiementsPageTest extends TestCase
         $this->assertSame(1, preg_match_all('#/Type\s*/Page[^s]#', $reponse->getContent()));
     }
 
+    public function test_l_etudiant_obtient_le_meme_recu_que_l_administration(): void
+    {
+        $vue = null;
+        \Illuminate\Support\Facades\View::composer('pdf.recu-paiement', function ($v) use (&$vue) {
+            $vue = $v->getData();
+        });
+        $controleur = new \App\Http\Controllers\etudiant\RecuPaiementController;
+        $requete = function (string $etudiant, array $query = []) {
+            $requete = \Illuminate\Http\Request::create('/etudiant/mes-paiements/recu/p1', 'GET', $query);
+            $requete->attributes->set('student', \App\Models\Etudiant::make()->forceFill(['id_etudiant' => $etudiant]));
+
+            return $requete;
+        };
+        $p1 = DB::table('paiements')->where('id_paiement', 'p1')->first();
+        // Un paiement en attente n'a pas de reçu côté étudiant.
+        try {
+            $controleur->show($requete($p1->resident_id), app(\App\Services\RecuPaiement::class), 'p1');
+            $this->fail('Reçu d’un paiement en attente');
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+        }
+        DB::table('paiements')->where('id_paiement', 'p1')->update(['statut_paiement' => 'valide']);
+
+        $apercu = $controleur->show($requete($p1->resident_id), app(\App\Services\RecuPaiement::class), 'p1');
+        $this->assertSame('application/pdf', $apercu->headers->get('Content-Type'));
+        $this->assertStringStartsWith('inline', (string) $apercu->headers->get('Content-Disposition'));
+        $this->assertSame('PAY-001', $vue['details'][0]['numero']);
+        $this->assertSame(['filiere', 'niveau'], array_keys($vue['parcours']));
+        $telechargement = $controleur->show($requete($p1->resident_id, ['telecharger' => 1]), app(\App\Services\RecuPaiement::class), 'p1');
+        $this->assertStringStartsWith('attachment', (string) $telechargement->headers->get('Content-Disposition'));
+
+        // Le reçu d'un autre étudiant est introuvable.
+        $this->expectException(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+        $controleur->show($requete('quelqu-un-d-autre'), app(\App\Services\RecuPaiement::class), 'p1');
+    }
+
     public function test_recu_unique_pour_les_types_enregistres_ensemble(): void
     {
         $base = ['resident_id' => 'e1', 'contrat_id' => null, 'methode_paiement' => 'especes', 'statut_paiement' => 'valide', 'created_at' => now()];
@@ -357,20 +400,98 @@ class PaiementsPageTest extends TestCase
         }
     }
 
+    /**
+     * Rapport financier, filtré par cité, campagne (active par défaut) et mois de la campagne : attendu, recouvré,
+     * impayés et retards sur les loyers facturés de la campagne (mois facturé) ; encaissé, modes et évolution sur les
+     * paiements validés de la campagne, tous types (mois du paiement).
+     */
     public function test_rapport_financier(): void
     {
-        $props = $this->page('rapportFinancier', 'Admin/Hebergement/Paiements/RapportFinancier', ['annee' => '2026']);
+        \Carbon\Carbon::setTestNow('2026-11-26 10:00:00');
+        Schema::table('loyers', function (Blueprint $t) {
+            $t->string('cite_id')->nullable();
+            $t->string('etudiant_id')->nullable();
+            $t->decimal('montant_total', 12, 2)->default(0);
+            $t->string('statut')->nullable();
+        });
+        DB::table('loyers')->delete();
+        $loyer = fn (string $id, string $mois, float $paye, string $statut = 'actif', string $assignation = 'a1') => [
+            'id_loyer' => $id, 'assignation_id' => $assignation, 'cite_id' => 'c1', 'etudiant_id' => $id === 'l3' ? 'e2' : 'e1',
+            'mois_facturation' => (int) substr($mois, 5, 2), 'annee_facturation' => (int) substr($mois, 0, 4),
+            'montant_total' => 10000, 'total_paye' => $paye, 'solde_restant' => 10000 - $paye,
+            'date_limit_paiement' => $mois.'-10', 'statut' => $statut, 'created_at' => now(),
+        ];
+        DB::table('loyers')->insert([
+            $loyer('l1', '2026-10', 10000, 'termine'),
+            $loyer('l2', '2026-11', 4000),            // échéance passée : 6 000 en retard
+            $loyer('l3', '2026-12', 0),               // pas encore échu
+            $loyer('l4', '2026-11', 0, 'annule'),
+            $loyer('l5', '2025-11', 0, 'actif', 'a0'), // campagne 2025-2026
+        ]);
+        $paiement = fn (string $id, string $type, string $methode, float $montant, string $date, ?string $contrat = 'a1', string $statut = 'valide') => [
+            'id_paiement' => $id, 'numero_paiement' => strtoupper($id), 'resident_id' => 'e1', 'contrat_id' => $contrat, 'cite_id' => $contrat ? 'c1' : null,
+            'montant' => $montant, 'type_paiement' => $type, 'methode_paiement' => $methode, 'statut_paiement' => $statut, 'date_paiement' => $date, 'created_at' => $date,
+        ];
+        // Caution avant l'attribution : rattachée à la campagne par la demande déposée avant le paiement.
+        DB::table('demande')->insert(['id_demande' => 'd1', 'etudiant_id' => 'e1', 'campagne_id' => 'k1', 'created_at' => '2026-08-01 09:00:00']);
+        DB::table('paiements')->insert([
+            $paiement('r1', 'loyer', 'especes', 10000, '2026-10-05 09:00:00'),
+            $paiement('r2', 'loyer', 'especes', 4000, '2026-11-15 09:00:00'),
+            $paiement('r3', 'caution', 'orange_money', 24000, '2026-08-20 09:00:00', null),
+            $paiement('r4', 'loyer', 'especes', 9000, '2025-11-05 09:00:00', 'a0'),
+            $paiement('r5', 'loyer', 'especes', 7000, '2026-11-21 09:00:00', 'a1', 'annule'),
+        ]);
+        $rapport = fn (array $filtres = []) => $this->page('rapportFinancier', 'Admin/Hebergement/Paiements/RapportFinancier', $filtres);
 
-        // Les flottants entiers perdent leur « .0 » en JSON : comparaison par valeur.
-        $this->assertEquals(100000, $props['stats']['total_attendu']);
-        $this->assertEquals(40000, $props['stats']['total_encaisse']);
-        $this->assertEquals(60000, $props['stats']['total_impayes']);
-        $this->assertEquals(40, $props['stats']['taux_recouvrement']);
-        $this->assertCount(12, $props['evolution']);
-        $this->assertEquals(['label' => 'Jan', 'encaisse' => 0, 'attendu' => 1000], $props['evolution'][0]);
-        $this->assertSame('Espèces', $props['statsParMode'][0]['libelle']);
-        $this->assertSame('PAY-001', $props['derniersPaiements'][0]['numero']);
-        $this->assertSame(['annee' => '2026', 'mois' => '', 'residence' => ''], $props['filters']);
+        // Par défaut : la campagne active (k1), tous ses mois, toutes les cités.
+        $props = $rapport();
+        $this->assertSame(['campagne' => 'k1', 'mois' => '', 'residence' => ''], $props['filters']);
+        $this->assertEquals([
+            'total_attendu' => 30000, 'total_recouvre' => 14000, 'total_encaisse' => 38000, 'total_impayes' => 16000, 'total_retard' => 6000,
+            'nb_retard' => 1, 'nb_impayes' => 2, 'nb_loyers' => 3, 'nb_paiements' => 3, 'taux_recouvrement' => 46.7,
+        ], $props['stats']);
+        $this->assertEquals(['paye' => 14000, 'a_echoir' => 10000, 'retard' => 6000], $props['repartition']);
+        // Mois proposés : ceux du calendrier des loyers de la campagne (proposé ici : 10 mois à partir de septembre 2026).
+        $this->assertCount(10, $props['mois']);
+        $this->assertSame([['value' => '2026-09', 'label' => 'Septembre 2026'], ['value' => '2027-06', 'label' => 'Juin 2027']], [$props['mois'][0], $props['mois'][9]]);
+        // Évolution : les mois de la campagne, plus août 2026 (caution versée avant le premier mois).
+        $this->assertCount(11, $props['evolution']);
+        $this->assertEquals([
+            ['label' => 'Aoû 2026', 'encaisse' => 24000, 'attendu' => 0],
+            ['label' => 'Sep 2026', 'encaisse' => 0, 'attendu' => 0],
+            ['label' => 'Oct 2026', 'encaisse' => 10000, 'attendu' => 10000],
+            ['label' => 'Nov 2026', 'encaisse' => 4000, 'attendu' => 10000],
+            ['label' => 'Déc 2026', 'encaisse' => 0, 'attendu' => 10000],
+        ], array_slice($props['evolution'], 0, 5));
+        $this->assertEquals([['Orange Money', 1, 24000, 63.2], ['Espèces', 2, 14000, 36.8]], array_map(
+            fn (array $mode) => [$mode['libelle'], $mode['nombre'], $mode['total'], $mode['pourcentage']], $props['statsParMode'],
+        ));
+        $this->assertSame([['id' => 'k1', 'libelle' => 'Campagne 2026-2027', 'active' => true], ['id' => 'k0', 'libelle' => 'Campagne 2025-2026', 'active' => false]], $props['campagnes']);
+        $this->assertArrayNotHasKey('statsParResidence', $props);
+        $this->assertArrayNotHasKey('derniersPaiements', $props);
+
+        // Un mois de la campagne : indicateurs de ce mois, évolution de toute la campagne.
+        $props = $rapport(['campagne' => 'k1', 'mois' => '2026-11']);
+        $this->assertEquals([10000, 4000, 4000, 40], [$props['stats']['total_attendu'], $props['stats']['total_recouvre'], $props['stats']['total_encaisse'], $props['stats']['taux_recouvrement']]);
+        $this->assertCount(11, $props['evolution']);
+        $this->assertSame('2026-11', $props['filters']['mois']);
+        // Mois hors de la campagne : ignoré.
+        $this->assertSame('', $rapport(['campagne' => 'k1', 'mois' => '2025-11'])['filters']['mois']);
+
+        // Une cité : les paiements sans cité (caution avant l'attribution) n'y sont pas comptés.
+        $props = $rapport(['residence' => 'c1']);
+        $this->assertEquals([14000, 2], [$props['stats']['total_encaisse'], $props['stats']['nb_paiements']]);
+
+        // Autre campagne.
+        $props = $rapport(['campagne' => 'k0']);
+        $this->assertEquals([10000, 0, 9000, 10000], [$props['stats']['total_attendu'], $props['stats']['total_recouvre'], $props['stats']['total_encaisse'], $props['stats']['total_retard']]);
+
+        // Toutes les campagnes : pas de mois à choisir.
+        $props = $rapport(['campagne' => 'toutes', 'mois' => '2026-11']);
+        $this->assertSame(['campagne' => 'toutes', 'mois' => '', 'residence' => ''], $props['filters']);
+        $this->assertSame([], $props['mois']);
+        $this->assertEquals([40000, 47000], [$props['stats']['total_attendu'], $props['stats']['total_encaisse']]);
+        \Carbon\Carbon::setTestNow();
     }
 
     /** « Nouveau paiement » : contrôleur dont le service de paiement enregistre les lignes reçues. */
@@ -504,7 +625,10 @@ class PaiementsPageTest extends TestCase
         }
         $paiements = Mockery::mock(PaiementService::class);
         $paiements->shouldReceive('prochainMoisAPayer')->andReturn('12-2026');
-        $controleur = new PaiementController($paiements, Mockery::mock(EtudiantService::class), Mockery::mock(LoyerService::class), Mockery::mock(CiteService::class));
+        $paiements->shouldReceive('getLoyerActuel')->andReturn((object) ['solde_restant' => 12000, 'montant_total' => 12000]);
+        $loyers = Mockery::mock(LoyerService::class);
+        $loyers->shouldReceive('calculerArriere')->andReturn(['solde_restant' => 24000]);
+        $controleur = new PaiementController($paiements, Mockery::mock(EtudiantService::class), $loyers, Mockery::mock(CiteService::class));
 
         return $controleur->rechercheResidents(Request::create('/x', 'GET', ['q' => 'Awa']))->getData(true);
     }
@@ -528,12 +652,24 @@ class PaiementsPageTest extends TestCase
         $this->assertSame(['avance' => 1], $this->rechercher()[0]['a_payer']);
     }
 
-    public function test_recherche_limitee_aux_admis_a_loger(): void
+    public function test_recherche_propose_les_residents_loges(): void
     {
-        // Étudiant déjà logé (affectation confirmée) : plus proposé.
+        // Résident logé (affectation confirmée) : chambre, loyer du type de chambre et arriérés, pour payer le loyer.
         $this->enregistrer([['type_paiement' => 'loyer', 'mois' => 1]]);
         DB::table('etudiants')->where('id_etudiant', 'e1')->update(['statut_inscription' => 'residents']);
-        $this->assertSame([], $this->rechercher());
+        Schema::table('assignation_chambres', fn (Blueprint $t) => $t->string('chambre_id')->nullable());
+        DB::table('assignation_chambres')->where('id_assignation', 'a1')->update(['chambre_id' => 'ch1']);
+
+        $resultats = $this->rechercher();
+
+        $this->assertCount(1, $resultats);
+        $this->assertSame(['e1', false, 'ch1', 'a1', '12-2026'], [$resultats[0]['id_etudiant'], $resultats[0]['sans_chambre'], $resultats[0]['chambre_id'], $resultats[0]['contrat_id'], $resultats[0]['prochain_mois']]);
+        $this->assertEquals([12000, 24000, 36000, 'En retard'], [$resultats[0]['loyer_mensuel'], $resultats[0]['arriere'], $resultats[0]['total_du'], $resultats[0]['statut_paiement']]);
+    }
+
+    public function test_recherche_sans_chambre_limitee_aux_admis_a_loger(): void
+    {
+        $this->enregistrer([['type_paiement' => 'loyer', 'mois' => 1]]);
 
         // Dossier « Recevable », pas encore admis à loger : pas proposé.
         $this->etudiantAdmisALoger(false);
@@ -593,5 +729,134 @@ class PaiementsPageTest extends TestCase
             $this->assertSame(['lignes.1.mois'], array_keys($e->errors()));
             $this->assertStringContainsString('au moins 3 mois', $e->errors()['lignes.1.mois'][0]);
         }
+    }
+
+    public function test_nouveau_paiement_refuse_au_dela_des_mois_du_calendrier(): void
+    {
+        // Le service ne trouve que 6 mois restants à payer (calendrier des loyers) : 7 mois de loyer sont refusés.
+        try {
+            $this->enregistrer([['type_paiement' => 'loyer', 'mois' => 7]]);
+            $this->fail('Un paiement au-delà des mois du calendrier doit être refusé.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertSame(['mois_concernes'], array_keys($e->errors()));
+            $this->assertStringContainsString('Il ne reste que 6 mois', $e->errors()['mois_concernes'][0]);
+        }
+    }
+
+    /** 10 mois consécutifs à partir de `$premier`, échéance le `$jour` du mois du loyer (attendu après enregistrement). */
+    private function calendrierSaisi(int $jour = 5, string $premier = '2026-10'): array
+    {
+        $debut = \Carbon\CarbonImmutable::createFromFormat('!Y-m', $premier);
+
+        return array_map(fn (int $rang) => [
+            'mois' => $debut->addMonths($rang)->format('Y-m'),
+            'echeance' => $debut->addMonths($rang)->setDay($jour)->format('Y-m-d'),
+        ], range(0, 9));
+    }
+
+    /** Action « Enregistrer le calendrier » : premier mois de loyer, jour d'échéance, mois de l'échéance. */
+    private function enregistrerCalendrier(string $premier = '2026-10', $jour = 5, string $echeance = 'mois_loyer', string $campagne = 'k1'): \Illuminate\Http\RedirectResponse
+    {
+        $request = Request::create('/admin/gestion-hebergement/paiements/calendrier/'.$campagne, 'PUT', ['premier_mois' => $premier, 'jour' => $jour, 'echeance' => $echeance]);
+        $this->app->instance('request', $request);
+
+        return $this->controleur()->enregistrerCalendrier($request, $campagne);
+    }
+
+    public function test_onglet_calendrier_des_loyers_propose_puis_enregistre(): void
+    {
+        $this->travelTo('2026-11-20 10:00:00');
+
+        // Pas encore configuré : proposition de 10 mois à partir de septembre de l'année de début, échéance le 10.
+        $props = $this->page('index', 'Admin/Hebergement/Paiements/Index', ['onglet' => 'calendrier']);
+        $this->assertSame('calendrier', $props['onglet']);
+        $this->assertFalse($props['calendrier']['configure']);
+        $this->assertSame(['premier_mois' => '2026-09', 'jour' => 10, 'echeance' => 'mois_loyer'], $props['calendrier']['regle']);
+        $this->assertCount(10, $props['calendrier']['mois']);
+        $this->assertSame(['mois' => '2026-09', 'echeance' => '2026-09-10', 'libelle' => 'septembre 2026', 'paye' => false], $props['calendrier']['mois'][0]);
+        $this->assertSame('2027-06', $props['calendrier']['mois'][9]['mois']);
+        $this->assertNull($props['kpis']['prochaine_echeance']);
+        // Sans administrateur connecté, pas d'enregistrement proposé.
+        $this->assertNull($props['urls']['calendrier']);
+
+        // Seul le premier mois se saisit : les 10 mois se suivent.
+        $reponse = $this->enregistrerCalendrier();
+        $this->assertStringContainsString('onglet=calendrier', $reponse->getTargetUrl());
+        $this->assertSame($this->calendrierSaisi(), \App\Models\Campagne::find('k1')->calendrier_loyer);
+
+        // Enregistré : la prochaine échéance remplace l'indicateur des pénalités ; la règle est relue pour le formulaire.
+        $props = $this->page('index', 'Admin/Hebergement/Paiements/Index');
+        $this->assertTrue($props['calendrier']['configure']);
+        $this->assertSame(['premier_mois' => '2026-10', 'jour' => 5, 'echeance' => 'mois_loyer'], $props['calendrier']['regle']);
+        $this->assertSame(['2026-10', '2027-07'], [$props['calendrier']['mois'][0]['mois'], $props['calendrier']['mois'][9]['mois']]);
+        $this->assertSame(['date' => '2026-12-05', 'mois' => 'décembre 2026'], $props['kpis']['prochaine_echeance']);
+        // « Toutes les campagnes » : pas de calendrier.
+        $this->assertNull($this->page('index', 'Admin/Hebergement/Paiements/Index', ['campagne' => 'toutes'])['calendrier']);
+    }
+
+    public function test_calendrier_des_loyers_echeance_le_jour_du_mois_suivant(): void
+    {
+        // Le 31 du mois suivant : ramené au dernier jour des mois courts (loyer de janvier 2027 → 28/02/2027).
+        $this->enregistrerCalendrier('2026-10', 31, 'mois_suivant');
+
+        $calendrier = \App\Models\Campagne::find('k1')->calendrier_loyer;
+        $this->assertSame(['mois' => '2026-10', 'echeance' => '2026-11-30'], $calendrier[0]);
+        $this->assertSame(['mois' => '2027-01', 'echeance' => '2027-02-28'], $calendrier[3]);
+        $this->assertSame(['mois' => '2027-07', 'echeance' => '2027-08-31'], $calendrier[9]);
+        $this->assertSame(['premier_mois' => '2026-10', 'jour' => 31, 'echeance' => 'mois_suivant'], app(\App\Services\CalendrierLoyer::class)->regle(\App\Models\Campagne::find('k1')));
+    }
+
+    public function test_calendrier_des_loyers_saisie_controlee(): void
+    {
+        try {
+            $this->enregistrerCalendrier('2026-13', 0, 'autre');
+            $this->fail('Une saisie invalide doit être refusée.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertEqualsCanonicalizing(['premier_mois', 'jour', 'echeance'], array_keys($e->errors()));
+        }
+        $this->assertNull(\App\Models\Campagne::find('k1')->calendrier_loyer);
+    }
+
+    public function test_calendrier_des_loyers_garde_les_mois_payes_et_reporte_les_echeances(): void
+    {
+        DB::table('loyers')->insert([
+            // Septembre 2026 payé ; décembre 2026 facturé, non soldé ; loyer d'une autre campagne (a0) intact.
+            ['id_loyer' => 'l-sept', 'assignation_id' => 'a1', 'mois_facturation' => 9, 'annee_facturation' => 2026, 'total_paye' => 12000, 'solde_restant' => 0, 'date_limit_paiement' => '2026-09-10 23:59:59'],
+            ['id_loyer' => 'l-dec', 'assignation_id' => 'a1', 'mois_facturation' => 12, 'annee_facturation' => 2026, 'total_paye' => 0, 'solde_restant' => 12000, 'date_limit_paiement' => '2026-12-10 23:59:59'],
+            ['id_loyer' => 'l-autre', 'assignation_id' => 'a0', 'mois_facturation' => 12, 'annee_facturation' => 2026, 'total_paye' => 0, 'solde_restant' => 12000, 'date_limit_paiement' => '2026-12-10 23:59:59'],
+        ]);
+
+        // Un calendrier qui commence en octobre retirerait septembre, déjà payé.
+        try {
+            $this->enregistrerCalendrier('2026-10');
+            $this->fail('Un mois déjà payé doit rester dans le calendrier.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertSame(['premier_mois'], array_keys($e->errors()));
+            $this->assertStringContainsString('septembre 2026', $e->errors()['premier_mois'][0]);
+        }
+
+        // À partir de septembre, échéance le 15 : la date limite du loyer de décembre non soldé suit.
+        $this->enregistrerCalendrier('2026-09', 15);
+        $this->assertStringStartsWith('2026-12-15', (string) DB::table('loyers')->where('id_loyer', 'l-dec')->value('date_limit_paiement'));
+        $this->assertStringStartsWith('2026-09-10', (string) DB::table('loyers')->where('id_loyer', 'l-sept')->value('date_limit_paiement'));
+        $this->assertStringStartsWith('2026-12-10', (string) DB::table('loyers')->where('id_loyer', 'l-autre')->value('date_limit_paiement'));
+
+        $props = $this->page('index', 'Admin/Hebergement/Paiements/Index');
+        $this->assertSame(['2026-09'], $props['calendrier']['mois_payes']);
+    }
+
+    public function test_recherche_propose_les_mois_restants_du_calendrier(): void
+    {
+        $this->enregistrer([['type_paiement' => 'loyer', 'mois' => 1]]);
+        DB::table('etudiants')->where('id_etudiant', 'e1')->update(['statut_inscription' => 'residents']);
+        Schema::table('assignation_chambres', fn (Blueprint $t) => $t->string('chambre_id')->nullable());
+        DB::table('assignation_chambres')->where('id_assignation', 'a1')->update(['chambre_id' => 'ch1']);
+
+        // Sans calendrier : mois consécutifs côté formulaire.
+        $this->assertNull($this->rechercher()[0]['mois_calendrier']);
+
+        // Calendrier d'octobre 2026 à juillet 2027, prochain mois à payer : décembre 2026.
+        DB::table('campagne')->where('id_campagne', 'k1')->update(['calendrier_loyer' => json_encode($this->calendrierSaisi())]);
+        $this->assertSame(['12-2026', '01-2027', '02-2027', '03-2027', '04-2027', '05-2027', '06-2027', '07-2027'], $this->rechercher()[0]['mois_calendrier']);
     }
 }

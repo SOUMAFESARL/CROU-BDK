@@ -2,18 +2,20 @@
 
 namespace App\Services;
 
+use App\Http\Services\PaiementService;
+use App\Models\AssignationChambre;
 use App\Models\Etudiant;
 use App\Models\Loyer;
-use App\Models\OnlinePayment;
 use App\Models\Paiement;
 use App\Models\PaymentProvider;
 use App\Payments\OnlinePaymentService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 
 /**
- * Props de la page React « Mes paiements » de l'espace étudiant (Etudiant/MesPaiements) :
- * situation des loyers, loyer réglable en ligne, historique des paiements et suivi des paiements en ligne.
+ * Props de la page React « Mes paiements » de l'espace étudiant (Etudiant/MesPaiements) : loyers des mois écoulés
+ * du séjour de la campagne (payé, avec quittance, ou non payé), loyer réglable en ligne et historique des paiements.
  * Le montant payable vient toujours du solde serveur (OnlinePaymentService) ; seules les valeurs affichées sont envoyées.
  */
 class EtudiantPaiements
@@ -26,8 +28,11 @@ class EtudiantPaiements
         'rembourse' => ['Remboursé', 'info'],
     ];
 
-    /** Onglets de la page (`?onglet=`) : « Situation » par défaut. */
-    public const ONGLETS = ['situation', 'loyers', 'en-ligne', 'historique'];
+    /** Onglets de la page (`?onglet=`) : « Mes loyers » par défaut. */
+    public const ONGLETS = ['loyers', 'historique'];
+
+    /** Durée de logement d'une campagne, en mois : le relevé des loyers ne va pas au-delà du 10e mois du séjour. */
+    public const MOIS_PAR_CAMPAGNE = 10;
 
     private const MOIS = [1 => 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
@@ -37,33 +42,82 @@ class EtudiantPaiements
     {
         $id = (string) $etudiant->getKey();
         $statut = array_key_exists((string) $request->query('statut'), self::STATUTS) ? (string) $request->query('statut') : null;
-        $loyers = Loyer::where('etudiant_id', $id)->where('statut', '!=', 'annule')
-            ->orderByDesc('annee_facturation')->orderByDesc('mois_facturation')->get();
         $paiements = Paiement::where('resident_id', $id)
             ->whereIn('statut_paiement', array_keys(self::STATUTS))
             ->when($statut, fn ($q) => $q->where('statut_paiement', $statut))
             ->latest('created_at')->orderByDesc('id_paiement')
             ->paginate(10)->withPath(route('etudiants.dashboard'))->appends(['onglet' => 'historique'] + $request->except(['page', 'onglet']));
+        $releve = $this->releve($id);
 
-        // Un ancien lien filtré ou paginé (sans `onglet`) ouvre directement l'historique.
+        // Un ancien lien filtré ou paginé (sans `onglet`) ouvre directement l'historique ; un ancien onglet retiré, les loyers.
         $onglet = $request->query('onglet');
-        $parDefaut = $statut || $request->query('page') ? 'historique' : 'situation';
+        $parDefaut = $statut || $request->query('page') ? 'historique' : 'loyers';
 
         return [
             'onglet' => in_array($onglet, self::ONGLETS, true) ? $onglet : $parDefaut,
-            'situation' => $this->situation($loyers),
             'reglement' => $this->reglement($id, (string) $etudiant->telephone1),
-            'loyers' => $loyers->take(12)->map(fn (Loyer $loyer) => $this->loyer($loyer))->values()->all(),
+            'campagne' => $releve['campagne'],
+            'loyers' => $releve['mois']->sortByDesc('cle')->map(fn (array $mois) => $this->ligneMois($mois))->values()->all(),
             'statut' => $statut,
             'statuts' => collect(self::STATUTS)->map(fn ($s, $code) => ['code' => $code, 'libelle' => $s[0]])->values()->all(),
             'paiements' => collect($paiements->items())->map(fn (Paiement $paiement) => $this->paiement($paiement))->values()->all(),
             'pagination' => EtudiantMaintenance::pagination($paiements),
-            'enLigne' => $this->enLigne($id),
             'urls' => [
                 'payer' => route('etudiants.online-payments.store'),
                 'page' => route('etudiants.dashboard', ['section' => 'paiements']),
                 'documents' => route('etudiants.documents.personal'),
             ],
+        ];
+    }
+
+    /**
+     * Données de la quittance de loyer d'un mois (`aaaa-mm`) du séjour de l'étudiant, ou null si ce mois
+     * n'est pas un mois écoulé du séjour ou n'est pas entièrement payé.
+     */
+    public function quittance(Etudiant $etudiant, string $cle): ?array
+    {
+        $releve = $this->releve((string) $etudiant->getKey());
+        $mois = $releve['mois']->firstWhere('cle', $cle);
+        if (! $mois || ! $mois['paye']) {
+            return null;
+        }
+        $chambre = $releve['sejour']->chambre;
+
+        return [
+            'etudiant' => $etudiant,
+            'numero' => 'Q-'.str_replace('-', '', $cle).'-'.strtoupper(substr(hash('sha256', $etudiant->getKey().$cle), 0, 6)),
+            'periode' => $mois['periode'],
+            'campagne' => $releve['campagne'],
+            'civilite' => app(ParcoursEtudiant::class)->civilite($etudiant),
+            'parcours' => app(ParcoursEtudiant::class)->pour((string) $etudiant->getKey(), $releve['sejour']->campagne_id),
+            // Numéro de la chambre, puis la cité : « 1 · Cité Zanzan ».
+            'chambre' => collect([$chambre?->numero_chambre, $chambre?->cite?->name])->filter()->join(' · '),
+            'montant' => $mois['montant'] !== null ? formatSystemAmount($mois['montant']) : null,
+            'datePaiement' => $mois['datePaiement']?->format('d/m/Y'),
+            // Montant affecté à ce mois (un paiement de plusieurs mois est réparti à parts égales).
+            'paiements' => $mois['paiements']->map(fn (Paiement $paiement) => [
+                'numero' => $paiement->numero_paiement ?: $paiement->getKey(),
+                'date' => ($paiement->date_paiement ?? $paiement->created_at)?->format('d/m/Y'),
+                'methode' => $paiement->methode_paiement ? $paiement->methode_label : '—',
+                'montant' => formatSystemAmount($this->partDuMois($paiement, $cle)),
+            ])->values()->all(),
+        ];
+    }
+
+    /**
+     * Mois de loyer du séjour, tels que le relevé « Mes loyers » les calcule, pour le formulaire admin « Nouveau paiement » :
+     * mois payés et mois en retard (non payés, échéance passée), dans l'ordre chronologique, au format `mm-aaaa`.
+     *
+     * @return array{payes: list<string>, en_retard: list<string>}
+     */
+    public function etatDesMois(string $etudiantId): array
+    {
+        $mois = $this->releve($etudiantId)['mois']->sortBy('cle');
+        $code = fn (array $m) => substr($m['cle'], 5, 2).'-'.substr($m['cle'], 0, 4);
+
+        return [
+            'payes' => $mois->where('paye', true)->map($code)->values()->all(),
+            'en_retard' => $mois->where('enRetard', true)->map($code)->values()->all(),
         ];
     }
 
@@ -75,33 +129,94 @@ class EtudiantPaiements
             ->values()->all(), [], false);
     }
 
-    private function situation(Collection $loyers): array
+    /**
+     * Séjour de la campagne (dernière attribution confirmée et commencée) et ses mois de loyer, dans la limite des
+     * 10 mois de logement de la campagne (MOIS_PAR_CAMPAGNE) : les mois écoulés jusqu'au mois en cours (ou au mois
+     * de fin du séjour), payés ou non, puis les mois à venir déjà payés (avance).
+     *
+     * Le premier mois est le premier mois facturé sur ce séjour ou payé d'avance pour la campagne (avance versée
+     * avant l'attribution, qui peut précéder ou suivre l'entrée) ; à défaut, le mois d'entrée.
+     *
+     * Un mois est payé quand une avance validée le couvre (l'avance payée avant l'attribution est un loyer), quand
+     * son loyer facturé est soldé ou, sans loyer facturé, quand un paiement validé de loyer le couvre (`paiements.mois`).
+     *
+     * @return array{sejour: ?AssignationChambre, campagne: ?string, mois: Collection<int, array>}
+     */
+    private function releve(string $etudiantId): array
     {
-        $attendu = (float) $loyers->sum('montant_total');
-        $paye = (float) $loyers->sum('total_paye');
-        $reste = (float) $loyers->sum('solde_restant');
-        $impayes = $loyers->filter(fn (Loyer $loyer) => (float) $loyer->solde_restant > 0);
-        $enRetard = $impayes->filter(fn (Loyer $loyer) => $this->enRetard($loyer));
-        // Prochaine échéance : le plus ancien loyer non soldé.
-        $prochain = $impayes->sortBy(fn (Loyer $loyer) => sprintf('%04d%02d', $loyer->annee_facturation, $loyer->mois_facturation))->first();
+        $sejour = AssignationChambre::where('etudiant_id', $etudiantId)->where('statut', 'confirmee')
+            ->where('date_assignation', '<=', now())
+            ->orderByDesc('date_assignation')->orderByDesc('created_at')->first();
+        if (! $sejour) {
+            return ['sejour' => null, 'campagne' => null, 'mois' => collect()];
+        }
+
+        $loyers = Loyer::where('etudiant_id', $etudiantId)->where('assignation_id', $sejour->getKey())
+            ->where('statut', '!=', 'annule')->get()
+            ->keyBy(fn (Loyer $loyer) => sprintf('%04d-%02d', $loyer->annee_facturation, $loyer->mois_facturation));
+        $paiements = Paiement::where('resident_id', $etudiantId)->where('statut_paiement', 'valide')
+            ->where(fn ($q) => $q->whereIn('type_paiement', PaiementService::TYPES_LOYER)->orWhereNull('type_paiement'))
+            ->orderBy('date_paiement')->orderBy('created_at')->get();
+
+        // Mois payés d'avance pour la campagne (avance versée avant l'attribution, sans loyer ni attribution).
+        $avances = $sejour->campagne_id
+            ? Paiement::where('resident_id', $etudiantId)->where('statut_paiement', 'valide')
+                ->where('type_paiement', PaiementService::TYPE_AVANCE)->deCampagne($sejour->campagne_id)->get()
+                ->flatMap(fn (Paiement $paiement) => $this->clesMois($paiement->mois))
+            : collect();
+        $debut = $loyers->keys()->merge($avances)->min() ?? $sejour->date_assignation->format('Y-m');
+        $debut = CarbonImmutable::createFromFormat('!Y-m', $debut);
+        $ecoule = CarbonImmutable::parse($sejour->date_fin && $sejour->date_fin->isPast() ? $sejour->date_fin : now())->startOfMonth();
+        // Calendrier des loyers de la campagne (Paiements › Calendrier des loyers) : ses 10 mois et leurs échéances ;
+        // sans calendrier, 10 mois consécutifs à partir du premier mois du séjour, échéance le 10.
+        $service = app(CalendrierLoyer::class);
+        $calendrier = $service->de($sejour->campagne);
+        $dates = $calendrier
+            ? collect($calendrier)->map(fn (array $entree) => CarbonImmutable::createFromFormat('!Y-m', $entree['mois']))
+            : collect(range(0, self::MOIS_PAR_CAMPAGNE - 1))->map(fn (int $rang) => $debut->addMonths($rang));
+
+        $mensuel = (float) ($sejour->chambre?->typeChambre?->montant ?: $sejour->chambre?->prix ?: 0);
+        $mois = collect();
+        foreach ($dates as $date) {
+            $cle = $date->format('Y-m');
+            $loyer = $loyers->get($cle);
+            $couverture = $paiements->filter(fn (Paiement $paiement) => in_array($cle, $this->clesMois($paiement->mois), true)
+                || ($loyer && $paiement->loyer_id === $loyer->getKey()))->values();
+            // L'avance payée au départ est un loyer : un mois qu'elle couvre est payé, même si le loyer facturé
+            // à l'attribution n'a pas été soldé.
+            $parAvance = $couverture->contains(fn (Paiement $paiement) => $paiement->type_paiement === PaiementService::TYPE_AVANCE
+                && in_array($cle, $this->clesMois($paiement->mois), true));
+            $paye = $parAvance || ($loyer ? (float) $loyer->solde_restant <= 0 : $couverture->isNotEmpty());
+            // Mois à venir : seulement s'il est déjà payé (avance). Mois du calendrier avant le début du séjour
+            // (arrivée en cours d'année) : seulement s'il a été facturé ou payé.
+            if (! $paye && ($date > $ecoule || ($date < $debut && ! $loyer))) {
+                continue;
+            }
+            $echeance = $loyer?->date_limit_paiement ?? ($calendrier ? $service->echeance($calendrier, $date->month, $date->year) : null);
+            // Sans loyer facturé, le montant du mois est la part des paiements qui le couvrent (avance de 2 mois → moitié).
+            $part = $couverture->filter(fn (Paiement $paiement) => in_array($cle, $this->clesMois($paiement->mois), true))
+                ->sum(fn (Paiement $paiement) => $this->partDuMois($paiement, $cle));
+            $montant = $loyer ? (float) $loyer->montant_total : ($part > 0 ? $part : ($mensuel > 0 ? $mensuel : null));
+            $dernier = $couverture->last();
+
+            $mois->push([
+                'cle' => $cle,
+                'periode' => self::MOIS[$date->month].' '.$date->year,
+                'loyer' => $loyer,
+                'paye' => $paye,
+                'montant' => $montant,
+                'avance' => $parAvance,
+                'echeance' => $echeance,
+                'enRetard' => ! $paye && ($echeance ? $echeance->isBefore(today()) : $date->isBefore(now()->startOfMonth())),
+                'datePaiement' => $paye && $dernier ? ($dernier->date_paiement ?? $dernier->created_at) : null,
+                'paiements' => $paye ? $couverture : collect(),
+            ]);
+        }
 
         return [
-            'totalPaye' => formatSystemAmount($paye),
-            'reste' => formatSystemAmount($reste),
-            'penalites' => (float) $loyers->sum('total_penalites') > 0 ? formatSystemAmount($loyers->sum('total_penalites')) : null,
-            'recouvrement' => $attendu > 0 ? (int) min(100, round($paye / $attendu * 100)) : null,
-            'nbImpayes' => $impayes->count(),
-            'nbRetards' => $enRetard->count(),
-            'prochaine' => $prochain ? [
-                'periode' => $this->periode($prochain),
-                'montant' => formatSystemAmount($prochain->solde_restant),
-                'limite' => $prochain->date_limit_paiement ? formatDateFr($prochain->date_limit_paiement->format('Y-m-d'), true) : null,
-            ] : null,
-            'etat' => match (true) {
-                $enRetard->isNotEmpty() => ['libelle' => 'En retard', 'ton' => 'red'],
-                $impayes->isNotEmpty() => ['libelle' => 'Loyer à régler', 'ton' => 'amber'],
-                default => ['libelle' => 'À jour', 'ton' => 'green'],
-            },
+            'sejour' => $sejour,
+            'campagne' => $sejour->campagne_id ? $sejour->campagne?->annee_campagne : null,
+            'mois' => $mois,
         ];
     }
 
@@ -133,7 +248,6 @@ class EtudiantPaiements
                 'chambre' => $assignation->chambre->numero_chambre,
                 'periode' => $this->periode($loyer),
                 'montant' => formatSystemAmount($loyer->montant_total),
-                'penalites' => (float) $loyer->total_penalites > 0 ? formatSystemAmount($loyer->total_penalites) : null,
                 'dejaPaye' => (float) $loyer->total_paye > 0 ? formatSystemAmount($loyer->total_paye) : null,
                 'solde' => formatSystemAmount($loyer->solde_restant),
                 // Plafond du montant saisi (francs CFA entiers) ; le serveur revérifie au lancement.
@@ -142,25 +256,23 @@ class EtudiantPaiements
         ];
     }
 
-    private function loyer(Loyer $loyer): array
+    /** Ligne de « Mes loyers » : payé (quittance à voir ou télécharger) ou non payé. */
+    private function ligneMois(array $mois): array
     {
-        $solde = (float) $loyer->solde_restant;
-        [$libelle, $ton] = match (true) {
-            $loyer->statut === 'suspendu' => ['Suspendu', 'neutral'],
-            $solde <= 0 => ['Payé', 'success'],
-            $this->enRetard($loyer) => ['En retard', 'danger'],
-            (float) $loyer->total_paye > 0 => ['Payé en partie', 'warning'],
-            default => ['À payer', 'warning'],
-        };
+        $quittance = route('etudiants.quittances.show', $mois['cle']);
 
         return [
-            'id' => (string) $loyer->getKey(),
-            'periode' => $this->periode($loyer),
-            'montant' => formatSystemAmount($loyer->montant_total),
-            'paye' => formatSystemAmount($loyer->total_paye),
-            'solde' => formatSystemAmount($solde),
-            'limite' => $loyer->date_limit_paiement ? $loyer->date_limit_paiement->format('d/m/Y') : null,
-            'statut' => ['libelle' => $libelle, 'ton' => $ton],
+            'id' => $mois['cle'],
+            'periode' => $mois['periode'],
+            'montant' => $mois['montant'] !== null ? formatSystemAmount($mois['montant']) : null,
+            'limite' => $mois['echeance']?->format('d/m/Y'),
+            'datePaiement' => $mois['datePaiement']?->format('d/m/Y'),
+            'paye' => $mois['paye'],
+            'avance' => $mois['avance'],
+            'statut' => $mois['paye']
+                ? ['libelle' => 'Payé', 'ton' => 'success']
+                : ['libelle' => 'Non payé', 'ton' => $mois['enRetard'] ? 'danger' : 'warning'],
+            'quittance' => $mois['paye'] ? ['voir' => $quittance, 'telecharger' => $quittance.'?telecharger=1'] : null,
         ];
     }
 
@@ -174,40 +286,16 @@ class EtudiantPaiements
             'periode' => $this->moisPayes($paiement->mois),
             'date' => $date?->format('d/m/Y'),
             'reference' => $paiement->numero_paiement ?: $paiement->reference_transaction,
+            'type' => $paiement->type_paiement ? $paiement->type_label : null,
             'methode' => $paiement->methode_paiement ? $paiement->methode_label : null,
             'montant' => formatSystemAmount($paiement->montant),
             'statut' => ['libelle' => $libelle, 'ton' => $ton],
-            'recu' => in_array($paiement->statut_paiement, ['valide', 'rembourse'], true)
-                ? route('etudiants.documents.receipt', $paiement->getKey())
-                : null,
+            // Même reçu que l'administration (App\Services\RecuPaiement), pour les paiements validés ou remboursés.
+            'recu' => in_array($paiement->statut_paiement, ['valide', 'rembourse'], true) ? [
+                'voir' => $recu = route('etudiants.paiements.recu', $paiement->getKey()),
+                'telecharger' => $recu.'?telecharger=1',
+            ] : null,
         ];
-    }
-
-    /** Cinq derniers paiements en ligne, avec leur page de suivi. */
-    private function enLigne(string $etudiantId): array
-    {
-        return rescue(fn () => OnlinePayment::where('student_id', $etudiantId)->latest()->limit(5)->get()
-            ->map(fn (OnlinePayment $paiement) => [
-                'id' => (string) $paiement->getKey(),
-                'date' => $paiement->created_at?->format('d/m/Y H:i'),
-                'reseau' => PaymentProvider::NETWORKS[$paiement->provider_code] ?? $paiement->provider_code,
-                'montant' => formatSystemAmount($paiement->amount),
-                'statut' => [
-                    'libelle' => $paiement->status_label,
-                    'ton' => match ($paiement->status) {
-                        'succeeded' => 'success',
-                        'failed' => 'danger',
-                        'review' => 'warning',
-                        default => 'info',
-                    },
-                ],
-                'url' => route('etudiants.online-payments.show', $paiement),
-            ])->values()->all(), [], false);
-    }
-
-    private function enRetard(Loyer $loyer): bool
-    {
-        return (float) $loyer->solde_restant > 0 && $loyer->date_limit_paiement?->isBefore(today());
     }
 
     private function periode(Loyer $loyer): string
@@ -215,12 +303,39 @@ class EtudiantPaiements
         return (self::MOIS[(int) $loyer->mois_facturation] ?? $loyer->mois_facturation).' '.$loyer->annee_facturation;
     }
 
-    /** `paiements.mois` : liste de « mm-aaaa » (ou texte libre) → « Septembre 2026, Octobre 2026 ». */
-    private function moisPayes($mois): ?string
+    /** `paiements.mois` : liste de « mm-aaaa » (ou texte libre). */
+    private function listeMois($mois): array
     {
         $liste = is_array($mois) ? $mois : (is_string($mois) && $mois !== '' ? (json_decode($mois, true) ?? [$mois]) : []);
 
-        return collect(is_array($liste) ? $liste : [$liste])
+        return is_array($liste) ? $liste : [$liste];
+    }
+
+    /**
+     * Part d'un paiement affectée au mois `aaaa-mm` : réparti à parts égales sur les mois qu'il couvre
+     * (avance de 16 000 sur 2 mois → 8 000) ; un paiement rattaché au seul loyer du mois compte en entier.
+     */
+    private function partDuMois(Paiement $paiement, string $cle): float
+    {
+        $cles = $this->clesMois($paiement->mois);
+
+        return in_array($cle, $cles, true) ? (float) $paiement->montant / count($cles) : (float) $paiement->montant;
+    }
+
+    /** `paiements.mois` → clés « aaaa-mm » des mois reconnus. */
+    private function clesMois($mois): array
+    {
+        return collect($this->listeMois($mois))
+            ->map(fn ($m) => preg_match('/^(\d{1,2})-(\d{4})$/', (string) $m, $p) && isset(self::MOIS[(int) $p[1]])
+                ? sprintf('%04d-%02d', $p[2], $p[1])
+                : null)
+            ->filter()->values()->all();
+    }
+
+    /** `paiements.mois` : liste de « mm-aaaa » (ou texte libre) → « Septembre 2026, Octobre 2026 ». */
+    private function moisPayes($mois): ?string
+    {
+        return collect($this->listeMois($mois))
             ->map(fn ($m) => preg_match('/^(\d{1,2})-(\d{4})$/', (string) $m, $p) && isset(self::MOIS[(int) $p[1]])
                 ? self::MOIS[(int) $p[1]].' '.$p[2]
                 : (string) $m)

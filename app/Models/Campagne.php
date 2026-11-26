@@ -45,6 +45,8 @@ class Campagne extends Model
         'age_D1_max'   => 'integer',
         'age_D2_max'  => 'integer',
         'age_D3_max'  => 'integer' ,
+        // Calendrier des loyers : [{mois: aaaa-mm, echeance: aaaa-mm-jj}, …] (App\Services\CalendrierLoyer).
+        'calendrier_loyer' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime'
@@ -84,6 +86,7 @@ class Campagne extends Model
         'age_D1_max' ,
         'age_D2_max',
         'age_D3_max' ,
+        'calendrier_loyer',
         'created_by',
         'updated_by',
         'deleted_by'

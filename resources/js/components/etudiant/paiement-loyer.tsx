@@ -47,7 +47,6 @@ export type LoyerReglable = {
     chambre: string;
     periode: string;
     montant: string;
-    penalites: string | null;
     dejaPaye: string | null;
     solde: string;
     soldeValeur: number;
@@ -262,9 +261,6 @@ export function PaiementLoyerDialog({
                                     <Recapitulatif
                                         lignes={[
                                             ["Loyer facturé", loyer.montant],
-                                            ...(loyer.penalites
-                                                ? ([["Pénalités", loyer.penalites]] as [string, string][])
-                                                : []),
                                             ...(loyer.dejaPaye
                                                 ? ([["Déjà réglé", loyer.dejaPaye]] as [string, string][])
                                                 : []),

@@ -22,6 +22,7 @@ use App\Http\Services\Eligibilite\CriteresCampagne;
 use App\Http\Services\Eligibilite\ListeDefinitivePubliee;
 use App\Models\TypeChambre;
 use App\Services\AdminAccess;
+use App\Services\CalendrierLoyer;
 use Inertia\Inertia;
 
 class PaiementController extends Controller
@@ -66,11 +67,11 @@ class PaiementController extends Controller
     
     // Utiliser les bonnes valeurs
     $totalDu = $statsLoyers['total_montant'];
-    $totalEncaisse = $statsLoyers['total_paye'];
     $impayes = $statsLoyers['total_solde_restant'];
     $tauxRecouvrement = $statsLoyers['taux_recouvrement'];
     $nombreRetard = $statsLoyers['nombre_en_retard'];
-    $totalPenalites = $statsLoyers['total_penalites'];
+    // Calendrier des loyers de la campagne choisie (onglet « Calendrier des loyers ») ; aucune pénalité de retard ne s'applique.
+    $calendrier = $campagne ? $this->calendrierCampagne($campagne) : null;
     
     // ============================================================
     // STATISTIQUES DE LA PAGE (sur les paiements affichés)
@@ -84,11 +85,13 @@ class PaiementController extends Controller
         ->where('date_echeance', '<', now())
         ->count();
     $url = $this->urlSiAutorise($request);
-    $nombrePaiements = Paiement::query()
+    // « Total encaissé » : somme des paiements validés de la campagne, tous types confondus (loyer, avance, caution…),
+    // et leur nombre ; les montants des loyers facturés ne comptent pas les paiements faits avant l'attribution.
+    $encaisses = Paiement::query()
         ->when($filters['campagne'], fn ($query, $id) => $query->deCampagne($id))
-        ->whereMonth('date_paiement', now()->month)
-        ->whereYear('date_paiement', now()->year)
-        ->count();
+        ->where('statut_paiement', 'valide');
+    $totalEncaisse = (clone $encaisses)->sum('montant');
+    $nombrePaiements = $encaisses->count();
 
     return Inertia::render('Admin/Hebergement/Paiements/Index', [
         'paiements' => $paiements->appends($request->query())->through(fn (Paiement $paiement) => [
@@ -118,7 +121,8 @@ class PaiementController extends Controller
             'total_encaisse' => (float) $totalEncaisse,
             'taux_recouvrement' => (float) $tauxRecouvrement,
             'impayes' => (float) $impayes,
-            'penalites' => (float) $totalPenalites,
+            // Prochaine échéance du calendrier des loyers de la campagne (null sans calendrier ou après la dernière).
+            'prochaine_echeance' => $calendrier ? $this->prochaineEcheance($calendrier) : null,
             'nombre_paiements' => (int) $nombrePaiements,
             'nombre_retard' => (int) $nombreRetard,
         ],
@@ -137,19 +141,88 @@ class PaiementController extends Controller
             'statut' => (string) ($filters['statut'] ?? ''),
             'mois' => (string) ($filters['mois'] ?? ''),
         ],
+        'onglet' => $request->query('onglet') === 'calendrier' ? 'calendrier' : 'paiements',
+        'calendrier' => $calendrier,
         'urls' => [
             'index' => route('admin.hebergement.paiements.index'),
+            'calendrier' => $campagne ? $url('admin.hebergement.paiements.calendrier.update', ['campagne' => $campagne->id_campagne]) : null,
             'export' => $url('admin.hebergement.paiements.export', ['campagne' => $choixCampagne] + $request->query()),
             'store' => $url('admin.hebergement.paiements.store'),
             'recherche' => $url('admin.hebergement.paiements.recherche'),
             'relances' => $url('admin.hebergement.paiements.relances.envoyer'),
-            'rapport' => $url('admin.hebergement.paiements.rapport_financier'),
+            // Le rapport s'ouvre sur la campagne affichée.
+            'rapport' => $url('admin.hebergement.paiements.rapport_financier', ['campagne' => $choixCampagne]),
         ],
     ]);
 }
 
     /** Valeur du paramètre `campagne` qui affiche toutes les campagnes. */
     private const TOUTES_CAMPAGNES = 'toutes';
+
+    /**
+     * Onglet « Calendrier des loyers » : les 10 mois de loyer de la campagne et leur échéance (enregistrés, ou proposés
+     * s'ils ne sont pas encore configurés) ; les mois déjà payés ne peuvent pas être retirés.
+     */
+    private function calendrierCampagne(Campagne $campagne): array
+    {
+        // La liste des campagnes ne charge que quelques colonnes : relire la campagne (calendrier, année de début).
+        $campagne = Campagne::find($campagne->getKey()) ?? $campagne;
+        $service = app(CalendrierLoyer::class);
+        $payes = $service->moisPayes($campagne);
+
+        return [
+            'campagne' => $campagne->libelle ?: $campagne->annee_campagne,
+            'configure' => $service->de($campagne) !== [],
+            'nombre_mois' => CalendrierLoyer::NOMBRE_MOIS,
+            'mois' => array_map(fn (array $entree) => $entree + [
+                'libelle' => CalendrierLoyer::libelle($entree['mois']),
+                'paye' => in_array($entree['mois'], $payes, true),
+            ], $service->propose($campagne)),
+            'mois_payes' => $payes,
+            // Valeurs du formulaire : premier mois, jour d'échéance, échéance dans le mois du loyer ou le mois suivant.
+            'regle' => $service->regle($campagne),
+        ];
+    }
+
+    /** Première échéance à venir (aujourd'hui compris) du calendrier enregistré : date et mois concerné. */
+    private function prochaineEcheance(array $calendrier): ?array
+    {
+        if (! $calendrier['configure']) {
+            return null;
+        }
+        $entree = collect($calendrier['mois'])->first(fn (array $mois) => $mois['echeance'] >= today()->format('Y-m-d'));
+
+        return $entree ? ['date' => $entree['echeance'], 'mois' => $entree['libelle']] : null;
+    }
+
+    /**
+     * Enregistre le calendrier des loyers d'une campagne (onglet « Calendrier des loyers ») : 10 mois et leur échéance.
+     */
+    public function enregistrerCalendrier(Request $request, string $campagne)
+    {
+        $campagne = Campagne::findOrFail($campagne);
+        // Seul le premier mois se saisit : les 10 mois se suivent ; échéance le jour J du mois du loyer ou du mois suivant.
+        $validated = $request->validate([
+            'premier_mois' => ['required', 'string', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
+            'jour' => 'required|integer|min:1|max:31',
+            'echeance' => 'required|in:' . CalendrierLoyer::MOIS_LOYER . ',' . CalendrierLoyer::MOIS_SUIVANT,
+        ], [
+            'premier_mois.required' => 'Choisissez le premier mois de loyer.',
+            'premier_mois.regex' => 'Premier mois de loyer invalide.',
+            'jour.required' => 'Indiquez le jour d’échéance.',
+            'jour.integer' => 'Le jour d’échéance est un nombre entier.',
+            'jour.min' => 'Le jour d’échéance est compris entre 1 et 31.',
+            'jour.max' => 'Le jour d’échéance est compris entre 1 et 31.',
+            'echeance.required' => 'Choisissez le mois de l’échéance.',
+            'echeance.in' => 'Choisissez le mois de l’échéance.',
+        ]);
+
+        app(CalendrierLoyer::class)->enregistrer($campagne, $validated['premier_mois'], (int) $validated['jour'], $validated['echeance']);
+
+        return redirect()
+            ->route('admin.hebergement.paiements.index', ['campagne' => $campagne->id_campagne, 'onglet' => 'calendrier'])
+            ->with('success', 'Calendrier des loyers enregistré.');
+    }
 
     /**
      * Campagne choisie (`?campagne=<id>`) ; à défaut (ou identifiant inconnu), la campagne active, sinon la plus récente.
@@ -315,8 +388,8 @@ class PaiementController extends Controller
     }
 
     /**
-     * Recherche dynamique de « Nouveau paiement » : uniquement les étudiants de la liste « Admis à loger »
-     * (Résidents & contrats), sans chambre (`ListeDefinitivePubliee`).
+     * Recherche dynamique de « Nouveau paiement » : résidents logés (affectation confirmée : loyer, avance…), puis
+     * étudiants de la liste « Admis à loger » sans chambre (`ListeDefinitivePubliee` : caution et avance avant l'attribution).
      */
     public function rechercheResidents(Request $request)
     {
@@ -337,13 +410,81 @@ class PaiementController extends Controller
               ->orWhereHas('demandes', fn ($d) => $d->where('num_table_bac', 'LIKE', "%{$query}%"));
         };
 
-        $etudiants = app(ListeDefinitivePubliee::class)->candidats(Etudiant::query())
-            ->with('derniereDemande.campagne')
+        $residents = Etudiant::with(['assignationActive.campagne', 'assignationActive.chambre.cite', 'assignationActive.chambre.batiment', 'assignationActive.chambre.typeChambre'])
+            ->whereHas('assignationActive')
             ->where($correspond)
-            ->limit(15)
+            ->limit(self::RECHERCHE_MAX)
             ->get();
 
-        return response()->json($this->lignesAdmis($etudiants));
+        $admis = $residents->count() >= self::RECHERCHE_MAX ? collect() : app(ListeDefinitivePubliee::class)->candidats(Etudiant::query())
+            ->with('derniereDemande.campagne')
+            ->where($correspond)
+            ->limit(self::RECHERCHE_MAX - $residents->count())
+            ->get();
+
+        return response()->json(array_merge($this->lignesResidents($residents), $this->lignesAdmis($admis)));
+    }
+
+    /** Mois (`mm-aaaa`) restants du calendrier des loyers à partir de `$prochain` ; null si la campagne n'en a pas. */
+    private function moisCalendrier(?Campagne $campagne, string $prochain): ?array
+    {
+        $service = app(CalendrierLoyer::class);
+
+        return $service->de($campagne) ? $service->moisProposes($campagne, $prochain, CalendrierLoyer::NOMBRE_MOIS) : null;
+    }
+
+    /** Nombre maximum de résultats de la recherche de « Nouveau paiement ». */
+    private const RECHERCHE_MAX = 15;
+
+    /**
+     * Résidents logés proposés par « Nouveau paiement » : montant sur le loyer mensuel du type de leur chambre,
+     * arriérés et prochain mois à payer pour le loyer et l'avance.
+     *
+     * @param  \Illuminate\Support\Collection<int, Etudiant>  $residents  avec `assignationActive.chambre` chargée
+     */
+    private function lignesResidents(\Illuminate\Support\Collection $residents): array
+    {
+        return $residents->map(function (Etudiant $resident) {
+            $assignation = $resident->assignationActive;
+            $chambre = $assignation?->chambre;
+            $cite = $chambre?->cite;
+            $batiment = $chambre?->batiment;
+            $arriere = (float) ($this->loyerService->calculerArriere($resident->id_etudiant)['solde_restant'] ?? 0);
+            $loyerActuel = $this->paiementService->getLoyerActuel($resident->id_etudiant);
+            $montantMois = (float) ($loyerActuel ? ($loyerActuel->solde_restant ?? $loyerActuel->montant_total) : 0);
+            // Mois payés et mois en retard du séjour (même calcul que « Mes loyers » de l'espace étudiant).
+            $etatMois = app(\App\Services\EtudiantPaiements::class)->etatDesMois((string) $resident->id_etudiant);
+
+            return [
+                'id_etudiant' => $resident->id_etudiant,
+                'name' => trim((string) $resident->name),
+                'matricule' => $resident->matricule,
+                'num_table_bac' => $resident->demandes()->whereNotNull('num_table_bac')->latest('created_at')->value('num_table_bac'),
+                'telephone' => $resident->telephone1 ?? $resident->telephone2 ?? null,
+                'residence' => $cite?->name,
+                'residence_id' => $cite?->id_cite,
+                'batiment' => $batiment?->name,
+                'batiment_id' => $batiment?->id_batiment,
+                'chambre' => $chambre?->numero_chambre,
+                'chambre_id' => $chambre?->id_chambre,
+                'contrat_id' => $assignation?->id_assignation,
+                // Loyer mensuel du type de chambre (Paramétrage hébergement › Types de chambre) : base des montants.
+                'loyer_mensuel' => $this->loyerMensuelChambre($chambre),
+                'arriere' => $arriere,
+                'montant_mois' => $montantMois,
+                'total_du' => $arriere + $montantMois,
+                'statut_paiement' => $arriere > 0 ? 'En retard' : 'À jour',
+                'mois_payes' => $etatMois['payes'],
+                'mois_en_retard' => $etatMois['en_retard'],
+                // Réadmission : pas de caution.
+                'readmission' => $this->voletResident($assignation, $resident->id_etudiant) === 'readmission',
+                // Mois suivant le dernier mois payé (loyer ou avance) : premier mois du champ « Mois » (mm-aaaa).
+                'prochain_mois' => $prochain = $this->paiementService->prochainMoisAPayer($resident->id_etudiant),
+                // Mois restants du calendrier des loyers de la campagne (null sans calendrier : mois consécutifs).
+                'mois_calendrier' => $this->moisCalendrier($assignation?->campagne, $prochain),
+                'sans_chambre' => false,
+            ];
+        })->values()->all();
     }
 
     /**
@@ -385,7 +526,8 @@ class PaiementController extends Controller
                 'total_du' => 0,
                 'statut_paiement' => 'À jour',
                 'readmission' => $etat['volet'] === 'readmission',
-                'prochain_mois' => $this->paiementService->prochainMoisAPayer($etudiant->id_etudiant),
+                'prochain_mois' => $prochain = $this->paiementService->prochainMoisAPayer($etudiant->id_etudiant),
+                'mois_calendrier' => $this->moisCalendrier($etudiant->derniereDemande?->campagne, $prochain),
                 // Admis à loger, pas encore de chambre : caution et avance à verser avant l'attribution,
                 // montant sur le type de chambre choisi.
                 'sans_chambre' => true,
@@ -419,20 +561,6 @@ class PaiementController extends Controller
         $arrieres = $this->loyerService->getAllEtudiantsAvecArrieres($etudiantIds);
         
         return response()->json($arrieres);
-    }
-
-    /**
-     * Applique les pénalités à tous les loyers en retard
-     */
-    public function appliquerPenalites()
-    {
-        $nombre = $this->loyerService->appliquerPenalites();
-        
-        return response()->json([
-            'success' => true,
-            'message' => "{$nombre} loyers ont été pénalisés",
-            'nombre' => $nombre
-        ]);
     }
 
     /**
@@ -513,7 +641,16 @@ class PaiementController extends Controller
         $mensuelles = array_filter($saisies, fn ($ligne) => in_array($ligne['type_paiement'], PaiementService::TYPES_LOYER, true));
         // Avant l'attribution, seule l'avance (loyer payé d'avance) est concernée : mêmes mois consécutifs à cocher.
         if ($mensuelles) {
-            $attendus = $this->paiementService->moisConsecutifs($validated['resident_id'], array_sum(array_column($mensuelles, 'mois')));
+            $demandes = array_sum(array_column($mensuelles, 'mois'));
+            $attendus = $this->paiementService->moisConsecutifs($validated['resident_id'], $demandes);
+            // Calendrier des loyers : on ne paie pas au-delà de ses 10 mois.
+            if (count($attendus) < $demandes) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'mois_concernes' => count($attendus) === 0
+                        ? 'Tous les mois de loyer du calendrier de la campagne sont déjà payés.'
+                        : sprintf('Il ne reste que %d mois de loyer à payer sur le calendrier de la campagne.', count($attendus)),
+                ]);
+            }
             if (array_values($validated['mois_concernes'] ?? []) !== $attendus) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
                     'mois_concernes' => sprintf(
@@ -590,9 +727,6 @@ class PaiementController extends Controller
         }
     }
 
-    /** Lignes de répartition affichées au plus sur le reçu PDF (une seule page). */
-    private const RECU_LIGNES_MAX = 12;
-
     /** Nombre de mois maximum par type coché dans « Nouveau paiement ». */
     public const MOIS_MAX = 12;
 
@@ -653,39 +787,33 @@ class PaiementController extends Controller
     }
 
     /**
-     * Récupère le message de répartition du paiement
+     * Message de répartition du loyer et de l'avance : arriérés, mois en cours, puis mois suivants. Sans loyer du mois
+     * en cours à payer (déjà soldé ou pas encore facturé), tout le reste va aux mois suivants.
      */
     protected function getMessageRepartition(array $verification): string
     {
+        $fcfa = fn ($montant) => number_format((float) $montant, 0, ',', ' ').' FCFA';
         $messages = [];
-        
+
         if ($verification['arriere_total'] > 0) {
-            $messages[] = sprintf(
-                '✅ Arriérés (%s FCFA) entièrement payés.',
-                number_format($verification['arriere_total'], 0, ',', ' ')
-            );
+            $messages[] = sprintf('Arriérés (%s) entièrement payés.', $fcfa($verification['arriere_total']));
         }
 
-        if ($verification['reste_apres_arriere'] > 0) {
-            if ($verification['reste_apres_arriere'] >= $verification['montant_mois']) {
-                $messages[] = sprintf(
-                    '✅ Loyer du mois (%s FCFA) payé.',
-                    number_format($verification['montant_mois'], 0, ',', ' ')
-                );
-                
-                if ($verification['reste_apres_mois'] > 0) {
-                    $messages[] = sprintf(
-                        '💰 Avance sur prochain mois: %s FCFA.',
-                        number_format($verification['reste_apres_mois'], 0, ',', ' ')
-                    );
-                }
-            } else {
-                $messages[] = sprintf(
-                    '⚠️ Paiement partiel du mois: %s FCFA sur %s FCFA.',
-                    number_format($verification['reste_apres_arriere'], 0, ',', ' '),
-                    number_format($verification['montant_mois'], 0, ',', ' ')
-                );
+        $reste = (float) $verification['reste_apres_arriere'];
+        $moisEnCours = (float) $verification['montant_mois'];
+        if ($reste <= 0) {
+            return implode(' ', $messages);
+        }
+
+        if ($moisEnCours <= 0) {
+            $messages[] = sprintf('Avance sur les mois suivants : %s.', $fcfa($reste));
+        } elseif ($reste >= $moisEnCours) {
+            $messages[] = sprintf('Loyer du mois en cours (%s) payé.', $fcfa($moisEnCours));
+            if ($verification['reste_apres_mois'] > 0) {
+                $messages[] = sprintf('Avance sur les mois suivants : %s.', $fcfa($verification['reste_apres_mois']));
             }
+        } else {
+            $messages[] = sprintf('Paiement partiel du mois en cours : %s sur %s.', $fcfa($reste), $fcfa($moisEnCours));
         }
 
         return implode(' ', $messages);
@@ -772,13 +900,6 @@ class PaiementController extends Controller
                 'trend' => $stats['nombre_termines'] . ' terminés',
                 'trend_class' => 'stable'
             ],
-            [
-                'label' => 'Pénalités totales',
-                'value' => number_format($stats['total_penalites'], 0, ',', ' ') . ' FCFA',
-                'type' => 'warning',
-                'trend' => '⚠️ Retards accumulés',
-                'trend_class' => 'warning'
-            ]
         ];
     }
 
@@ -897,178 +1018,44 @@ public function show(Request $request, string $id)
  * Reçu PDF d'un paiement : document dédié (et non une copie de la page de détail), tenant sur une page A4 —
  * en-tête avec le logo et le nom du système, bénéficiaire, détail du paiement, répartition et signatures.
  * Reçu unique pour les types de paiement enregistrés ensemble : même document depuis chacun d'eux.
+ * Le même reçu est proposé à l'étudiant (Mes paiements › Historique) : App\Services\RecuPaiement.
  */
 public function recu(string $id)
 {
-    $paiements = Paiement::findOrFail($id)->paiementsDuRecu()
-        ->load(['resident', 'chambre', 'cite', 'repartitions', 'createdBy']);
-    $paiement = $paiements->first();
-
-    // Une seule page : au-delà de 12 lignes (moins une par type supplémentaire), les dernières sont regroupées en une ligne.
-    $max = max(3, self::RECU_LIGNES_MAX - ($paiements->count() - 1));
-    $repartitions = $paiements->flatMap(fn (Paiement $p) => $p->repartitions)->values();
-    $reste = $repartitions->slice($max - 1);
-    $lignes = $repartitions->count() > $max ? $repartitions->take($max - 1) : $repartitions;
-
-    $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.recu-paiement', [
-        'paiement' => $paiement,
-        'montant' => formatSystemAmount($paiements->sum('montant')),
-        'details' => $paiements->map(function (Paiement $p) {
-            $mois = $p->mois ? formatPaiementMois($p->mois, 0) : null;
-
-            return [
-                'numero' => $p->numero_paiement,
-                'type' => $p->type_label,
-                'mois' => $mois && $mois !== '-' ? $mois : null,
-                'montant' => formatSystemAmount($p->montant),
-            ];
-        })->all(),
-        'references' => $paiements->pluck('reference_transaction')->filter()->unique()->join(', '),
-        'notes' => $paiements->pluck('notes')->filter()->unique()->join(' '),
-        'matricule' => $paiement->resident?->matricule
-            ?: $paiement->resident?->demandes()->whereNotNull('num_table_bac')->latest('created_at')->value('num_table_bac'),
-        'repartitions' => $lignes->map(fn ($rep) => [
-            'libelle' => ['arriere' => 'Arriéré', 'mois_cours' => 'Mois en cours', 'avance' => 'Avance'][$rep->type] ?? ucfirst((string) $rep->type),
-            'periode' => $rep->mois && $rep->annee ? str_pad((string) $rep->mois, 2, '0', STR_PAD_LEFT).'/'.$rep->annee : null,
-            'montant' => formatSystemAmount($rep->montant),
-        ])->when($repartitions->count() > $max, fn ($l) => $l->push([
-            'libelle' => sprintf('Autres périodes (%d)', $reste->count()),
-            'periode' => null,
-            'montant' => formatSystemAmount($reste->sum('montant')),
-        ]))->values()->all(),
-    ])->setPaper('a4');
-
-    return $pdf->stream('recu-'.($paiement->numero_paiement ?: $paiement->id_paiement).'.pdf');
+    return app(\App\Services\RecuPaiement::class)->reponse(Paiement::findOrFail($id));
 }
 
 /**
- * Affiche le rapport financier
+ * Rapport financier (année, mois et résidence facultatifs). Les chiffres viennent de App\Services\RapportFinancier :
+ * attendu, recouvré, impayés et retards sur les loyers facturés ; total encaissé, modes et évolution sur les
+ * paiements validés, tous types confondus.
  */
 public function rapportFinancier(Request $request)
 {
-    
-    $annee = $request->get('annee', date('Y'));
-    $mois = $request->get('mois');
-    $residence = $request->get('residence');
- 
-    // Statistiques globales
-    $statsLoyers = $this->loyerService->getStatistiquesLoyers($annee, $mois, $residence);
-    $statsPaiements = $this->paiementService->getStatistiquesPaiements($annee, $mois, $residence);
-    
-    $totalAttendu = $statsLoyers['total_montant'] ?? 0;
-    $totalEncaisse = $statsPaiements['total_encaisse'] ?? 0;
-    $totalImpayes = $totalAttendu - $totalEncaisse;
-    $totalPenalites = $statsLoyers['total_penalites'] ?? 0;
-    $totalRetard = $statsLoyers['total_retard'] ?? 0;
-    $nbRetard = $statsLoyers['nombre_retard'] ?? 0;
-    $nbImpayes = $statsLoyers['nombre_impayes'] ?? 0;
-    $nbLoyers = $statsLoyers['nombre_loyers'] ?? 0;
-    $nbPaiements = $statsPaiements['nombre_paiements'] ?? 0;
-    
-    $tauxRecouvrement = $totalAttendu > 0 ? round(($totalEncaisse / $totalAttendu) * 100, 1) : 0;
-    
-    // Statistiques par résidence
-    $statsParResidence = $this->loyerService->getStatistiquesParResidenceFiltre($annee, $mois, $residence);
-   // dd($statsParResidence);
-    // Données pour les graphiques
-    $evolutionData = $this->paiementService->getEvolutionPaiements($annee, $mois, $residence);
-    $repartitionData = [
-        $totalEncaisse,
-        $totalImpayes,
-        $totalRetard
-    ];
-    
-    // Derniers paiements
-    $derniersPaiements = $this->paiementService->getDerniersPaiements(10);
-    
-    // Résidences pour les filtres
-    $residences = Cite::orderBy('name')->get();
-    
-    // Labels pour les graphiques
-    $evolutionLabels = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
-    $evolutionAttendus = $this->paiementService->getEvolutionAttendus($annee, $mois, $residence);
-    
-    $statsParMode = $this->paiementService->getStatistiquesParModePaiement($annee, $mois, $residence);
-    
-    // Statistiques par mode pour les graphiques
-    $modeLabels = [];
-    $modeData = [];
-    $modeColors = [
-        'orange_money' => '#f47b20',
-        'mtn_money' => '#ffcb00',
-        'moov_money' => '#00a651',
-        'especes' => '#1e7aa8',
-        'virement' => '#6a4d8a',
-        'carte_bancaire' => '#b13e3e',
-        'autre' => '#5b7b99'
-    ];
-    
-    foreach ($statsParMode as $mode) {
-        $modeLabels[] = $mode['libelle'];
-        $modeData[] = $mode['total'];
-    }
+    // Filtres : cité, campagne (`?campagne=<id>`, `toutes`, ou par défaut la campagne active) et mois de cette campagne.
+    $campagnes = Campagne::query()->orderByDesc('created_at')->get(['id_campagne', 'libelle', 'annee_campagne', 'statut']);
+    $campagne = $this->campagneChoisie($request, $campagnes);
+    // La liste ne charge que quelques colonnes : relire la campagne (calendrier des loyers, année de début).
+    $campagne = $campagne ? (Campagne::find($campagne->getKey()) ?? $campagne) : null;
+    $residence = (string) $request->query('residence', '') ?: null;
 
-
+    $rapport = app(\App\Services\RapportFinancier::class)->donnees($campagne, (string) $request->query('mois', '') ?: null, $residence);
+    $moisChoisi = $rapport['moisChoisi'];
+    unset($rapport['moisChoisi']);
     $url = $this->urlSiAutorise($request);
 
     return Inertia::render('Admin/Hebergement/Paiements/RapportFinancier', [
-        'stats' => [
-            'total_attendu' => (float) $totalAttendu,
-            'total_encaisse' => (float) $totalEncaisse,
-            'total_impayes' => (float) $totalImpayes,
-            'total_penalites' => (float) $totalPenalites,
-            'total_retard' => (float) $totalRetard,
-            'nb_retard' => (int) $nbRetard,
-            'nb_impayes' => (int) $nbImpayes,
-            'nb_loyers' => (int) $nbLoyers,
-            'nb_paiements' => (int) $nbPaiements,
-            'taux_recouvrement' => (float) $tauxRecouvrement,
-        ],
-        'evolution' => collect($evolutionLabels)->map(fn ($label, $index) => [
-            'label' => $label,
-            'encaisse' => (float) ($evolutionData[$index] ?? 0),
-            'attendu' => (float) ($evolutionAttendus[$index] ?? 0),
+        ...$rapport,
+        'residences' => Cite::orderBy('name')->get()->map(fn (Cite $cite) => ['id' => (string) $cite->id_cite, 'name' => $cite->name])->values(),
+        'campagnes' => $campagnes->map(fn (Campagne $option) => [
+            'id' => (string) $option->id_campagne,
+            'libelle' => $option->libelle ?: $option->annee_campagne,
+            'active' => $option->statut === 'active',
         ])->values(),
-        'repartition' => [
-            'paye' => (float) $repartitionData[0],
-            'impaye' => (float) $repartitionData[1],
-            'retard' => (float) $repartitionData[2],
-        ],
-        'statsParMode' => collect($statsParMode)->map(fn ($mode) => [
-            'methode' => (string) $mode['methode'],
-            'libelle' => $mode['libelle'],
-            'couleur' => $mode['couleur'],
-            'nombre' => (int) $mode['nombre'],
-            'total' => (float) $mode['total'],
-            'moyenne' => (float) $mode['moyenne'],
-            'pourcentage' => (float) $mode['pourcentage'],
-        ])->values(),
-        'statsParResidence' => collect($statsParResidence)->map(fn ($stat) => [
-            'residence' => $stat['residence'] ?? null,
-            'total_attendu' => (float) ($stat['total_attendu'] ?? 0),
-            'total_encaisse' => (float) ($stat['total_encaisse'] ?? 0),
-            'total_impayes' => (float) ($stat['total_impayes'] ?? 0),
-            'taux_recouvrement' => (float) ($stat['taux_recouvrement'] ?? 0),
-            'nb_residents' => (int) ($stat['nb_residents'] ?? 0),
-            'loyer_moyen' => (float) ($stat['loyer_moyen'] ?? 0),
-            'nb_en_retard' => (int) ($stat['nb_en_retard'] ?? 0),
-            'alerte' => (bool) ($stat['alerte'] ?? false),
-        ])->values(),
-        'derniersPaiements' => collect($derniersPaiements)->map(fn ($paiement) => [
-            'id' => (string) $paiement['id'],
-            'numero' => $paiement['numero'],
-            'resident' => $paiement['resident'],
-            'montant' => (float) $paiement['montant'],
-            'methode' => $paiement['methode'],
-            'statut_label' => $paiement['statut'],
-            'statut_badge' => $paiement['statut_badge'],
-            'date' => $paiement['date'],
-            'url' => $url('admin.hebergement.paiements.show', ['id' => $paiement['id']]),
-        ])->values(),
-        'residences' => $residences->map(fn (Cite $cite) => ['id' => (string) $cite->id_cite, 'name' => $cite->name])->values(),
         'filters' => [
-            'annee' => (string) $annee,
-            'mois' => (string) ($mois ?? ''),
+            'campagne' => $campagne ? (string) $campagne->id_campagne : self::TOUTES_CAMPAGNES,
+            // Mois de la campagne (`aaaa-mm`) ; vide : toute la campagne.
+            'mois' => (string) ($moisChoisi ?? ''),
             'residence' => (string) ($residence ?? ''),
         ],
         'urls' => [

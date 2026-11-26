@@ -7,7 +7,6 @@ import { toast } from 'sonner';
 import { Notice } from '@/components/etudiant/panneau';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -16,7 +15,6 @@ import { FileDrop } from '@/components/ui/file-drop';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Stepper } from '@/components/ui/stepper';
-import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { avecFormatTelephone, PROPS_TELEPHONE } from '@/lib/telephone';
 import { cn } from '@/lib/utils';
@@ -299,12 +297,8 @@ function Formulaire({
         haut.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
-    // Navigation libre entre les étapes ; la soumission exige les champs obligatoires (`manquants`).
+    // Navigation libre entre les étapes ; à l'envoi, un champ obligatoire vide ramène à son étape (erreur sous le champ).
     const allerA = (cible: number) => afficher(cible);
-    const manquants = champsManquants(schema, useWatch({ control }), CHAMPS_ETAPE, {
-        ...Object.fromEntries(documents.map((document) => [`documents.${document.slug}`, document.nom])),
-        // La certification n’est pas rappelée : la case est juste au-dessus du bouton d’envoi, qui reste désactivé sans elle.
-    }).filter((item) => item.cle !== 'certifie');
 
     const soumettre = handleSubmit(
         async (donnees) => {
@@ -583,7 +577,6 @@ function Formulaire({
                             <Notice icone={Info}>Aucun document n’est demandé pour cette campagne.</Notice>
                         )}
 
-                        <ChampsManquants manquants={manquants} etapes={ETAPES} onAller={afficher} action="soumettre votre demande" />
                         <div className="flex flex-col gap-2 border-t pt-4">
                             <CaseACocher control={control} name="certifie" id="dh-certifie" libelle="Je certifie l’exactitude des informations fournies" requis erreur={errors.certifie?.message} />
                         </div>
@@ -608,7 +601,7 @@ function Formulaire({
                         key="envoyer"
                         type="submit"
                         variant="accent"
-                        disabled={isSubmitting || !certifie || manquants.length > 0}
+                        disabled={isSubmitting || !certifie}
                         title={certifie ? undefined : 'Cochez « Je certifie l’exactitude des informations fournies » pour soumettre votre demande'}
                         className="font-medium"
                     >

@@ -409,6 +409,8 @@ Route::middleware(['admin'])->group(function () {
             Route::get('/detail/{id}',  'show')->name('show');
             // Reçu PDF d'un paiement (document dédié, une page A4).
             Route::get('/recu/{id}', 'recu')->name('recu');
+            // Onglet « Calendrier des loyers » : 10 mois de loyer de la campagne et leur échéance.
+            Route::put('/calendrier/{campagne}', 'enregistrerCalendrier')->name('calendrier.update');
 
 
 

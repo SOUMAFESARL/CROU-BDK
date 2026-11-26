@@ -42,6 +42,27 @@ class PaiementHorsLoyerTest extends TestCase
             $t->decimal('montant', 12, 2);
             $t->timestamps();
         });
+        // Campagne de l'étudiant (attribution confirmée, sinon dernière demande) et son calendrier des loyers.
+        Schema::create('campagne', function (Blueprint $t) {
+            $t->string('id_campagne')->primary();
+            $t->timestamps();
+            $t->softDeletes();
+        });
+        (require database_path('migrations/2026_11_26_000001_add_calendrier_loyer_to_campagne_table.php'))->up();
+        Schema::create('assignation_chambres', function (Blueprint $t) {
+            $t->string('id_assignation')->primary();
+            foreach (['etudiant_id', 'campagne_id', 'statut'] as $champ) {
+                $t->string($champ)->nullable();
+            }
+            $t->dateTime('date_assignation')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('demande', function (Blueprint $t) {
+            $t->string('id_demande')->primary();
+            $t->string('etudiant_id')->nullable();
+            $t->string('campagne_id')->nullable();
+            $t->timestamps();
+        });
     }
 
     private function service(LoyerRepositoryInterface $loyers): PaiementService
@@ -163,5 +184,67 @@ class PaiementHorsLoyerTest extends TestCase
 
         $this->assertSame('12-2026', $service->prochainMoisAPayer('e1'));
         $this->assertSame(['12-2026', '01-2027', '02-2027'], $service->moisConsecutifs('e1', 3));
+    }
+
+    /** Campagne k1 de e1 (attribution confirmée, entrée le `$entree`) avec un calendrier d'octobre 2026 à juillet 2027 sans décembre. */
+    private function calendrier(string $entree = '2026-10-01'): array
+    {
+        $mois = ['2026-10', '2026-11', '2027-01', '2027-02', '2027-03', '2027-04', '2027-05', '2027-06', '2027-07', '2027-08'];
+        $calendrier = array_map(fn (string $cle) => ['mois' => $cle, 'echeance' => $cle.'-05'], $mois);
+        DB::table('campagne')->insert(['id_campagne' => 'k1', 'calendrier_loyer' => json_encode($calendrier)]);
+        DB::table('assignation_chambres')->insert(['id_assignation' => 'a1', 'etudiant_id' => 'e1', 'campagne_id' => 'k1', 'statut' => 'confirmee', 'date_assignation' => $entree, 'created_at' => now()]);
+
+        return $calendrier;
+    }
+
+    public function test_le_calendrier_des_loyers_fixe_les_mois_a_payer(): void
+    {
+        $this->calendrier();
+        DB::table('paiements')->insert([
+            'id_paiement' => 'p-loyer', 'resident_id' => 'e1', 'type_paiement' => 'loyer', 'statut_paiement' => 'valide',
+            'mois' => json_encode(['10-2026', '11-2026']), 'created_at' => now(),
+        ]);
+        $service = $this->service(Mockery::mock(LoyerRepositoryInterface::class));
+
+        // Décembre n'est pas au calendrier : après novembre vient janvier ; rien au-delà d'août 2027 (8 mois restants).
+        $this->assertSame('01-2027', $service->prochainMoisAPayer('e1'));
+        $this->assertSame(['01-2027', '02-2027', '03-2027'], $service->moisConsecutifs('e1', 3));
+        $this->assertCount(8, $service->moisConsecutifs('e1', 12));
+    }
+
+    public function test_sans_mois_paye_le_premier_mois_du_calendrier_suit_l_entree(): void
+    {
+        // Entrée en novembre 2026, aucun loyer payé : premier mois à payer novembre (octobre est avant l'entrée).
+        $this->calendrier('2026-11-15');
+        $service = $this->service(Mockery::mock(LoyerRepositoryInterface::class));
+
+        $this->assertSame('11-2026', $service->prochainMoisAPayer('e1'));
+        $this->assertSame(['11-2026', '01-2027'], $service->moisConsecutifs('e1', 2));
+
+        // Échéance d'un mois : celle du calendrier, sinon le 10 du mois.
+        $calendrier = app(\App\Services\CalendrierLoyer::class);
+        $this->assertSame('2027-01-05 23:59:59', $calendrier->echeance($calendrier->pourEtudiant('e1'), 1, 2027)->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-12-10 23:59:59', $calendrier->echeance($calendrier->pourEtudiant('e1'), 12, 2026)->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-12-10 23:59:59', $calendrier->echeance([], 12, 2026)->format('Y-m-d H:i:s'));
+    }
+
+    public function test_les_penalites_deja_calculees_sont_retirees_des_loyers(): void
+    {
+        Schema::create('loyers', function (Blueprint $t) {
+            $t->string('id_loyer')->primary();
+            foreach (['solde_restant', 'total_penalites', 'penalite_journaliere'] as $champ) {
+                $t->decimal($champ, 12, 2)->default(0);
+            }
+        });
+        DB::table('loyers')->insert([
+            ['id_loyer' => 'l1', 'solde_restant' => 13000, 'total_penalites' => 1000, 'penalite_journaliere' => 240],
+            ['id_loyer' => 'l2', 'solde_restant' => 500, 'total_penalites' => 800, 'penalite_journaliere' => 0],
+            ['id_loyer' => 'l3', 'solde_restant' => 12000, 'total_penalites' => 0, 'penalite_journaliere' => 0],
+        ]);
+
+        (require database_path('migrations/2026_11_26_000002_supprimer_penalites_loyers.php'))->up();
+
+        $loyers = DB::table('loyers')->orderBy('id_loyer')->get()->map(fn ($l) => [(float) $l->solde_restant, (float) $l->total_penalites, (float) $l->penalite_journaliere])->all();
+        $this->assertSame([[12000.0, 0.0, 0.0], [0.0, 0.0, 0.0], [12000.0, 0.0, 0.0]], $loyers);
     }
 }

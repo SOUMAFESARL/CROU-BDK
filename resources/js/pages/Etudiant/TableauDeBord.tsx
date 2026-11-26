@@ -23,7 +23,6 @@ import { ReponseProposition, type Proposition } from '@/components/etudiant/repo
 import { ICON } from '@/components/layout/app-sidebar';
 import { EtudiantLayout } from '@/components/layout/etudiant-layout';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { StatCard, type KpiTone } from '@/components/ui/stat-card';
 import { cn } from '@/lib/utils';
 
@@ -50,9 +49,8 @@ type Demande = {
     echeanceIso: string | null;
     moyenne: string | number | null;
     residenceSouhaitee: string | null;
-    /** Avancement du dossier (étapes franchies / 5), calculé par EtudiantDashboard::ETAPES_FRANCHIES. */
-    progression: number;
-    etapesFranchies: number;
+    /** Dossier en cours sans chambre attribuée (EtudiantDashboard::ETATS_ATTENTE_ATTRIBUTION). */
+    enAttenteAttribution: boolean;
     documentsPourcentage: number;
     documentsValides: number;
     documents: { id: string; nom: string; statut: 'valide' | 'rejete' | 'en_attente' }[];
@@ -209,7 +207,6 @@ function VueResident({ resident, statut, anneeAcademique, aujourdHui }: TableauD
 }
 
 /** Ordre du traitement : la vérification est franchie à l'admission (liste définitive publiée). */
-const ETAPES = ['Soumission', 'Étude du dossier', 'Vérification', 'Attribution', 'Validation'];
 
 /** Jours restants avant l'échéance (fin de journée), recalculés chaque minute. */
 function useJoursRestants(echeanceIso: string | null): number | null {
@@ -286,32 +283,14 @@ function VueDemande({ demande, statut, anneeAcademique, aujourdHui }: TableauDeB
                         <Ligne icone={Building2} libelle="Résidence souhaitée" titre={demande.residenceSouhaitee ?? 'Non spécifiée'} />
                     </Liste>
 
-                    <div className="mt-4 flex flex-col gap-3 border-t pt-4">
-                        <div className="flex items-center justify-between text-sm">
-                            <span className="text-muted">Progression du traitement</span>
-                            <strong className="font-medium text-gray-900 tabular-nums">{demande.progression} %</strong>
+                    {demande.enAttenteAttribution && (
+                        <div className="mt-4 border-t pt-4">
+                            <Notice icone={Clock}>
+                                <strong className="font-medium">En attente d’attribution de chambre.</strong> Votre demande est en cours de traitement : vous
+                                serez informé(e) dès qu’une chambre vous sera attribuée.
+                            </Notice>
                         </div>
-                        <Progress value={demande.progression} tone="primary" label="Progression du traitement" className="h-2" />
-                        <ol className="grid grid-cols-5 gap-1 text-center text-[11px] leading-tight text-muted sm:text-xs">
-                            {ETAPES.map((etape, index) => {
-                                const faite = index < demande.etapesFranchies;
-
-                                return (
-                                    <li key={etape} className={cn('flex flex-col items-center gap-1', faite && 'text-primary')}>
-                                        <span
-                                            className={cn(
-                                                'grid size-6 place-items-center rounded-full border text-xs font-medium',
-                                                faite ? 'border-primary bg-primary text-white' : 'bg-white',
-                                            )}
-                                        >
-                                            {index + 1}
-                                        </span>
-                                        {etape}
-                                    </li>
-                                );
-                            })}
-                        </ol>
-                    </div>
+                    )}
                 </Panneau>
 
                 <Panneau surtitre="Pièces" titre="Documents fournis" badge={`${demande.documentsValides}/${nbDocuments} validés`}>

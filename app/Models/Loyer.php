@@ -210,18 +210,6 @@ class Loyer extends Model
         return $this->solde_restant;
     }
 
-    public function appliquerPenalites()
-    {
-        if ($this->date_limit_paiement && $this->date_limit_paiement < now() && $this->solde_restant > 0) {
-            $joursRetard = now()->diffInDays($this->date_limit_paiement) - $this->jours_retard_autorises;
-            if ($joursRetard > 0 && $this->penalite_journaliere > 0) {
-                $this->total_penalites += $joursRetard * $this->penalite_journaliere;
-                $this->calculerSolde();
-                $this->save();
-            }
-        }
-    }
-
     public function enregistrerPaiement($montant, $datePaiement = null)
     {
         $this->total_paye += $montant;

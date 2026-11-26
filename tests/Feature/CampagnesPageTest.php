@@ -46,6 +46,7 @@ class CampagnesPageTest extends TestCase
         });
         Schema::create('document', function (Blueprint $t) {
             $t->string('id_document')->primary(); $t->string('name'); $t->string('slug')->nullable(); $t->integer('statut')->default(1);
+            $t->boolean('champs_requis')->default(false); $t->integer('ordre_affiche')->default(0);
             $t->timestamps(); $t->softDeletes();
         });
         Schema::create('cite', function (Blueprint $t) {
@@ -84,8 +85,8 @@ class CampagnesPageTest extends TestCase
             ['id_chambre' => 'r3', 'numero_chambre' => '103', 'batiment_id' => 'b1', 'etat' => 'occupee', 'capacite_max' => 2],
         ]);
         DB::table('document')->insert([
-            ['id_document' => 'd1', 'name' => 'Certificat de scolarité', 'statut' => 1],
-            ['id_document' => 'd2', 'name' => 'Ancien document', 'statut' => 0],
+            ['id_document' => 'd1', 'name' => 'Certificat de scolarité', 'statut' => 1, 'champs_requis' => true],
+            ['id_document' => 'd2', 'name' => 'Ancien document', 'statut' => 0, 'champs_requis' => false],
         ]);
         DB::table('campagne')->insert([
             [
@@ -172,8 +173,12 @@ class CampagnesPageTest extends TestCase
 
         $this->assertSame('Admin/Hebergement/Campagnes/Create', $page['component']);
         $this->assertSame([['id' => 'cA', 'name' => 'Cité A', 'chambres' => 2]], $page['props']['residences']);
-        $this->assertSame([['id' => 'd1', 'name' => 'Certificat de scolarité']], $page['props']['documents']);
+        // Documents actifs seulement, avec leur caractère obligatoire (affiché sur la carte de sélection).
+        $this->assertSame([['id' => 'd1', 'name' => 'Certificat de scolarité', 'requis' => true]], $page['props']['documents']);
         $this->assertNotNull($page['props']['urls']['submit']);
+        // Ajout d'un document depuis l'assistant, à la suite des documents existants (2 en base).
+        $this->assertSame(route('admin.hebergement.parametrage-herb.document.store'), $page['props']['urls']['documentStore']);
+        $this->assertSame(3, $page['props']['ordreDocumentSuivant']);
     }
 
     public function test_creation_d_une_campagne_puis_retour_a_la_liste(): void

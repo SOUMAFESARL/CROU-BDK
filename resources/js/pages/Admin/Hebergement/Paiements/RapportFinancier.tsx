@@ -1,13 +1,12 @@
 import { Link, router } from '@inertiajs/react';
-import { ArrowLeft, Eye, Printer } from 'lucide-react';
+import { ArrowLeft, Printer } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Bar, CartesianGrid, Cell, ComposedChart, Line, Pie, PieChart, XAxis, YAxis } from 'recharts';
 import type { DataTableColumn } from '@/components/data-table/data-table';
-import { RowAction, RowActions } from '@/components/data-table/row-action';
 import { SimpleTable } from '@/components/data-table/simple-table';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
-import { fcfa, fcfaCourt, MOIS, toneTaux, varianteBadge } from '@/components/paiements/shared';
+import { fcfa, fcfaCourt } from '@/components/paiements/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
@@ -21,38 +20,18 @@ import { cn } from '@/lib/utils';
 
 type Mode = { methode: string; libelle: string; couleur: string; nombre: number; total: number; moyenne: number; pourcentage: number };
 
-type StatResidence = {
-    residence: string | null;
-    total_attendu: number;
-    total_encaisse: number;
-    total_impayes: number;
-    taux_recouvrement: number;
-    nb_residents: number;
-    loyer_moyen: number;
-    nb_en_retard: number;
-    alerte: boolean;
-};
-
-type DernierPaiement = {
-    id: string;
-    numero: string | null;
-    resident: string;
-    montant: number;
-    methode: string;
-    statut_label: string;
-    statut_badge: string;
-    date: string | null;
-    url: string | null;
-};
-
-type Filtres = { annee: string; mois: string; residence: string };
+/** `campagne` : identifiant ou `toutes` ; `mois` : mois de loyer de la campagne (`aaaa-mm`), vide pour toute la campagne. */
+type Filtres = { campagne: string; mois: string; residence: string };
 
 type Props = {
     stats: {
+        /** Loyers facturés de la période (mois de l'échéance). */
         total_attendu: number;
+        /** Part payée de ces loyers : base du taux de recouvrement. */
+        total_recouvre: number;
+        /** Paiements validés de la période, tous types (loyer, avance, caution…). */
         total_encaisse: number;
         total_impayes: number;
-        total_penalites: number;
         total_retard: number;
         nb_retard: number;
         nb_impayes: number;
@@ -61,35 +40,36 @@ type Props = {
         taux_recouvrement: number;
     };
     evolution: { label: string; encaisse: number; attendu: number }[];
-    repartition: { paye: number; impaye: number; retard: number };
+    /** Loyers de la période : payé, reste dû pas encore échu, reste dû en retard. */
+    repartition: { paye: number; a_echoir: number; retard: number };
     statsParMode: Mode[];
-    statsParResidence: StatResidence[];
-    derniersPaiements: DernierPaiement[];
     residences: { id: string; name: string }[];
+    campagnes: { id: string; libelle: string; active: boolean }[];
+    /** Mois de loyer de la campagne choisie (calendrier des loyers) ; vide pour « Toutes les campagnes ». */
+    mois: { value: string; label: string }[];
     filters: Filtres;
     urls: { rapport: string; index: string | null };
 };
 
 const COULEURS = { primary: '#006400', secondary: '#86BB46', accent: '#FAAB04', danger: '#DC2626' };
 const TOUS = 'tous';
+/** Valeur du filtre « Campagne » pour toutes les campagnes (comme la page Paiements). */
+const TOUTES_CAMPAGNES = 'toutes';
 
-/** Rapport financier des loyers (remplace `vie_residentielle/paiement/rapport-financier.blade.php`, Chart.js → Recharts). */
-export default function RapportFinancier({ stats, evolution, repartition, statsParMode, statsParResidence, derniersPaiements, residences, filters, urls }: Props) {
-    const anneeCourante = new Date().getFullYear();
-    const annees = Array.from({ length: 6 }, (_, index) => String(anneeCourante - index));
-    if (!annees.includes(filters.annee)) annees.unshift(filters.annee);
+/**
+ * Rapport financier (App\Services\RapportFinancier) : attendu, recouvré, impayés et retards sur les loyers facturés ;
+ * total encaissé, modes de paiement et évolution sur les paiements validés, tous types confondus.
+ */
+export default function RapportFinancier({ stats, evolution, repartition, statsParMode, residences, campagnes, mois, filters, urls }: Props) {
+    const campagneChoisie = campagnes.find((campagne) => campagne.id === filters.campagne);
 
+    // Changer de campagne remet le mois à « Tous les mois » (les mois dépendent de la campagne).
     const filtrer = (cle: keyof Filtres, valeur: string) => {
-        const suivants = { ...filters, [cle]: valeur === TOUS ? '' : valeur };
+        const suivants = { ...filters, [cle]: valeur === TOUS ? '' : valeur, ...(cle === 'campagne' ? { mois: '' } : {}) };
         router.get(urls.rapport, Object.fromEntries(Object.entries(suivants).filter(([, v]) => v)), { preserveState: true, preserveScroll: true, replace: true });
     };
 
     const totalModes = statsParMode.reduce((somme, mode) => ({ nombre: somme.nombre + mode.nombre, total: somme.total + mode.total }), { nombre: 0, total: 0 });
-    const totauxResidences = statsParResidence.reduce(
-        (somme, s) => ({ attendu: somme.attendu + s.total_attendu, encaisse: somme.encaisse + s.total_encaisse, impayes: somme.impayes + s.total_impayes }),
-        { attendu: 0, encaisse: 0, impayes: 0 },
-    );
-    const tauxGlobal = totauxResidences.attendu > 0 ? Math.round((totauxResidences.encaisse / totauxResidences.attendu) * 1000) / 10 : 0;
 
     const colonnesModes: DataTableColumn<Mode>[] = [
         {
@@ -117,54 +97,6 @@ export default function RapportFinancier({ stats, evolution, repartition, statsP
         },
     ];
 
-    const colonnesResidences: DataTableColumn<StatResidence>[] = [
-        {
-            key: 'residence',
-            header: 'Résidence',
-            cell: (s) => (
-                <span className="flex items-center gap-2 font-medium text-gray-900">
-                    {s.residence ?? 'N/A'}
-                    {s.alerte && <Badge variant="warning">Sous l’objectif</Badge>}
-                </span>
-            ),
-        },
-        { key: 'attendu', header: 'Attendu', className: 'whitespace-nowrap tabular-nums', cell: (s) => fcfa(s.total_attendu) },
-        { key: 'encaisse', header: 'Encaissé', className: 'whitespace-nowrap tabular-nums', cell: (s) => fcfa(s.total_encaisse) },
-        {
-            key: 'taux',
-            header: 'Recouvrement',
-            cell: (s) => (
-                <div className="flex min-w-32 items-center gap-2.5">
-                    <Progress value={s.taux_recouvrement} tone={toneTaux(s.taux_recouvrement)} label={`${s.taux_recouvrement} % recouvré`} />
-                    <span className="w-12 text-right text-xs font-medium tabular-nums">{nombre(s.taux_recouvrement, 1)} %</span>
-                </div>
-            ),
-        },
-        { key: 'impayes', header: 'Impayés', className: 'whitespace-nowrap tabular-nums', cell: (s) => fcfa(s.total_impayes) },
-        { key: 'residents', header: 'Résidents', className: 'text-center tabular-nums', headClassName: 'text-center', cell: (s) => nombre(s.nb_residents) },
-        { key: 'moyen', header: 'Loyer moyen', className: 'whitespace-nowrap tabular-nums', cell: (s) => fcfa(s.loyer_moyen) },
-        {
-            key: 'retards',
-            header: 'Retards',
-            cell: (s) => <Badge variant={s.nb_en_retard > 0 ? 'danger' : 'success'}>{nombre(s.nb_en_retard)} retard(s)</Badge>,
-        },
-    ];
-
-    const colonnesDerniers: DataTableColumn<DernierPaiement>[] = [
-        { key: 'numero', header: 'Numéro', className: 'font-mono text-[13px]', cell: (p) => p.numero ?? 'N/A' },
-        { key: 'resident', header: 'Résident', className: 'font-medium text-gray-900', cell: (p) => p.resident },
-        { key: 'montant', header: 'Montant', className: 'whitespace-nowrap font-medium tabular-nums', cell: (p) => fcfa(p.montant) },
-        { key: 'methode', header: 'Méthode', cell: (p) => <Badge variant="info">{p.methode}</Badge> },
-        { key: 'statut', header: 'Statut', cell: (p) => <Badge variant={varianteBadge(p.statut_badge)}>{p.statut_label}</Badge> },
-        { key: 'date', header: 'Date', className: 'whitespace-nowrap', cell: (p) => p.date ?? <span className="text-muted">—</span> },
-        {
-            key: 'actions',
-            header: <span className="sr-only">Actions</span>,
-            className: 'text-right',
-            cell: (p) => <RowActions>{p.url && <RowAction label="Voir le détail" icon={Eye} href={p.url} tone="view" />}</RowActions>,
-        },
-    ];
-
     const configEvolution = {
         encaisse: { label: 'Montants encaissés', color: COULEURS.primary },
         attendu: { label: 'Montants attendus', color: COULEURS.accent },
@@ -172,8 +104,8 @@ export default function RapportFinancier({ stats, evolution, repartition, statsP
 
     const donneesRepartition = [
         { name: 'Payé', value: repartition.paye, fill: COULEURS.primary },
-        { name: 'Impayé', value: Math.max(0, repartition.impaye), fill: COULEURS.danger },
-        { name: 'En retard', value: repartition.retard, fill: COULEURS.accent },
+        { name: 'À échoir', value: repartition.a_echoir, fill: COULEURS.accent },
+        { name: 'En retard', value: repartition.retard, fill: COULEURS.danger },
     ];
     const donneesModes = statsParMode.map((mode) => ({ name: mode.libelle, value: mode.total, fill: mode.couleur }));
 
@@ -196,44 +128,15 @@ export default function RapportFinancier({ stats, evolution, repartition, statsP
                 }
             />
 
-            {/* Période et résidence : la page est rechargée à chaque changement. */}
+            {/* Cité, campagne puis mois de cette campagne : la page est rechargée à chaque changement. */}
             <section aria-label="Période du rapport" className="mb-6 grid grid-cols-1 gap-3 rounded-brand border bg-white p-4 sm:grid-cols-3 print:hidden">
-                <Filtre label="Année">
-                    <Select value={filters.annee} onValueChange={(valeur) => filtrer('annee', valeur)}>
-                        <SelectTrigger className="h-10" aria-label="Année">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {annees.map((annee) => (
-                                <SelectItem key={annee} value={annee}>
-                                    {annee}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </Filtre>
-                <Filtre label="Mois">
-                    <Select value={filters.mois || TOUS} onValueChange={(valeur) => filtrer('mois', valeur)}>
-                        <SelectTrigger className="h-10" aria-label="Mois">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value={TOUS}>Tous les mois</SelectItem>
-                            {MOIS.map((mois) => (
-                                <SelectItem key={mois.value} value={mois.value}>
-                                    {mois.label}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </Filtre>
-                <Filtre label="Résidence">
+                <Filtre label="Cité">
                     <Select value={filters.residence || TOUS} onValueChange={(valeur) => filtrer('residence', valeur)}>
-                        <SelectTrigger className="h-10" aria-label="Résidence">
+                        <SelectTrigger className="h-10" aria-label="Cité">
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value={TOUS}>Toutes les résidences</SelectItem>
+                            <SelectItem value={TOUS}>Toutes les cités</SelectItem>
                             {residences.map((residence) => (
                                 <SelectItem key={residence.id} value={residence.id}>
                                     {residence.name}
@@ -242,21 +145,49 @@ export default function RapportFinancier({ stats, evolution, repartition, statsP
                         </SelectContent>
                     </Select>
                 </Filtre>
+                <Filtre label="Campagne">
+                    <Select value={filters.campagne} onValueChange={(valeur) => filtrer('campagne', valeur)}>
+                        <SelectTrigger className="h-10" aria-label="Campagne">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value={TOUTES_CAMPAGNES}>Toutes les campagnes</SelectItem>
+                            {campagnes.map((campagne) => (
+                                <SelectItem key={campagne.id} value={campagne.id}>
+                                    {campagne.libelle}
+                                    {campagne.active ? ' (active)' : ''}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </Filtre>
+                <Filtre label="Mois">
+                    <Select value={filters.mois || TOUS} onValueChange={(valeur) => filtrer('mois', valeur)} disabled={mois.length === 0}>
+                        <SelectTrigger className="h-10" aria-label="Mois">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value={TOUS}>{mois.length === 0 ? 'Choisissez une campagne' : 'Tous les mois de la campagne'}</SelectItem>
+                            {mois.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </Filtre>
             </section>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <StatCard tone="green" label="Total encaissé" value={fcfa(stats.total_encaisse)} extra={`${nombre(stats.nb_paiements)} paiement(s)`} />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                <StatCard tone="green" label="Total encaissé" value={fcfa(stats.total_encaisse)} />
                 <StatCard tone="blue" label="Total attendu" value={fcfa(stats.total_attendu)} extra={`${nombre(stats.nb_loyers)} loyer(s)`} />
-                <StatCard tone="blue" label="Taux de recouvrement" value={`${nombre(stats.taux_recouvrement, 1)} %`} extra="Objectif > 95 %" highlight={stats.taux_recouvrement < 95}>
-                    <Progress value={stats.taux_recouvrement} tone={toneTaux(stats.taux_recouvrement)} label={`${stats.taux_recouvrement} % recouvré`} className="bg-white" />
-                </StatCard>
+                <StatCard tone="blue" label="Taux de recouvrement" value={`${nombre(stats.taux_recouvrement, 1)} %`} highlight={stats.taux_recouvrement < 95} />
                 <StatCard tone="amber" label="Impayés" value={fcfa(stats.total_impayes)} extra={`${nombre(stats.nb_impayes)} loyer(s) impayé(s)`} highlight={stats.total_impayes > 0} />
                 <StatCard tone="amber" label="Retards" value={fcfa(stats.total_retard)} extra={`${nombre(stats.nb_retard)} loyer(s) en retard`} />
-                <StatCard tone="plum" label="Pénalités" value={fcfa(stats.total_penalites)} extra="Retards accumulés" />
             </div>
 
             <div className="mt-6 grid gap-6 lg:grid-cols-3">
-                <Panneau titre="Évolution des paiements" extra={<Badge variant="success">{filters.annee}</Badge>} className="lg:col-span-2">
+                <Panneau titre="Évolution des paiements" extra={<Badge variant="success">{campagneChoisie?.libelle ?? 'Toutes les campagnes'}</Badge>} className="lg:col-span-2">
                     <ChartContainer config={configEvolution} className="aspect-auto h-80 w-full">
                         <ComposedChart data={evolution} margin={{ left: 0, right: 8, top: 8 }}>
                             <CartesianGrid vertical={false} strokeDasharray="4 4" />
@@ -269,8 +200,8 @@ export default function RapportFinancier({ stats, evolution, repartition, statsP
                         </ComposedChart>
                     </ChartContainer>
                 </Panneau>
-                <Panneau titre="Répartition des montants">
-                    <Donut donnees={donneesRepartition} vide="Aucun montant sur la période." />
+                <Panneau titre="Répartition des loyers">
+                    <Donut donnees={donneesRepartition} vide="Aucun loyer sur la période." />
                 </Panneau>
             </div>
 
@@ -296,40 +227,6 @@ export default function RapportFinancier({ stats, evolution, repartition, statsP
                     <Donut donnees={donneesModes} vide="Aucun paiement validé sur la période." />
                 </Panneau>
             </div>
-
-            <section className="mt-6 overflow-hidden rounded-brand border bg-white">
-                <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
-                    <h2 className="text-base font-medium text-gray-900">Détail par résidence</h2>
-                    <span className="text-sm text-muted">{nombre(statsParResidence.length)} résidence(s)</span>
-                </div>
-                <SimpleTable columns={colonnesResidences} rows={statsParResidence} rowKey={(s) => s.residence ?? 'na'} emptyMessage="Aucune donnée pour la période sélectionnée." />
-                {statsParResidence.length > 0 && (
-                    <Totaux>
-                        <span>
-                            Attendu : <strong className="font-medium tabular-nums">{fcfa(totauxResidences.attendu)}</strong>
-                        </span>
-                        <span>
-                            Encaissé : <strong className="font-medium tabular-nums">{fcfa(totauxResidences.encaisse)}</strong>
-                        </span>
-                        <span>
-                            Impayés : <strong className="font-medium tabular-nums">{fcfa(totauxResidences.impayes)}</strong>
-                        </span>
-                        <Badge variant={tauxGlobal >= 90 ? 'success' : 'warning'}>{nombre(tauxGlobal, 1)} % recouvré</Badge>
-                    </Totaux>
-                )}
-            </section>
-
-            <section className="mt-6 overflow-hidden rounded-brand border bg-white">
-                <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
-                    <h2 className="text-base font-medium text-gray-900">Derniers paiements</h2>
-                    {urls.index && (
-                        <Link href={urls.index} className="text-sm font-medium text-primary hover:underline print:hidden">
-                            Voir tous les paiements
-                        </Link>
-                    )}
-                </div>
-                <SimpleTable columns={colonnesDerniers} rows={derniersPaiements} rowKey={(p) => p.id} emptyMessage="Aucun paiement récent." />
-            </section>
         </AdminLayout>
     );
 }

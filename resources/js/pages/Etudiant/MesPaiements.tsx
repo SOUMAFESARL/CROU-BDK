@@ -1,20 +1,9 @@
-import {
-    CalendarClock,
-    CreditCard,
-    Download,
-    FileText,
-    Globe,
-    Info,
-    ReceiptText,
-    TriangleAlert,
-    Wallet,
-} from "lucide-react";
+import { CalendarClock, CreditCard, Download, Eye, FileText, ReceiptText, Wallet } from "lucide-react";
 import { useState } from "react";
 import {
     Filtres,
-    Ligne,
+    IconeLigne,
     Liste,
-    Notice,
     PaginationSimple,
     Panneau,
     Vide,
@@ -29,7 +18,6 @@ import { ICON } from "@/components/layout/app-sidebar";
 import { EtudiantLayout } from "@/components/layout/etudiant-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { StatCard, type KpiTone } from "@/components/ui/stat-card";
 import {
     Table,
     TableBody,
@@ -39,70 +27,60 @@ import {
     TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
 
 type Ton = "success" | "warning" | "danger" | "info" | "neutral";
 type Statut = { libelle: string; ton: Ton };
 
-type Situation = {
-    totalPaye: string;
-    reste: string;
-    penalites: string | null;
-    recouvrement: number | null;
-    nbImpayes: number;
-    nbRetards: number;
-    prochaine: { periode: string; montant: string; limite: string | null } | null;
-    etat: { libelle: string; ton: KpiTone };
-};
-
 type Loyer = {
+    /** Mois « aaaa-mm ». */
     id: string;
     periode: string;
-    montant: string;
-    paye: string;
-    solde: string;
+    montant: string | null;
     limite: string | null;
+    datePaiement: string | null;
+    paye: boolean;
+    /** Payé par une avance (versée avant l'attribution de la chambre). */
+    avance: boolean;
     statut: Statut;
+    quittance: DocumentPdf | null;
 };
+
+/** Document PDF à voir (nouvel onglet) ou télécharger. */
+type DocumentPdf = { voir: string; telecharger: string };
 
 type Paiement = {
     id: string;
     periode: string | null;
     date: string | null;
     reference: string | null;
+    /** Type de paiement (Loyer, Avance, Caution…). */
+    type: string | null;
     methode: string | null;
     montant: string;
     statut: Statut;
-    recu: string | null;
+    /** Même reçu que l'administration, pour un paiement validé ou remboursé. */
+    recu: DocumentPdf | null;
 };
 
-type PaiementEnLigne = {
-    id: string;
-    date: string | null;
-    reseau: string;
-    montant: string;
-    statut: Statut;
-    url: string;
-};
-
-type Onglet = "situation" | "loyers" | "en-ligne" | "historique";
+type Onglet = "loyers" | "historique";
 
 type MesPaiementsProps = {
-    /** Onglet ouvert (`?onglet=`), « situation » par défaut. */
+    /** Onglet ouvert (`?onglet=`), « loyers » par défaut. */
     onglet: Onglet;
-    situation: Situation;
     reglement: {
         reseaux: Reseau[];
         telephone: string;
         indisponible: string | null;
         loyer: LoyerReglable | null;
     };
+    /** Année de la campagne du séjour (« 2026-2027 »). */
+    campagne: string | null;
+    /** Mois écoulés du séjour (10 au plus), le plus récent en premier. */
     loyers: Loyer[];
     statut: string | null;
     statuts: { code: string; libelle: string }[];
     paiements: Paiement[];
     pagination: PaginationSimpleProps;
-    enLigne: PaiementEnLigne[];
     urls: { payer: string; page: string; documents: string };
 };
 
@@ -118,24 +96,25 @@ function avecStatut(page: string, statut: string | null) {
 }
 
 /**
- * Page « Mes paiements », en quatre onglets : « Situation » (chiffres clés et loyer à régler), « Mes loyers »,
- * « Paiements en ligne » (suivi) et « Historique » (règlements enregistrés et reçus).
+ * Page « Mes loyers », en deux onglets : « Loyers » (mois écoulés de la campagne, payés avec quittance
+ * à voir ou télécharger, ou non payés) et « Historique » (règlements enregistrés et reçus).
  */
 export default function MesPaiements({
     onglet,
-    situation,
     reglement,
+    campagne,
     loyers,
     statut,
     statuts,
     paiements,
     pagination,
-    enLigne,
     urls,
 }: MesPaiementsProps) {
     const [paiementOuvert, setPaiementOuvert] = useState(false);
     const [actif, setActif] = useState<Onglet>(onglet);
     const payable = reglement.loyer && !reglement.indisponible;
+    const impayes = loyers.filter((loyer) => !loyer.paye);
+    const enRetard = impayes.some((loyer) => loyer.statut.ton === "danger");
 
     // L'onglet ouvert reste dans l'URL (?onglet=…) pour le partage et le retour arrière.
     const changerOnglet = (valeur: string) => {
@@ -146,15 +125,15 @@ export default function MesPaiements({
     };
 
     return (
-        <EtudiantLayout title="Mes paiements">
+        <EtudiantLayout title="Mes loyers">
             <div className="flex flex-col gap-5">
                 <header className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                         <h1 className="page-title text-xl font-medium text-gray-900">
-                            Mes paiements
+                            Mes loyers
                         </h1>
                         <p className="mt-2 text-sm text-muted">
-                            Suivez vos loyers, réglez en ligne et téléchargez vos reçus.
+                            Suivez vos loyers, réglez en ligne et téléchargez vos quittances et reçus.
                         </p>
                     </div>
                     {payable && (
@@ -166,163 +145,80 @@ export default function MesPaiements({
                 </header>
 
                 <Tabs value={actif} onValueChange={changerOnglet}>
-                    <TabsList aria-label="Mes paiements">
-                        <TabsTrigger value="situation">
-                            <CreditCard {...ICON} aria-hidden /> Situation
-                        </TabsTrigger>
+                    <TabsList aria-label="Mes loyers">
                         <TabsTrigger value="loyers">
-                            <Wallet {...ICON} aria-hidden /> Mes loyers
-                            {situation.nbImpayes > 0 && (
+                            <Wallet {...ICON} aria-hidden /> Loyers
+                            {impayes.length > 0 && (
                                 <Badge
-                                    variant={situation.nbRetards > 0 ? "danger" : "warning"}
-                                    title={pluriel(situation.nbImpayes, "impayé", "impayés")}
+                                    variant={enRetard ? "danger" : "warning"}
+                                    title={pluriel(impayes.length, "mois non payé", "mois non payés")}
                                 >
-                                    {situation.nbImpayes}
+                                    {impayes.length}
                                 </Badge>
                             )}
-                        </TabsTrigger>
-                        <TabsTrigger value="en-ligne">
-                            <Globe {...ICON} aria-hidden /> Paiements en ligne
                         </TabsTrigger>
                         <TabsTrigger value="historique">
                             <ReceiptText {...ICON} aria-hidden /> Historique
                         </TabsTrigger>
                     </TabsList>
 
-                    <TabsContent value="situation" className="flex flex-col gap-5">
-                        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                            <StatCard
-                                label="Total payé"
-                                value={situation.totalPaye}
-                                tone="green"
-                                extra={
-                                    situation.recouvrement !== null
-                                        ? `${situation.recouvrement} % réglé`
-                                        : undefined
-                                }
-                            />
-                            <StatCard
-                                label="Reste à payer"
-                                value={situation.reste}
-                                tone={situation.nbImpayes > 0 ? "red" : "neutral"}
-                                extra={pluriel(situation.nbImpayes, "impayé", "impayés")}
-                                highlight={situation.nbRetards > 0}
-                            />
-                            <StatCard
-                                label="Prochaine échéance"
-                                value={situation.prochaine?.periode ?? "Aucune"}
-                                tone="blue"
-                                extra={situation.prochaine?.montant}
-                            />
-                            <StatCard
-                                label="Statut du compte"
-                                value={situation.etat.libelle}
-                                tone={situation.etat.ton}
-                            />
-                        </div>
-
-                        {situation.nbRetards > 0 && (
-                            <Notice icone={TriangleAlert} className="bg-red-50 text-red-700">
-                                {pluriel(situation.nbRetards, "loyer est", "loyers sont")} en retard de
-                                paiement
-                                {situation.penalites
-                                    ? `, avec ${situation.penalites} de pénalités`
-                                    : ""}
-                                . Réglez-les au plus vite pour éviter de nouvelles pénalités.
-                            </Notice>
-                        )}
-
-                        <Panneau surtitre="Paiement en ligne" titre="Payer mon loyer">
-                            {reglement.loyer && !reglement.indisponible ? (
-                                <div className="flex flex-col gap-3">
-                                    <dl className="divide-y rounded-brand border">
-                                        {(
-                                            [
-                                                ["Chambre", reglement.loyer.chambre],
-                                                ["Période à régler", reglement.loyer.periode],
-                                                ["Loyer facturé", reglement.loyer.montant],
-                                                ["Pénalités", reglement.loyer.penalites],
-                                                ["Déjà réglé", reglement.loyer.dejaPaye],
-                                            ] as [string, string | null][]
-                                        )
-                                            .filter(([, valeur]) => valeur)
-                                            .map(([libelle, valeur]) => (
-                                                <div
-                                                    key={libelle}
-                                                    className="flex justify-between gap-4 px-3 py-2.5 text-sm"
-                                                >
-                                                    <dt className="text-muted">{libelle}</dt>
-                                                    <dd className="font-medium text-gray-900">
-                                                        {valeur}
-                                                    </dd>
-                                                </div>
-                                            ))}
-                                        <div className="flex items-center justify-between gap-4 bg-soft px-3 py-3">
-                                            <dt className="text-sm font-medium text-primary">
-                                                Solde restant
-                                            </dt>
-                                            <dd className="text-lg font-bold text-primary tabular-nums">
-                                                {reglement.loyer.solde}
-                                            </dd>
-                                        </div>
-                                    </dl>
-                                    <p className="text-xs text-muted">
-                                        Le loyer le plus ancien est proposé en premier. Vous pouvez
-                                        régler tout ou partie du solde avec{" "}
-                                        {reglement.reseaux.map((r) => r.nom).join(", ")}.
-                                    </p>
-                                    <Button
-                                        onClick={() => setPaiementOuvert(true)}
-                                        className="w-full font-medium sm:w-fit"
-                                    >
-                                        <CreditCard {...ICON} />
-                                        Payer {reglement.loyer.solde}
-                                    </Button>
-                                </div>
-                            ) : (
-                                <Vide icone={Info}>{reglement.indisponible}</Vide>
-                            )}
-                        </Panneau>
-                    </TabsContent>
-
                     <TabsContent value="loyers">
                         <Panneau
-                            surtitre="Facturation"
-                            titre="Mes loyers"
-                            badge={pluriel(loyers.length, "loyer", "loyers")}
+                            surtitre={campagne ? `Campagne ${campagne}` : "Facturation"}
+                            titre="Loyers du séjour"
+                            badge={pluriel(loyers.length, "mois", "mois")}
                         >
                             {loyers.length === 0 ? (
                                 <Vide icone={Wallet}>
-                                    Aucun loyer n’a encore été établi pour votre chambre.
+                                    Aucun mois de loyer pour le moment : votre séjour n’a pas encore commencé.
                                 </Vide>
                             ) : (
                                 <>
                                     <Liste className="md:hidden">
                                         {loyers.map((loyer) => (
-                                            <Ligne
+                                            <li
                                                 key={loyer.id}
-                                                icone={CalendarClock}
-                                                ton={loyer.statut.ton === "success" ? "vert" : "orange"}
-                                                titre={loyer.periode}
-                                                detail={`Payé ${loyer.paye} · Reste ${loyer.solde}`}
-                                                complement={
-                                                    <Badge variant={loyer.statut.ton}>
-                                                        {loyer.statut.libelle}
-                                                    </Badge>
-                                                }
-                                            />
+                                                className="flex min-h-14 items-center gap-3 px-2 py-2.5"
+                                            >
+                                                <IconeLigne
+                                                    icone={CalendarClock}
+                                                    ton={loyer.paye ? "vert" : "orange"}
+                                                />
+                                                <span className="min-w-0 flex-1">
+                                                    <strong className="block truncate text-sm font-medium text-gray-900">
+                                                        {loyer.periode}
+                                                    </strong>
+                                                    <small className="block truncate text-xs text-muted">
+                                                        {loyer.paye
+                                                            ? [
+                                                                  loyer.montant,
+                                                                  loyer.datePaiement &&
+                                                                      `payé le ${loyer.datePaiement}`,
+                                                                  loyer.avance && "avance",
+                                                              ]
+                                                                  .filter(Boolean)
+                                                                  .join(" · ")
+                                                            : loyer.montant}
+                                                    </small>
+                                                </span>
+                                                <Badge variant={loyer.statut.ton}>{loyer.statut.libelle}</Badge>
+                                                <ActionsDocument
+                                                    pdf={loyer.quittance}
+                                                    libelle={`la quittance de ${loyer.periode}`}
+                                                />
+                                            </li>
                                         ))}
                                     </Liste>
                                     <div className="hidden overflow-hidden rounded-brand border md:block">
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
-                                                    <TableHead>Période</TableHead>
+                                                    <TableHead>Mois</TableHead>
                                                     <TableHead>Échéance</TableHead>
                                                     <TableHead className="text-right">Montant</TableHead>
-                                                    <TableHead className="text-right">Payé</TableHead>
-                                                    <TableHead className="text-right">Reste</TableHead>
+                                                    <TableHead>Payé le</TableHead>
                                                     <TableHead>Statut</TableHead>
+                                                    <TableHead className="text-right">Quittance</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
@@ -335,61 +231,39 @@ export default function MesPaiements({
                                                             {loyer.limite ?? "—"}
                                                         </TableCell>
                                                         <TableCell className="text-right tabular-nums">
-                                                            {loyer.montant}
+                                                            {loyer.montant ?? "—"}
                                                         </TableCell>
-                                                        <TableCell className="text-right tabular-nums">
-                                                            {loyer.paye}
-                                                        </TableCell>
-                                                        <TableCell className="text-right font-medium tabular-nums">
-                                                            {loyer.solde}
+                                                        <TableCell className="text-muted">
+                                                            {loyer.datePaiement ?? "—"}
+                                                            {loyer.avance && (
+                                                                <span className="block text-xs">Avance</span>
+                                                            )}
                                                         </TableCell>
                                                         <TableCell>
                                                             <Badge variant={loyer.statut.ton}>
                                                                 {loyer.statut.libelle}
                                                             </Badge>
                                                         </TableCell>
+                                                        <TableCell className="py-1">
+                                                            <div className="flex justify-end">
+                                                                <ActionsDocument
+                                                                    pdf={loyer.quittance}
+                                                                    libelle={`la quittance de ${loyer.periode}`}
+                                                                />
+                                                            </div>
+                                                        </TableCell>
                                                     </TableRow>
                                                 ))}
                                             </TableBody>
                                         </Table>
                                     </div>
+                                    {impayes.length > 0 && payable && (
+                                        <p className="mt-3 text-xs text-muted">
+                                            Réglez vos loyers non payés avec « Payer mon loyer » : le plus ancien
+                                            est proposé en premier.
+                                        </p>
+                                    )}
                                 </>
-                            )}
-                        </Panneau>
-                    </TabsContent>
-
-                    <TabsContent value="en-ligne">
-                        <Panneau
-                            surtitre="Suivi"
-                            titre="Mes paiements en ligne"
-                            badge={pluriel(enLigne.length, "récent", "récents")}
-                        >
-                            {enLigne.length === 0 ? (
-                                <Vide icone={Globe}>
-                                    Aucun paiement en ligne pour le moment.
-                                </Vide>
-                            ) : (
-                                <Liste>
-                                    {enLigne.map((p) => (
-                                        <Ligne
-                                            key={p.id}
-                                            href={p.url}
-                                            icone={Globe}
-                                            ton={p.statut.ton === "success" ? "vert" : undefined}
-                                            titre={`${p.montant} · ${p.reseau}`}
-                                            detail={p.date}
-                                            complement={
-                                                <Badge
-                                                    variant={p.statut.ton}
-                                                    className="max-w-36 truncate"
-                                                    title={p.statut.libelle}
-                                                >
-                                                    {p.statut.libelle}
-                                                </Badge>
-                                            }
-                                        />
-                                    ))}
-                                </Liste>
                             )}
                         </Panneau>
                     </TabsContent>
@@ -429,17 +303,19 @@ export default function MesPaiements({
                                             >
                                                 <span className="min-w-0 flex-1">
                                                     <strong className="block truncate text-sm font-medium text-gray-900">
-                                                        {p.montant}
-                                                        {p.periode ? ` · ${p.periode}` : ""}
+                                                        {[p.type, p.montant].filter(Boolean).join(" · ")}
                                                     </strong>
                                                     <small className="block truncate text-xs text-muted">
-                                                        {[p.date, p.methode, p.reference]
+                                                        {[p.periode, p.date, p.methode, p.reference]
                                                             .filter(Boolean)
                                                             .join(" · ")}
                                                     </small>
                                                 </span>
                                                 <Badge variant={p.statut.ton}>{p.statut.libelle}</Badge>
-                                                <LienRecu url={p.recu} />
+                                                <ActionsDocument
+                                                    pdf={p.recu}
+                                                    libelle={`le reçu ${p.reference ?? ""}`.trim()}
+                                                />
                                             </li>
                                         ))}
                                     </Liste>
@@ -448,20 +324,20 @@ export default function MesPaiements({
                                             <TableHeader>
                                                 <TableRow>
                                                     <TableHead>Date</TableHead>
+                                                    <TableHead>Type</TableHead>
                                                     <TableHead>Période</TableHead>
                                                     <TableHead>Référence</TableHead>
                                                     <TableHead>Moyen</TableHead>
                                                     <TableHead className="text-right">Montant</TableHead>
                                                     <TableHead>Statut</TableHead>
-                                                    <TableHead>
-                                                        <span className="sr-only">Reçu</span>
-                                                    </TableHead>
+                                                    <TableHead className="text-right">Reçu</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
                                                 {paiements.map((p) => (
                                                     <TableRow key={p.id}>
                                                         <TableCell>{p.date ?? "—"}</TableCell>
+                                                        <TableCell>{p.type ?? "—"}</TableCell>
                                                         <TableCell className="max-w-48 truncate">
                                                             {p.periode ?? "—"}
                                                         </TableCell>
@@ -477,8 +353,13 @@ export default function MesPaiements({
                                                                 {p.statut.libelle}
                                                             </Badge>
                                                         </TableCell>
-                                                        <TableCell className="w-12 py-1">
-                                                            <LienRecu url={p.recu} />
+                                                        <TableCell className="py-1">
+                                                            <div className="flex justify-end">
+                                                                <ActionsDocument
+                                                                    pdf={p.recu}
+                                                                    libelle={`le reçu ${p.reference ?? ""}`.trim()}
+                                                                />
+                                                            </div>
                                                         </TableCell>
                                                     </TableRow>
                                                 ))}
@@ -514,21 +395,33 @@ export default function MesPaiements({
     );
 }
 
-function LienRecu({ url }: { url: string | null }) {
-    if (!url) return <span className="inline-block size-9 shrink-0" aria-hidden />;
+const classeIcone =
+    "grid size-9 shrink-0 place-items-center rounded-brand text-muted hover:bg-soft hover:text-primary focus-visible:ring-2 focus-visible:ring-secondary focus-visible:outline-none";
+
+/** Voir (nouvel onglet) et télécharger un document : quittance d'un mois payé ou reçu d'un paiement. */
+function ActionsDocument({ pdf, libelle }: { pdf: DocumentPdf | null; libelle: string }) {
+    if (!pdf) return <span className="inline-block size-9 shrink-0" aria-hidden />;
 
     return (
-        <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Télécharger le reçu"
-            aria-label="Télécharger le reçu"
-            className={cn(
-                "grid size-9 shrink-0 place-items-center rounded-brand text-muted hover:bg-soft hover:text-primary focus-visible:ring-2 focus-visible:ring-secondary focus-visible:outline-none",
-            )}
-        >
-            <Download {...ICON} />
-        </a>
+        <span className="flex shrink-0 items-center">
+            <a
+                href={pdf.voir}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Voir ${libelle}`}
+                aria-label={`Voir ${libelle}`}
+                className={classeIcone}
+            >
+                <Eye {...ICON} />
+            </a>
+            <a
+                href={pdf.telecharger}
+                title={`Télécharger ${libelle}`}
+                aria-label={`Télécharger ${libelle}`}
+                className={classeIcone}
+            >
+                <Download {...ICON} />
+            </a>
+        </span>
     );
 }

@@ -107,6 +107,7 @@ return [
         'admin.hebergement.maintenance.store_ot' => 'hebergement.maintenance.create',
         'admin.hebergement.maintenance.update' => 'hebergement.maintenance.update',
         'admin.hebergement.paiements.annuler' => 'hebergement.paiements.validate',
+        'admin.hebergement.paiements.calendrier.update' => 'hebergement.paiements.update',
         'admin.hebergement.paiements.export' => 'hebergement.paiements.export',
         'admin.hebergement.paiements.index' => 'hebergement.paiements.view',
         'admin.hebergement.paiements.rapport_financier' => 'hebergement.paiements.view',

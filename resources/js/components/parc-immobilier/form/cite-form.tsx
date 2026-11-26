@@ -232,7 +232,7 @@ export function CiteForm({ item, campusId, typesCite, users, reglements, submitU
         }
         router.post(submitUrl, data, {
             forceFormData: true,
-            // Erreurs : la saisie est conservée. Succès : formulaire vierge (création) ou retour à la liste (modification).
+            // Erreurs : la saisie est conservée. Succès (création ou modification) : retour au parc immobilier.
             preserveState: 'errors',
             preserveScroll: true,
             onStart: () => setSubmitting(true),

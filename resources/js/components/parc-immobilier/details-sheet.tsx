@@ -186,7 +186,7 @@ function lignes(item: ParcItem): [string, ReactNode][] {
     }
 }
 
-function Section({ titre, children }: { titre: string; children: ReactNode }) {
+export function Section({ titre, children }: { titre: string; children: ReactNode }) {
     return (
         <section className="space-y-2.5">
             <h3 className="text-xs font-medium tracking-wide text-muted uppercase">{titre}</h3>
@@ -195,7 +195,7 @@ function Section({ titre, children }: { titre: string; children: ReactNode }) {
     );
 }
 
-function Occupation({ resume }: { resume: Resume }) {
+export function Occupation({ resume }: { resume: Resume }) {
     return (
         <div className="rounded-brand border bg-surface/60 p-4">
             <div className="mb-3 flex items-end justify-between">
@@ -215,7 +215,7 @@ function Occupation({ resume }: { resume: Resume }) {
     );
 }
 
-function Categories({ categories }: { categories: Record<string, number> }) {
+export function Categories({ categories }: { categories: Record<string, number> }) {
     const entrees = Object.entries(categories);
     const total = entrees.reduce((somme, [, n]) => somme + n, 0);
 

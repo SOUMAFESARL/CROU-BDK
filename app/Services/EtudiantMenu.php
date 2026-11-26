@@ -50,7 +50,7 @@ class EtudiantMenu
                     : []),
                 ['label' => 'Demandes', 'icon' => 'file-pen-line', 'page' => 'demandes', 'href' => $sectionUrl('demandes')],
                 ['label' => 'État des lieux', 'icon' => 'clipboard-check', 'page' => 'etat-lieux', 'href' => $sectionUrl('etat-lieux')],
-                ['label' => 'Paiements', 'icon' => 'credit-card', 'page' => 'paiements', 'href' => $sectionUrl('paiements')],
+                ['label' => 'Mes loyers', 'icon' => 'credit-card', 'page' => 'paiements', 'href' => $sectionUrl('paiements')],
                 ['label' => 'Annonces', 'icon' => 'megaphone', 'page' => 'annonce', 'href' => $sectionUrl('annonce')],
                 ['label' => 'Maintenance', 'icon' => 'wrench', 'page' => 'maintenance', 'href' => $sectionUrl('maintenance')],
                 // Sanctions appliquées à l'étudiant et signalement d'incidents.

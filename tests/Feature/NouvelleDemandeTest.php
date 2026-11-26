@@ -23,6 +23,8 @@ class NouvelleDemandeTest extends \Tests\Support\DossierTestCase
         Schema::create('departure_requests',function(Blueprint $t){$t->id();$t->string('etudiant_id');$t->string('statut');});
         Schema::create('document_campagne',function(Blueprint $t){$t->string('id_document_campagne')->primary();$t->string('id_campagne');$t->string('document_id');$t->timestamps();});
         Schema::create('document',function(Blueprint $t){$t->string('id_document')->primary();$t->string('name');$t->string('slug');$t->string('format_accepte')->nullable();$t->boolean('champs_requis')->default(false);$t->timestamps();});
+        // « Type de pièce » : sans document obligatoire dans la campagne, le formulaire propose les types de pièce.
+        Schema::create('type_piece',function(Blueprint $t){$t->id();$t->string('name');$t->string('description');});
         DB::table('etudiants')->where('id_etudiant','student')->update([
             'statut_inscription'=>'annuler','email1'=>'aya@exemple.com','telephone1'=>'+225 07 01 02 03 04','numero_piece'=>'CI-12345','matricule'=>'MAT-01',
         ]);

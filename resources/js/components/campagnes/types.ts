@@ -105,8 +105,17 @@ export type ResidenceOption = { id: string; name: string; chambres: number };
 
 export type CreateCampagneProps = {
     residences: ResidenceOption[];
-    documents: { id: string; name: string }[];
-    urls: { hebergement: string; index: string; submit: string | null };
+    /** Documents actifs (et ceux déjà liés en modification) ; `requis` : pièce obligatoire pour l'étudiant. */
+    documents: { id: string; name: string; requis: boolean }[];
+    /** Ordre d'affichage proposé pour un document ajouté depuis l'assistant. */
+    ordreDocumentSuivant: number;
+    urls: {
+        hebergement: string;
+        index: string;
+        submit: string | null;
+        /** Ajout d'un document à fournir sans quitter l'assistant (null sans le droit de paramétrage). */
+        documentStore: string | null;
+    };
 };
 
 /** Valeurs saisies dans l'assistant (dates `aaaa-mm-jj`, identifiants des cités et documents). */

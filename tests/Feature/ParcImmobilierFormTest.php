@@ -171,7 +171,7 @@ class ParcImmobilierFormTest extends TestCase
 
     public function test_cite_enregistree_sans_plan_et_telephones_normalises(): void
     {
-        app(ParcImmobilierController::class)->storeCite($this->requete('POST', [
+        $reponse = app(ParcImmobilierController::class)->storeCite($this->requete('POST', [
             'campus_id' => 'k1', 'name' => 'Cité Nouvelle', 'code_cite' => 'CN', 'type_cite' => 'tf', 'statut' => 'ouvert',
             'capacite_max' => '300', 'nombre_batiments' => '', 'superficie' => '', 'annee_construction' => '2020',
             'responsable_id' => 'resp', 'telephone1' => '07 01 02 03 04', 'telephone2' => '', 'telephone3' => '',
@@ -186,6 +186,8 @@ class ParcImmobilierFormTest extends TestCase
         $this->assertEquals(1, $cite->wifi_gratuit);
         $this->assertEquals(0, $cite->restaurant);
         $this->assertSame('reg1', $cite->reglement_interieur_id);
+        // Succès : retour au parc immobilier (et non sur le formulaire).
+        $this->assertSame(route('admin.hebergement.parc-immobilier.index'), $reponse->getTargetUrl());
     }
 
     public function test_batiment_refuse_si_type_incompatible_avec_la_cite(): void

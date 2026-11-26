@@ -32,10 +32,6 @@
         .repartition td.somme { text-align: right; white-space: nowrap; }
         .repartition tr.total td { background: #f8f8f8; color: #006400; }
         .avec-marge { margin-bottom: 6px; }
-        .signatures { margin-top: 22px; }
-        .signatures td { width: 50%; vertical-align: top; padding: 0 8px 0 0; }
-        .signatures .zone { height: 52px; border-bottom: 1px solid #54595f; }
-        .signatures .nom { margin-top: 3px; font-size: 9px; color: #54595f; }
         .pied { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8px; color: #54595f; border-top: 1px solid #e6e9e2; padding-top: 4px; }
     </style>
 </head>
@@ -44,7 +40,8 @@
         // Logo intégré au document (data URI) ; un logo introuvable sur ce serveur n'est pas affiché.
         $logo = systemLogoDocument();
         $resident = $paiement->resident;
-        $logement = collect([$paiement->cite?->name, $paiement->chambre?->numero_chambre ? 'Chambre '.$paiement->chambre->numero_chambre : null])->filter()->join(' · ');
+        // Numéro de la chambre, puis la cité : « 1 · Cité Zanzan ».
+        $chambre = collect([$paiement->chambre?->numero_chambre, $paiement->cite?->name])->filter()->join(' · ');
         $valide = $paiement->statut_paiement === 'valide';
         $plusieurs = count($details) > 1;
     @endphp
@@ -74,9 +71,12 @@
     <div class="bloc">
         <h2>Bénéficiaire</h2>
         <table class="grille">
+            <tr><td class="terme">Civilité</td><td>{{ $civilite ?? '—' }}</td></tr>
             <tr><td class="terme">Nom et prénoms</td><td>{{ $resident?->name ?: '—' }}</td></tr>
             <tr><td class="terme">Matricule / N° de table</td><td>{{ $matricule ?: '—' }}</td></tr>
-            <tr><td class="terme">Logement</td><td>{{ $logement ?: 'Non attribué (paiement avant l’attribution)' }}</td></tr>
+            <tr><td class="terme">Filière</td><td>{{ $parcours['filiere'] ?? '—' }}</td></tr>
+            <tr><td class="terme">Niveau d’étude</td><td>{{ $parcours['niveau'] ?? '—' }}</td></tr>
+            <tr><td class="terme">Chambre</td><td>{{ $chambre ?: 'Non attribuée (paiement avant l’attribution)' }}</td></tr>
         </table>
     </div>
 
@@ -137,17 +137,6 @@
             </table>
         </div>
     @endif
-
-    <table class="signatures">
-        <tr>
-            <td></td>
-            <td>
-                <div>Pour le service de l’hébergement</div>
-                <div class="zone"></div>
-                <div class="nom">{{ $paiement->createdBy?->name ?? 'Système' }}</div>
-            </td>
-        </tr>
-    </table>
 
     <div class="pied">
         {{ systemAppName() }} — Reçu n° {{ $paiement->numero_paiement ?: $paiement->id_paiement }} édité le {{ now()->format('d/m/Y à H:i') }}. Conservez ce reçu : il peut vous être demandé.

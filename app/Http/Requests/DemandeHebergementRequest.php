@@ -4,9 +4,12 @@ namespace App\Http\Requests;
 
 use App\Http\Services\Eligibilite\CriteresCampagne;
 use App\Http\Services\NouvelleDemandeService;
+use App\Http\Services\PiecesIdentiteDemande;
+use App\Models\Campagne;
 use App\Models\DemandeEtudiant;
 use App\Models\Etudiant;
 use App\Models\NiveauEtude;
+use Illuminate\Validation\Rule;
 
 /**
  * Formulaire public de demande d'hébergement (/register, frontedController::postRegister) : mêmes règles qu'EtudiantRequest,
@@ -67,12 +70,29 @@ class DemandeHebergementRequest extends EtudiantRequest
         $this->merge($donnees);
     }
 
-    /** Note au bac ramenée sur 20 avant l'enregistrement, puis traitement des saisies libres. */
+    private Campagne|false|null $campagne = false;
+
+    /** Campagne de la demande (champ `id_campagne`). */
+    private function campagne(): ?Campagne
+    {
+        if ($this->campagne === false) {
+            $id = $this->input('id_campagne');
+            $this->campagne = is_string($id) && $id !== '' ? Campagne::find($id) : null;
+        }
+
+        return $this->campagne;
+    }
+
+    /**
+     * Note au bac ramenée sur 20 avant l'enregistrement, type de pièce choisi (document obligatoire de la campagne)
+     * rattaché au référentiel `type_piece`, puis traitement des saisies libres.
+     */
     protected function passedValidation(): void
     {
         if ($this->apresTerminale() && is_numeric($this->input('moyenne'))) {
             $this->merge(['moyenne' => round((float) $this->input('moyenne') * 20 / self::NOTE_BAC_MAX, 2)]);
         }
+        $this->merge(['type_piece_id' => app(PiecesIdentiteDemande::class)->typePieceId($this->campagne(), (string) $this->input('type_piece'))]);
         parent::passedValidation();
     }
 
@@ -105,6 +125,8 @@ class DemandeHebergementRequest extends EtudiantRequest
             }
         }];
         $rules['niveau_precedent'] = ['required'];
+        // Type de pièce : un des choix proposés par le formulaire (documents obligatoires de la campagne, ou types de pièce).
+        $rules['type_piece'] = ['required', 'string', Rule::in(app(PiecesIdentiteDemande::class)->valeursAcceptees($this->campagne()))];
         // Après la Terminale : note au bac sur 400 et ville du bac obligatoire ; sinon moyenne générale sur 20.
         $rules['moyenne'] = $this->apresTerminale()
             ? ['nullable', 'numeric', 'min:1', 'max:'.self::NOTE_BAC_MAX]
@@ -143,6 +165,8 @@ class DemandeHebergementRequest extends EtudiantRequest
             'num_piece.unique' => $existant,
             'matricule.unique' => $existant,
             'niveau.required' => 'Choisissez votre niveau d’étude actuel.',
+            'type_piece.required' => 'Choisissez le type de pièce.',
+            'type_piece.in' => 'Choisissez un type de pièce parmi ceux proposés.',
             'niveau_precedent.required' => 'Choisissez votre niveau d’étude précédent.',
             'ville_bac.required' => 'La ville/commune d’obtention du bac est obligatoire.',
             'ville_bac.max' => 'La ville/commune d’obtention du bac ne doit pas dépasser 150 caractères.',

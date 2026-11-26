@@ -16,16 +16,11 @@ use Illuminate\Support\Collection;
 class EtudiantDashboard
 {
     /**
-     * Étapes de la frise « Progression du traitement » : Soumission, Étude du dossier, Vérification,
-     * Attribution, Validation. Nombre d'étapes franchies selon l'état du dossier (DossierWorkflow) :
-     * l'étude n'est terminée qu'à « Éligible », la vérification est franchie à l'admission (liste définitive publiée).
+     * États du dossier (DossierWorkflow) pour lesquels l'étudiant attend encore sa chambre : message
+     * « En attente d'attribution de chambre » sur le tableau de bord. Une proposition (`pre_attribue`) a son propre
+     * encadré de réponse ; un dossier refusé, annulé, expiré ou en brouillon n'attend pas de chambre.
      */
-    public const ETAPES_FRANCHIES = [
-        'soumis' => 1, 'incomplet' => 1, 'en_etude' => 1,
-        'eligible' => 2, 'confirme' => 3,
-        'pre_attribue' => 4, 'accepte' => 4,
-        'attribue_definitif' => 5, 'cloture' => 5,
-    ];
+    public const ETATS_ATTENTE_ATTRIBUTION = ['soumis', 'incomplet', 'en_etude', 'eligible', 'confirme', 'accepte'];
 
     /** Statuts legacy de la demande (synchronisés par DossierWorkflow) : libellé et teinte du KPI. */
     private const STATUTS = [
@@ -156,7 +151,6 @@ class EtudiantDashboard
         $total = $documents->count();
         $valides = $documents->where('statut', 'valide')->count();
         $echeance = $campagne?->date_echeance_demande ? Carbon::parse($campagne->date_echeance_demande) : null;
-        $etapes = self::ETAPES_FRANCHIES[$demande?->etat_dossier] ?? 0;
 
         return [
             'existe' => (bool) $demande,
@@ -168,8 +162,7 @@ class EtudiantDashboard
             'echeanceIso' => $echeance?->copy()->endOfDay()->toIso8601String(),
             'moyenne' => $demande?->moyenne,
             'residenceSouhaitee' => $demande?->preference_residence,
-            'progression' => (int) round($etapes / 5 * 100),
-            'etapesFranchies' => $etapes,
+            'enAttenteAttribution' => $demande !== null && in_array($demande->etat_dossier, self::ETATS_ATTENTE_ATTRIBUTION, true),
             'documentsPourcentage' => $total > 0 ? (int) round($valides / $total * 100) : 0,
             'documentsValides' => $valides,
             'documents' => $documents->map(fn ($document) => [

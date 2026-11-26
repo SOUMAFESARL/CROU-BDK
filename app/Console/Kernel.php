@@ -14,7 +14,7 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // Vérification quotidienne des loyers en retard et application des pénalités
+        // Vérification quotidienne des loyers en retard (aucune pénalité de retard ne s'applique)
         $schedule->call(function () {
             app(LoyerService::class)->verifierEtMettreAJourStatuts();
         })->dailyAt('00:05');

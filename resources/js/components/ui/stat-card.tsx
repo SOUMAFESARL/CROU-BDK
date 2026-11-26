@@ -1,3 +1,4 @@
+import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -49,31 +50,56 @@ type StatCardProps = {
     className?: string;
     /** Valeur en texte réduit (dates longues, ex. tableau de bord étudiant). */
     compact?: boolean;
+    /** Carte cliquable (ouvre le détail de l’indicateur) : rendue comme un bouton. */
+    onClick?: () => void;
 };
 
 /** Carte KPI compacte et teintée, utilisée en tête des pages d’administration. */
-export function StatCard({ label, value, tone, extra, highlight = false, children, className, compact = false }: StatCardProps) {
+export function StatCard({ label, value, tone, extra, highlight = false, children, className, compact = false, onClick }: StatCardProps) {
     const colors = KPI_TONES[tone];
+    const classes = cn('flex items-center rounded-md border p-3.5', colors.card, className);
 
-    return (
-        <article className={cn('flex items-center rounded-md border p-3.5', colors.card, className)}>
-            <div className="flex w-full min-w-0 flex-col gap-2">
-                <small className="block truncate text-xs leading-4 font-medium">{label}</small>
-                <div className="flex items-center gap-2">
-                    <strong className={cn('tabular-nums', compact ? 'text-sm leading-5 font-medium' : 'text-lg leading-5 font-bold')}>{value}</strong>
-                    {extra && (
-                        <span
-                            className={cn(
-                                'truncate rounded px-1.5 py-0.5 text-xs leading-4 font-semibold',
-                                highlight ? 'bg-[#FAAB04] text-[#1F2328]' : colors.badge,
-                            )}
-                        >
-                            {extra}
-                        </span>
-                    )}
-                </div>
-                {children}
+    const contenu = (
+        <div className="flex w-full min-w-0 flex-col gap-2">
+            <small className="flex min-w-0 items-center justify-between gap-2 text-xs leading-4 font-medium">
+                <span className="truncate">{label}</span>
+                {onClick && (
+                    <ChevronRight size={16} strokeWidth={1.25} className="shrink-0 opacity-70 transition-transform group-hover:translate-x-0.5" aria-hidden />
+                )}
+            </small>
+            <div className="flex items-center gap-2">
+                <strong className={cn('tabular-nums', compact ? 'text-sm leading-5 font-medium' : 'text-lg leading-5 font-bold')}>{value}</strong>
+                {extra && (
+                    <span
+                        className={cn(
+                            'truncate rounded px-1.5 py-0.5 text-xs leading-4 font-semibold',
+                            highlight ? 'bg-[#FAAB04] text-[#1F2328]' : colors.badge,
+                        )}
+                    >
+                        {extra}
+                    </span>
+                )}
             </div>
-        </article>
+            {children}
+        </div>
     );
+
+    if (onClick) {
+        return (
+            <button
+                type="button"
+                onClick={onClick}
+                aria-haspopup="dialog"
+                title={`Voir le détail : ${label}`}
+                className={cn(
+                    classes,
+                    'group w-full cursor-pointer text-left transition-shadow hover:shadow-md focus-visible:ring-2 focus-visible:ring-secondary focus-visible:outline-none',
+                )}
+            >
+                {contenu}
+            </button>
+        );
+    }
+
+    return <article className={classes}>{contenu}</article>;
 }

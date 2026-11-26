@@ -23,6 +23,7 @@ import { ItemActions, type ParcActions } from '@/components/parc-immobilier/acti
 import { ChambreDialog } from '@/components/parc-immobilier/chambre-dialog';
 import { DetailsSheet } from '@/components/parc-immobilier/details-sheet';
 import { EntityCard } from '@/components/parc-immobilier/entity-card';
+import { IndicateursSheet } from '@/components/parc-immobilier/indicateurs-sheet';
 import { messageErreur, parcHttp } from '@/components/parc-immobilier/http';
 import { ETATS, EtatBadge, estActif, nombre, pluriel, STATUTS, STATUTS_DESACTIVES, StatutBadge, TYPE_ICONS, TYPE_LABELS } from '@/components/parc-immobilier/labels';
 import { OccupationBar, tauxOccupation } from '@/components/parc-immobilier/occupation-bar';
@@ -34,6 +35,7 @@ import type {
     CiteItem,
     ContexteElement,
     EtatChambre,
+    Indicateur,
     Niveau,
     ParcItem,
     ParcProps,
@@ -100,13 +102,14 @@ function useVue(niveau: Niveau): [Vue, (vue: Vue) => void] {
     ];
 }
 
-export default function ParcImmobilierIndex({ niveau, items, plan, filters, statutsCite, statutsBatiment, contexte, stats, typesChambre, urls }: ParcProps) {
+export default function ParcImmobilierIndex({ niveau, items, plan, filters, statutsCite, statutsBatiment, contexte, stats, detailsIndicateurs, typesChambre, urls }: ParcProps) {
     const [search, setSearch] = useState(filters.q);
     const [vue, setVue] = useVue(niveau);
     const [details, setDetails] = useState<ParcItem | null>(null);
     const [aModifier, setAModifier] = useState<ChambreItem | null>(null);
     const [aDesactiver, setADesactiver] = useState<ParcItem | null>(null);
     const [aSupprimer, setASupprimer] = useState<ParcItem | null>(null);
+    const [indicateur, setIndicateur] = useState<Indicateur | null>(null);
     const premierRendu = useRef(true);
 
     // Paramètres qui situent la page (cité ou bâtiment ouvert), conservés par la recherche et les filtres.
@@ -141,6 +144,12 @@ export default function ParcImmobilierIndex({ niveau, items, plan, filters, stat
     }
 
     const naviguer = (params: Record<string, string>) => router.get(window.location.pathname, params);
+
+    // Détail d'un KPI : rechargé à chaque ouverture pour refléter les derniers changements du parc.
+    function ouvrirIndicateur(choix: Indicateur) {
+        setIndicateur(choix);
+        router.reload({ only: ['detailsIndicateurs'] });
+    }
 
     async function envoyerStatut(item: ParcItem) {
         if (!item.urls.status) return;
@@ -324,7 +333,7 @@ export default function ParcImmobilierIndex({ niveau, items, plan, filters, stat
                 </div>
             </div>
 
-            <Indicateurs stats={stats} />
+            <Indicateurs stats={stats} onOpen={ouvrirIndicateur} />
 
             <section className="mt-6 rounded-brand border bg-white">
                 {niveau !== 'cite' && (
@@ -354,6 +363,14 @@ export default function ParcImmobilierIndex({ niveau, items, plan, filters, stat
             </div>
 
             <DetailsSheet item={details} onClose={() => setDetails(null)} actions={actions} />
+
+            <IndicateursSheet
+                indicateur={indicateur}
+                onClose={() => setIndicateur(null)}
+                stats={stats}
+                details={detailsIndicateurs}
+                naviguer={naviguer}
+            />
 
             {urls.updateChambre && (
                 <ChambreDialog chambre={aModifier} onClose={() => setAModifier(null)} url={urls.updateChambre} typesChambre={typesChambre} />
@@ -406,20 +423,27 @@ function LienBouton({ href, icon: Icon, target, children }: { href: string; icon
     );
 }
 
-/** Indicateurs du parc entier (toujours globaux, quel que soit le niveau affiché). */
-function Indicateurs({ stats }: { stats: ParcProps['stats'] }) {
+/** Indicateurs du parc entier (toujours globaux, quel que soit le niveau affiché) ; un clic ouvre leur détail. */
+function Indicateurs({ stats, onOpen }: { stats: ParcProps['stats']; onOpen: (indicateur: Indicateur) => void }) {
     const taux = tauxOccupation(stats);
 
     return (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard tone="blue" label="Cités" value={nombre.format(stats.cites)} />
-            <StatCard tone="plum" label="Bâtiments" value={nombre.format(stats.batiments)} extra="tous statuts" />
-            <StatCard tone="amber" label="Chambres" value={nombre.format(stats.chambres)} extra={`${nombre.format(stats.disponibles)} disponibles`} />
+            <StatCard tone="blue" label="Cités" value={nombre.format(stats.cites)} onClick={() => onOpen('cites')} />
+            <StatCard tone="plum" label="Bâtiments" value={nombre.format(stats.batiments)} extra="tous statuts" onClick={() => onOpen('batiments')} />
+            <StatCard
+                tone="amber"
+                label="Chambres"
+                value={nombre.format(stats.chambres)}
+                extra={`${nombre.format(stats.disponibles)} disponibles`}
+                onClick={() => onOpen('chambres')}
+            />
             <StatCard
                 tone="green"
                 label="Taux d’occupation"
                 value={`${taux} %`}
                 extra={`${nombre.format(stats.occupants)} / ${nombre.format(stats.places)} places`}
+                onClick={() => onOpen('occupation')}
             >
                 <OccupationBar resume={{ ...stats, categories: {} }} />
             </StatCard>

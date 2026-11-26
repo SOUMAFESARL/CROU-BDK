@@ -46,7 +46,13 @@ class DemandeHebergementPageTest extends TestCase
             $t->integer('ordre_affiche')->default(0);
             $t->timestamps();
         });
-        foreach (['genre', 'type_piece', 'groupe_sanguins', 'regions'] as $table) {
+        // Comme en base : type_piece sans horodatage, avec un libellé (description).
+        Schema::create('type_piece', function (Blueprint $t) {
+            $t->id();
+            $t->string('name');
+            $t->string('description');
+        });
+        foreach (['genre', 'groupe_sanguins', 'regions'] as $table) {
             Schema::create($table, function (Blueprint $t) {
                 $t->id();
                 $t->string('name');
@@ -125,6 +131,41 @@ class DemandeHebergementPageTest extends TestCase
         $this->assertSame([['id' => '3', 'libelle' => 'Bondoukou', 'region' => '7']], $props['villes']);
         $this->assertSame([['id' => 'l1', 'libelle' => 'Licence 1', 'terminale' => false]], $props['niveaux']);
         $this->assertSame(route('register.post'), $props['liens']['envoyer']);
+    }
+
+    public function test_type_de_piece_propose_les_documents_obligatoires_de_la_campagne(): void
+    {
+        $this->campagneOuverte();
+        DB::table('type_piece')->insert(['id' => 1, 'name' => 'CNI', 'description' => 'Carte Nationale d’Identité']);
+        Schema::create('etudiants', function (Blueprint $t) {
+            $t->string('id_etudiant')->primary();
+            $t->string('email1')->nullable();
+            $t->string('telephone1')->nullable();
+            $t->string('numero_piece')->nullable();
+            $t->string('matricule')->nullable();
+        });
+
+        // Seuls les documents obligatoires de la campagne sont proposés (la CMU est facultative).
+        $this->assertSame([['id' => 'd1', 'libelle' => 'Extrait de naissance']], $this->pageProps()['typesPiece']);
+
+        $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+        $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'type_piece' => '1'])
+            ->assertSessionHasErrors(['type_piece' => 'Choisissez un type de pièce parmi ceux proposés.']);
+        $this->from('/register')->post('/register', ['id_campagne' => 'c1', 'type_piece' => 'd1'])
+            ->assertSessionDoesntHaveErrors('type_piece');
+
+        // Le document choisi est enregistré comme type de pièce (créé une seule fois, puis réutilisé).
+        $service = app(\App\Http\Services\PiecesIdentiteDemande::class);
+        $campagne = \App\Models\Campagne::find('c1');
+        $id = $service->typePieceId($campagne, 'd1');
+        $this->assertSame('Extrait de naissance', DB::table('type_piece')->where('id', $id)->value('name'));
+        $this->assertSame($id, $service->typePieceId($campagne, 'd1'));
+        $this->assertSame(2, DB::table('type_piece')->count());
+
+        // Campagne sans document obligatoire : les types de pièce d'identité du référentiel sont proposés.
+        DB::table('document')->update(['champs_requis' => false]);
+        $this->assertSame(['CNI', 'Extrait de naissance'], array_column($service->options($campagne->fresh())->all(), 'libelle'));
+        $this->assertSame(1, $service->typePieceId($campagne->fresh(), '1'));
     }
 
     public function test_sans_campagne_ouverte_le_formulaire_n_est_pas_propose(): void

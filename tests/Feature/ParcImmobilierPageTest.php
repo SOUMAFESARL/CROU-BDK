@@ -131,6 +131,32 @@ class ParcImmobilierPageTest extends TestCase
         $this->assertSame([], $props['plan']);
     }
 
+    public function test_detail_des_indicateurs_charge_seulement_a_la_demande(): void
+    {
+        // Chargement initial : le détail des KPI n'est pas calculé.
+        $this->assertArrayNotHasKey('detailsIndicateurs', $this->parcPage([])['props']);
+
+        $details = $this->parcPage([], ['detailsIndicateurs'])['props']['detailsIndicateurs'];
+
+        $cites = collect($details['cites'])->keyBy('id');
+        $this->assertSame(['cA', 'cB'], $cites->keys()->all());
+        $this->assertSame(11, $cites['cA']['batiments']);
+        $this->assertSame(3, $cites['cA']['resume']['chambres']);
+        $this->assertSame(1, $cites['cA']['resume']['occupants']);
+        $this->assertSame('desactive', $cites['cB']['statut']);
+        $this->assertSame(0, $cites['cB']['resume']['chambres']);
+
+        $this->assertCount(11, $details['batiments']);
+        $b1 = collect($details['batiments'])->firstWhere('id', 'b1');
+        $this->assertSame('Cité A', $b1['cite']);
+        $this->assertSame(3, $b1['resume']['chambres']);
+        $this->assertSame(0, collect($details['batiments'])->firstWhere('id', 'b2')['resume']['chambres']);
+
+        // Chambre non configurée (r4) exclue.
+        $this->assertSame([['name' => 'Simple', 'chambres' => 3, 'disponibles' => 1, 'places' => 5]], $details['typesChambre']);
+        $this->assertSame(['Garçons' => 1], $details['categories']);
+    }
+
     public function test_cites_filtrees_par_statut(): void
     {
         $props = $this->parcPage(['statut' => 'desactive'])['props'];
@@ -271,10 +297,15 @@ class ParcImmobilierPageTest extends TestCase
         return $response->getData(true);
     }
 
-    private function parcPage(array $query): array
+    private function parcPage(array $query, array $partiel = []): array
     {
         $request = Request::create('/admin/gestion-hebergement/parc-immobilier', 'GET', $query);
         $request->headers->set('X-Inertia', 'true');
+        if ($partiel !== []) {
+            // Rechargement partiel Inertia (`router.reload({ only: [...] })`).
+            $request->headers->set('X-Inertia-Partial-Component', 'Admin/Hebergement/ParcImmobilier/Index');
+            $request->headers->set('X-Inertia-Partial-Data', implode(',', $partiel));
+        }
         $request->setUserResolver(fn ($guard = null) => auth('admin')->user());
         $this->app->instance('request', $request);
 

@@ -26,6 +26,9 @@ Route::middleware(['etudiants'])->group(function () {
     Route::get('/mes-documents/justificatif/{id}', [\App\Http\Controllers\etudiant\DocumentController::class, 'attachment'])->name('documents.attachment');
     Route::get('/mes-documents/decompte/{id}', [\App\Http\Controllers\etudiant\DocumentController::class, 'settlement'])->name('documents.settlement');
     Route::get('/documents/{document}/pdf', [\App\Http\Controllers\etudiant\DocumentController::class, 'pdf'])->name('documents.pdf');
+    Route::get('/mes-paiements/quittance/{mois}', [\App\Http\Controllers\etudiant\QuittanceLoyerController::class, 'show'])
+        ->where('mois', '\d{4}-(0[1-9]|1[0-2])')->name('quittances.show');
+    Route::get('/mes-paiements/recu/{paiement}', [\App\Http\Controllers\etudiant\RecuPaiementController::class, 'show'])->name('paiements.recu');
     Route::prefix('paiements-en-ligne')->name('online-payments.')
         ->middleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class)
         ->controller(\App\Http\Controllers\etudiant\OnlinePaymentController::class)->group(function () {

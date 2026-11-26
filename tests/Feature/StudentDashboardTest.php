@@ -87,9 +87,8 @@ class StudentDashboardTest extends TestCase
 
         $this->assertNull($props['resident']);
         $this->assertSame('amber', $props['statut']['ton']);
-        // Pré-attribué : soumission, étude, vérification et attribution franchies ; documents à 50 %.
-        $this->assertSame(80, $props['demande']['progression']);
-        $this->assertSame(4, $props['demande']['etapesFranchies']);
+        // Pré-attribué : une chambre est proposée (encadré de réponse), plus d'attente d'attribution ; documents à 50 %.
+        $this->assertFalse($props['demande']['enAttenteAttribution']);
         $this->assertSame(50, $props['demande']['documentsPourcentage']);
         $this->assertSame(['valide', 'en_attente'], array_column($props['demande']['documents'], 'statut'));
         $this->assertSame('offer', $props['demande']['decision']['assignationId']);
@@ -101,7 +100,13 @@ class StudentDashboardTest extends TestCase
             $demande->etat_dossier = $etat;
             $props = app(EtudiantDashboard::class)->props($this->etudiant($demande), $campagne, [], collect());
             $this->assertNull($props['demande']['decision']);
+            // Pas encore de chambre : l'étudiant voit « En attente d'attribution de chambre ».
+            $this->assertTrue($props['demande']['enAttenteAttribution']);
         }
+
+        // Dossier refusé : plus d'attente d'attribution.
+        $demande->etat_dossier = 'refuse';
+        $this->assertFalse(app(EtudiantDashboard::class)->props($this->etudiant($demande), $campagne, [], collect())['demande']['enAttenteAttribution']);
     }
 
     public function test_refusal_without_reason_returns_a_field_error(): void

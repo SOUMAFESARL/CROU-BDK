@@ -1,11 +1,12 @@
 import { Link, router } from '@inertiajs/react';
-import { BarChart3, Check, CirclePlay, Download, Eye, Plus, Printer, Send, Wallet, X } from 'lucide-react';
+import { BarChart3, CalendarDays, Check, CirclePlay, Download, Eye, Plus, Printer, Send, Wallet, X } from 'lucide-react';
 import { useState } from 'react';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { RowAction, RowActions } from '@/components/data-table/row-action';
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
+import { type CalendrierLoyers, CalendrierLoyersOnglet } from '@/components/paiements/calendrier-loyers';
 import { NouveauPaiementDialog, type OptionTypePaiement } from '@/components/paiements/nouveau-paiement-dialog';
 import { RelanceDialog } from '@/components/paiements/relance-dialog';
 import { fcfa, MOIS, TypePaiementBadge } from '@/components/paiements/shared';
@@ -14,6 +15,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatCard } from '@/components/ui/stat-card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { dateFr, nombre } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import type { Paginated } from '@/types/global';
@@ -43,14 +45,19 @@ type CampagneOption = { id: string; libelle: string; annee: string | null; activ
 
 type Props = {
     paiements: Paginated<Paiement>;
-    kpis: { total_encaisse: number; taux_recouvrement: number; impayes: number; penalites: number; nombre_paiements: number; nombre_retard: number };
+    /** Aucune pénalité de retard ne s'applique : `prochaine_echeance` vient du calendrier des loyers de la campagne. */
+    kpis: { total_encaisse: number; taux_recouvrement: number; impayes: number; prochaine_echeance: { date: string; mois: string } | null; nombre_paiements: number; nombre_retard: number };
     residences: { id: string; name: string }[];
     /** Types de paiement actifs (Paramétrage hébergement › Types de paiement). */
     typesPaiement: OptionTypePaiement[];
     /** Campagnes, de la plus récente à la plus ancienne ; la page affiche celle de `filters.campagne` (ou `toutes`). */
     campagnes: CampagneOption[];
     filters: Filtres;
-    urls: { index: string; export: string | null; store: string | null; recherche: string | null; relances: string | null; rapport: string | null };
+    /** Onglet ouvert (`?onglet=calendrier` après l'enregistrement du calendrier). */
+    onglet: 'paiements' | 'calendrier';
+    /** Calendrier des loyers de la campagne affichée (null pour « Toutes les campagnes »). */
+    calendrier: CalendrierLoyers | null;
+    urls: { index: string; export: string | null; store: string | null; recherche: string | null; relances: string | null; rapport: string | null; calendrier: string | null };
 };
 
 const TOUS = 'tous';
@@ -79,7 +86,8 @@ const moisRecents = () => {
 type Action = { type: 'valider' | 'annuler'; paiement: Paiement } | null;
 
 /** Paiements des loyers (remplace `vie_residentielle/paiement/index.blade.php`). */
-export default function PaiementsIndex({ paiements, kpis, residences, typesPaiement, campagnes, filters, urls }: Props) {
+export default function PaiementsIndex({ paiements, kpis, residences, typesPaiement, campagnes, filters, onglet, calendrier, urls }: Props) {
+    const [ongletActif, setOngletActif] = useState<string>(onglet);
     const [nouveau, setNouveau] = useState(false);
     const [relance, setRelance] = useState(false);
     const [action, setAction] = useState<Action>(null);
@@ -215,89 +223,110 @@ export default function PaiementsIndex({ paiements, kpis, residences, typesPaiem
             />
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <StatCard tone="green" label="Total encaissé" value={fcfa(kpis.total_encaisse)} extra={`${nombre(kpis.nombre_paiements)} paiement(s) ce mois`} />
-                <StatCard tone="blue" label="Taux de recouvrement" value={`${nombre(kpis.taux_recouvrement, 2)} %`} extra="Objectif > 95 %" highlight={kpis.taux_recouvrement < 95} />
+                <StatCard tone="green" label="Total encaissé" value={fcfa(kpis.total_encaisse)} />
+                <StatCard tone="blue" label="Taux de recouvrement" value={`${nombre(kpis.taux_recouvrement, 2)} %`} highlight={kpis.taux_recouvrement < 95} />
                 <StatCard tone="amber" label="Impayés" value={fcfa(kpis.impayes)} extra={`${nombre(kpis.nombre_retard)} loyer(s) en retard`} highlight={kpis.nombre_retard > 0} />
-                <StatCard tone="plum" label="Pénalités" value={fcfa(kpis.penalites)} extra="Retards accumulés" />
+                <StatCard
+                    tone="plum"
+                    label="Prochaine échéance"
+                    value={kpis.prochaine_echeance ? dateFr(kpis.prochaine_echeance.date) : '—'}
+                    extra={kpis.prochaine_echeance ? `Loyer de ${kpis.prochaine_echeance.mois}` : calendrier ? 'Calendrier non configuré' : 'Choisissez une campagne'}
+                    highlight={calendrier !== null && !calendrier.configure}
+                />
             </div>
 
-            <section className="mt-6">
-                <div className="mb-3 flex items-baseline justify-between gap-3">
-                    <div>
-                        <h2 className="text-base font-medium text-gray-900">Liste des paiements</h2>
-                        <p className="text-xs text-muted">{periode}</p>
-                    </div>
-                    <span className="text-sm text-muted">{nombre(paiements.total)} paiement(s)</span>
-                </div>
-                <DataTable
-                    columns={colonnes}
-                    data={paiements}
-                    rowKey={(p) => p.id}
-                    toolbar={
-                        <>
-                            <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
-                                <Select value={filters.residence || TOUS} onValueChange={(valeur) => filtrer('residence', valeur)}>
-                                    <SelectTrigger className="h-10" aria-label="Filtrer par résidence">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value={TOUS}>Toutes les résidences</SelectItem>
-                                        {residences.map((residence) => (
-                                            <SelectItem key={residence.id} value={residence.id}>
-                                                {residence.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <Select value={filters.statut || TOUS} onValueChange={(valeur) => filtrer('statut', valeur)}>
-                                    <SelectTrigger className="h-10" aria-label="Filtrer par statut">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value={TOUS}>Tous les statuts</SelectItem>
-                                        {STATUTS.map((statut) => (
-                                            <SelectItem key={statut.value} value={statut.value}>
-                                                {statut.label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <Select value={filters.mois || TOUS} onValueChange={(valeur) => filtrer('mois', valeur)}>
-                                    <SelectTrigger className="h-10" aria-label="Filtrer par mois de paiement">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value={TOUS}>Tous les mois</SelectItem>
-                                        {mois.map((item) => (
-                                            <SelectItem key={item.value} value={item.value}>
-                                                {item.label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+            <Tabs value={ongletActif} onValueChange={setOngletActif} className="mt-6">
+                <TabsList aria-label="Paiements">
+                    <TabsTrigger value="paiements">
+                        <Wallet {...ICON} aria-hidden /> Paiements
+                    </TabsTrigger>
+                    <TabsTrigger value="calendrier">
+                        <CalendarDays {...ICON} aria-hidden /> Calendrier des loyers
+                    </TabsTrigger>
+                </TabsList>
+                <TabsContent value="calendrier">
+                    <CalendrierLoyersOnglet calendrier={calendrier} url={urls.calendrier} />
+                </TabsContent>
+                <TabsContent value="paiements">
+                    <section>
+                        <div className="mb-3 flex items-baseline justify-between gap-3">
+                            <div>
+                                <h2 className="text-base font-medium text-gray-900">Liste des paiements</h2>
+                                <p className="text-xs text-muted">{periode}</p>
                             </div>
-                            <div className="flex gap-2">
-                                {filtreActif && (
-                                    <Button variant="ghost" size="sm" className="h-10" onClick={() => router.get(urls.index, { campagne: filters.campagne }, { preserveScroll: true })}>
-                                        <X className="size-4" aria-hidden /> Réinitialiser
-                                    </Button>
-                                )}
-                                {urls.export && (
-                                    <a href={urls.export} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-10 px-4')}>
-                                        <Download {...ICON} aria-hidden /> Exporter (CSV)
-                                    </a>
-                                )}
-                            </div>
-                        </>
-                    }
-                    emptyMessage={
-                        <span className="flex flex-col items-center gap-2">
-                            <Wallet {...ICON} aria-hidden />
-                            {filtreActif ? 'Aucun paiement ne correspond à ces filtres.' : campagne ? 'Aucun paiement enregistré pour cette campagne.' : 'Aucun paiement enregistré.'}
-                        </span>
-                    }
-                />
-            </section>
+                            <span className="text-sm text-muted">{nombre(paiements.total)} paiement(s)</span>
+                        </div>
+                        <DataTable
+                            columns={colonnes}
+                            data={paiements}
+                            rowKey={(p) => p.id}
+                            toolbar={
+                                <>
+                                    <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
+                                        <Select value={filters.residence || TOUS} onValueChange={(valeur) => filtrer('residence', valeur)}>
+                                            <SelectTrigger className="h-10" aria-label="Filtrer par résidence">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value={TOUS}>Toutes les résidences</SelectItem>
+                                                {residences.map((residence) => (
+                                                    <SelectItem key={residence.id} value={residence.id}>
+                                                        {residence.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Select value={filters.statut || TOUS} onValueChange={(valeur) => filtrer('statut', valeur)}>
+                                            <SelectTrigger className="h-10" aria-label="Filtrer par statut">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value={TOUS}>Tous les statuts</SelectItem>
+                                                {STATUTS.map((statut) => (
+                                                    <SelectItem key={statut.value} value={statut.value}>
+                                                        {statut.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Select value={filters.mois || TOUS} onValueChange={(valeur) => filtrer('mois', valeur)}>
+                                            <SelectTrigger className="h-10" aria-label="Filtrer par mois de paiement">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value={TOUS}>Tous les mois</SelectItem>
+                                                {mois.map((item) => (
+                                                    <SelectItem key={item.value} value={item.value}>
+                                                        {item.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        {filtreActif && (
+                                            <Button variant="ghost" size="sm" className="h-10" onClick={() => router.get(urls.index, { campagne: filters.campagne }, { preserveScroll: true })}>
+                                                <X className="size-4" aria-hidden /> Réinitialiser
+                                            </Button>
+                                        )}
+                                        {urls.export && (
+                                            <a href={urls.export} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-10 px-4')}>
+                                                <Download {...ICON} aria-hidden /> Exporter (CSV)
+                                            </a>
+                                        )}
+                                    </div>
+                                </>
+                            }
+                            emptyMessage={
+                                <span className="flex flex-col items-center gap-2">
+                                    <Wallet {...ICON} aria-hidden />
+                                    {filtreActif ? 'Aucun paiement ne correspond à ces filtres.' : campagne ? 'Aucun paiement enregistré pour cette campagne.' : 'Aucun paiement enregistré.'}
+                                </span>
+                            }
+                        />
+                    </section>
+                </TabsContent>
+            </Tabs>
 
             {urls.store && urls.recherche && <NouveauPaiementDialog open={nouveau} onClose={() => setNouveau(false)} urlStore={urls.store} urlRecherche={urls.recherche} types={typesPaiement} />}
             {urls.relances && <RelanceDialog open={relance} onClose={() => setRelance(false)} url={urls.relances} nombreRetard={kpis.nombre_retard} />}

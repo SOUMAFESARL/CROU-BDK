@@ -138,6 +138,8 @@ class ParcImmobilierController extends Controller
                 'places' => (int) $this->chambresValides()->sum('capacite_max'),
                 'occupants' => AssignationChambre::actives()->whereIn('chambre_id', $this->chambresValides()->select('id_chambre'))->count(),
             ],
+            // Détails des indicateurs : chargés seulement au clic sur un KPI (rechargement partiel Inertia).
+            'detailsIndicateurs' => Inertia::optional(fn () => $this->detailsIndicateurs()),
             'typesChambre' => TypeChambre::orderBy('name')->get(['id_type_chambre', 'name'])
                 ->map(fn ($type) => ['id' => (string) $type->id_type_chambre, 'name' => $type->name]),
             'urls' => [
@@ -153,6 +155,54 @@ class ParcImmobilierController extends Controller
                 ]),
             ],
         ]);
+    }
+
+    /**
+     * Détail des KPI du parc entier : chaque cité et chaque bâtiment avec ses compteurs,
+     * la répartition des chambres par type et des occupants par catégorie.
+     */
+    private function detailsIndicateurs(): array
+    {
+        $cites = Cite::query()->withCount('batiment as batiments_total')->orderBy('name')->get();
+        $batiments = Batiment::query()->orderBy('name')->get(['id_batiment', 'name', 'cite_id', 'statut']);
+        $nomsCites = $cites->pluck('name', 'id_cite');
+        $citeDuBatiment = $batiments->pluck('cite_id', 'id_batiment');
+
+        $chambres = $this->chambresValides()
+            ->get(['id_chambre', 'batiment_id', 'etat', 'capacite_max', 'type_occupation_id', 'type_chambre_id']);
+        $parBatiment = $this->agregerChambres($chambres, fn ($chambre) => $chambre->batiment_id);
+        $parCite = $this->agregerChambres($chambres, fn ($chambre) => $citeDuBatiment[$chambre->batiment_id] ?? null);
+        $global = $this->agregerChambres($chambres, fn () => 'tout')->get('tout', self::AGREGAT_VIDE);
+        $typesChambre = TypeChambre::pluck('name', 'id_type_chambre');
+
+        return [
+            'cites' => $cites->map(fn (Cite $cite) => [
+                'id' => $cite->id_cite,
+                'name' => $cite->name,
+                'code' => $cite->code_cite,
+                'statut' => (string) $cite->statut,
+                'batiments' => (int) $cite->batiments_total,
+                'resume' => $parCite->get($cite->id_cite, self::AGREGAT_VIDE),
+            ])->values()->all(),
+            'batiments' => $batiments->map(fn (Batiment $batiment) => [
+                'id' => $batiment->id_batiment,
+                'name' => $batiment->name,
+                'cite_id' => $batiment->cite_id,
+                'cite' => $nomsCites[$batiment->cite_id] ?? null,
+                'statut' => (string) $batiment->statut,
+                'resume' => $parBatiment->get($batiment->id_batiment, self::AGREGAT_VIDE),
+            ])->values()->all(),
+            'typesChambre' => $chambres
+                ->groupBy(fn ($chambre) => $typesChambre[$chambre->type_chambre_id] ?? 'Type inconnu')
+                ->map(fn ($groupe, $nom) => [
+                    'name' => (string) $nom,
+                    'chambres' => $groupe->count(),
+                    'disponibles' => $groupe->where('etat', 'disponible')->count(),
+                    'places' => (int) $groupe->sum('capacite_max'),
+                ])
+                ->sortBy('name')->values()->all(),
+            'categories' => $global['categories'],
+        ];
     }
 
     private const ETATS_CHAMBRE = ['disponible', 'occupee', 'reservee', 'maintenance', 'hors_service'];
@@ -602,7 +652,9 @@ class ParcImmobilierController extends Controller
 
         try {
             $this->citeService->createCite($request->all());
-            return back()->with('success', 'Cité créée avec succès !');
+            return redirect()
+                ->route('admin.hebergement.parc-immobilier.index')
+                ->with('success', 'Cité créée avec succès !');
         } catch (\Exception $e) {
             return back()->withInput()->withErrors(['error' => 'Problème survenu lors de l\'enregistrement : ' . \App\Support\UserFacingErrors::caught($e)]);
         }

@@ -17,7 +17,6 @@ use App\Models\TypeChambre;
 use App\Models\NiveauEtude;
 use App\Models\Filiere;
 use App\Models\Genre;
-use App\Models\TypePiece;
 use App\Models\groupeSanguin;
 use App\Repositories\Interfaces\EtudiantRepositoryInterface;
 use App\Repositories\Interfaces\DemandeRepositoryInterface;
@@ -134,7 +133,8 @@ class  frontedController extends Controller
             ] : null,
             'documents' => $documents,
             'genres' => $options(Genre::all()),
-            'typesPiece' => $options(TypePiece::all()),
+            // Documents obligatoires de la campagne (à défaut, les types de pièce d'identité du référentiel).
+            'typesPiece' => app(\App\Http\Services\PiecesIdentiteDemande::class)->options($campagne),
             'groupesSanguins' => $options(groupeSanguin::all()),
             // `terminale` : retirée de la liste « niveau actuel » ; en niveau précédent, la moyenne devient la note au bac.
             'niveaux' => NiveauEtude::ordonnes()->get()
