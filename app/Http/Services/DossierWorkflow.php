@@ -207,6 +207,9 @@ class DossierWorkflow
             if ($to==='soumis' && $kind==='etudiant') {
                 DB::afterCommit(fn () => app(DecisionAutomatiqueDossier::class)->decider($id));
             }
+            if ($to === 'attribue_definitif') {
+                app(\App\Services\AdmissionResultDiffusion::class)->prepareAfterAssignment($request, $student);
+            }
             return $request->fresh();
         },3);
         return $to==='soumis' && DB::transactionLevel()===0 ? $result->fresh() : $result;

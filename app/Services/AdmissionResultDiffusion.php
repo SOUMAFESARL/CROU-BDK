@@ -23,6 +23,8 @@ class AdmissionResultDiffusion
 {
     public const TABLE = 'admission_result_deliveries';
 
+    private const AFTER_ASSIGNMENT = 'acces_attribution';
+
     /** @var array<string, string> mots de passe créés pendant ce traitement, communs à l'e-mail et au SMS d'un étudiant */
     private array $motsDePasse = [];
 
@@ -155,7 +157,34 @@ class AdmissionResultDiffusion
         }
     }
 
-    public function prepareDirect(DemandeEtudiant $dossier, Etudiant $student, ?string $temporaryPassword): int
+    public function prepareAfterAssignment(DemandeEtudiant $dossier, Etudiant $student): void
+    {
+        if (!filter_var($student->email1, FILTER_VALIDATE_EMAIL)) {
+            return;
+        }
+        if (DB::table(self::TABLE)->where('demande_id', $dossier->getKey())
+            ->where('resultat', self::AFTER_ASSIGNMENT)->where('channel', 'email')->exists()) {
+            return;
+        }
+
+        $password = blank($student->getRawOriginal('password'))
+            ? \Illuminate\Support\Str::password(16, symbols: false)
+            : null;
+        $deliveryId = $this->prepareDirect($dossier, $student, $password, self::AFTER_ASSIGNMENT);
+        if (!$deliveryId) {
+            return;
+        }
+
+        if ($password !== null) {
+            $student->forceFill(['password' => Hash::make($password)])->save();
+        }
+
+        DB::afterCommit(fn () => app()->terminating(fn () => rescue(
+            fn () => $this->sendPending(1, $deliveryId),
+        )));
+    }
+
+    public function prepareDirect(DemandeEtudiant $dossier, Etudiant $student, ?string $temporaryPassword, string $deliveryType = AdmissionSmsTemplates::DEFINITIVE): int
     {
         $config = $this->config->getConfig();
         if (!self::channels($config)['email']) {
@@ -173,7 +202,7 @@ class AdmissionResultDiffusion
             '{{Email_etudiant}}' => trim((string) $student->email1),
         ];
         $formatted = AdmissionSmsTemplates::formatted($settings)[$resultat] ?? null;
-        $identity = ['demande_id' => $dossier->getKey(), 'resultat' => $resultat, 'channel' => 'email'];
+        $identity = ['demande_id' => $dossier->getKey(), 'resultat' => $deliveryType, 'channel' => 'email'];
         DB::table(self::TABLE)->insertOrIgnore($identity + [
             'campagne_id' => $dossier->campagne_id,
             'destination' => $student->email1,
@@ -214,6 +243,7 @@ class AdmissionResultDiffusion
 
         // Message désactivé après la publication : ses envois restent en attente jusqu'à sa réactivation.
         $enabled = AdmissionSmsTemplates::enabled($settings?->admission_sms_templates ?? []);
+        $enabled[self::AFTER_ASSIGNMENT] = $enabled[AdmissionSmsTemplates::DEFINITIVE];
         $pending->whereNotIn('resultat', array_keys($enabled, false, true));
 
         if (!$settings?->sms_enabled || $settings->sms_provider !== 'helper_json' || !$settings->sms_api_url || !$settings->sms_api_key || !$settings->sms_sender) {
@@ -287,14 +317,18 @@ class AdmissionResultDiffusion
             : null;
         if ($motDePasse === null && $etudiant && $destinataire) {
             $id = (string) $etudiant->getKey();
-            if ($this->identifiants->aEnvoyer($etudiant)) {
+            if ($delivery->resultat !== AdmissionSmsTemplates::DEFINITIVE && $this->identifiants->aEnvoyer($etudiant)) {
                 $motDePasse = $this->motsDePasse[$id] ??= $this->identifiants->generer();
             } elseif (isset($this->motsDePasse[$id]) && Hash::check($this->motsDePasse[$id], (string) $etudiant->getRawOriginal('password'))) {
                 $motDePasse = $this->motsDePasse[$id];
             }
         }
 
-        $valeurs = [AdmissionSmsTemplates::PASSWORD => $motDePasse ?? 'votre mot de passe actuel (à défaut, « Mot de passe oublié » sur la page de connexion)'];
+        $sansMotDePasse = $delivery->resultat === AdmissionSmsTemplates::DEFINITIVE
+            && $etudiant && blank($etudiant->getRawOriginal('password'));
+        $valeurs = [AdmissionSmsTemplates::PASSWORD => $motDePasse ?? ($sansMotDePasse
+            ? 'vos accès seront envoyés après l’attribution définitive de votre chambre'
+            : 'votre mot de passe actuel (à défaut, « Mot de passe oublié » sur la page de connexion)')];
         $delivery->body = AdmissionSmsTemplates::fill($delivery->body, $valeurs);
         if ($html !== null) {
             $delivery->body_html = AdmissionSmsTemplates::fill($html, $valeurs, true);
@@ -321,13 +355,15 @@ class AdmissionResultDiffusion
         $demande = DemandeEtudiant::with('etudiant')->find($delivery->demande_id);
         $access = $reclamation = null;
         // Accès ajoutés seulement si le message ne les contient pas déjà (modèles antérieurs aux informations entre accolades).
-        if ($delivery->resultat === AdmissionSmsTemplates::DEFINITIVE && ($delivery->acces_dans_message ?? false)) {
+        $admission = in_array($delivery->resultat, [AdmissionSmsTemplates::DEFINITIVE, self::AFTER_ASSIGNMENT], true);
+        if ($admission && ($delivery->acces_dans_message ?? false)) {
             $access = null;
-        } elseif ($delivery->resultat === AdmissionSmsTemplates::DEFINITIVE) {
+        } elseif ($admission) {
             $student = $demande?->etudiant;
             $identifier = trim((string) $student?->email1);
             $identifier = strcasecmp($identifier, $delivery->destination) === 0 ? $identifier : null;
-            $activation = $identifier && blank($student->getRawOriginal('password'));
+            $activation = $delivery->resultat === self::AFTER_ASSIGNMENT
+                && $identifier && blank($student->getRawOriginal('password'));
             $forgotUrl = route('etudiant.password.request');
             $access = [
                 'identifier' => $identifier,
