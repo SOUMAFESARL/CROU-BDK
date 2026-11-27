@@ -55,7 +55,9 @@
                                             <p style="margin:0 0 12px">Identifiant : <span style="color:#006400">{{ $access['identifier'] }}</span></p>
                                         @endif
                                         <p style="margin:0 0 12px"><a href="{{ $access['loginUrl'] }}" style="{{ $bouton }}">Se connecter à l’espace étudiant</a></p>
-                                        @if($access['activation'])
+                                        @if(!empty($access['temporaryPassword']))
+                                            <p>Mot de passe temporaire : <strong>{{ $access['temporaryPassword'] }}</strong></p>
+                                        @elseif($access['activation'])
                                             <p style="margin:0 0 8px"><a href="{{ $access['passwordUrl'] }}" style="color:#006400">Définir mon mot de passe</a></p>
                                             <p style="margin:0">Ce lien est à usage unique et reste valable {{ $access['expire'] }} minutes.
                                                 Passé ce délai, utilisez <a href="{{ $access['forgotUrl'] }}" style="color:#006400">Mot de passe oublié</a>.</p>

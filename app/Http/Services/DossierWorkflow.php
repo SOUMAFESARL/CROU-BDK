@@ -252,9 +252,9 @@ class DossierWorkflow
         if ($target==='soumis' && $request->etat_dossier==='soumis') return;
         $this->transition($id,$target,Auth::guard('admin')->check()?'admin':'systeme',Auth::guard('admin')->id(),$reason);
     }
-    public function admissionDirecte(DemandeEtudiant $dossier, \App\Models\Chambre $room, Campagne $campaign, ?int $bed = null): string
+    public function admissionDirecte(DemandeEtudiant $dossier, \App\Models\Chambre $room, Campagne $campaign, ?int $bed = null, ?bool $nouveauResident = null, bool $notifierImmediatement = true): string
     {
-        return DB::transaction(function () use ($dossier, $room, $campaign, $bed) {
+        return DB::transaction(function () use ($dossier, $room, $campaign, $bed, $nouveauResident, $notifierImmediatement) {
             $student = Etudiant::whereKey($dossier->etudiant_id)->lockForUpdate()->firstOrFail();
             $dossier = DemandeEtudiant::whereKey($dossier->getKey())->lockForUpdate()->firstOrFail();
             if ($dossier->campagne_id !== $campaign->getKey() || $campaign->statut !== 'active') {
@@ -266,15 +266,28 @@ class DossierWorkflow
             }
             $rules = app(AttributionRules::class);
             $room = $rules->verrouillerChambre($room->getKey());
-            // Étudiant déjà installé : pas d'exigence de statut PMR confirmé.
+            // Le contrôle du logement et la réservation du lit restent communs aux admissions directes.
             $rules->verifier($student, $room, $campaign, null, false);
-            $assignment = AssignationChambre::create([
+            $assignment = new AssignationChambre([
                 'etudiant_id' => $student->getKey(), 'chambre_id' => $room->getKey(),
                 'campagne_id' => $campaign->getKey(),
                 'lit_id' => app(LitService::class)->choisir($room, $bed)->getKey(),
                 'statut' => 'confirmee', 'type_assignation' => 'manuelle',
                 'date_assignation' => $dossier->date_demande ?? now(), 'date_fin' => null,
             ]);
+            if ($nouveauResident !== null) {
+                $conditions = app(Eligibilite\CriteresCampagne::class)
+                    ->conditionsFinancieres($campaign, $nouveauResident ? 'admission' : 'readmission');
+                if (!$nouveauResident) {
+                    $conditions['caution_mois'] = 0;
+                }
+                $assignment->conditionsAdmissionDirecte = $conditions;
+            }
+            $assignment->save();
+            if ($nouveauResident !== null) {
+                $loyer = app(LoyerService::class)->genererLoyerPourAssignation($assignment);
+                app(PaiementAdmissionDirecte::class)->enregistrer($assignment, $loyer, $conditions['avance_mois']);
+            }
             DB::table($dossier->getTable())->where('id_demande', $dossier->getKey())->update([
                 'etat_dossier' => 'attribue_definitif', 'statut_demande' => 'Acceptée',
                 'assignation_id' => $assignment->getKey(), 'updated_at' => now(),
@@ -283,16 +296,36 @@ class DossierWorkflow
                 'statut_inscription' => 'residents', 'is_validation' => true,
                 'date_validation' => now(), 'users_validation' => Auth::guard('admin')->id(),
             ]);
+            $activationCompte = $nouveauResident !== null && blank($student->getRawOriginal('password'));
+            $motDePasseTemporaire = $activationCompte ? \Illuminate\Support\Str::password(16, symbols: false) : null;
+            if ($motDePasseTemporaire !== null) {
+                $student->forceFill([
+                    'password' => \Illuminate\Support\Facades\Hash::make($motDePasseTemporaire),
+                ])->save();
+            }
             DB::table('dossier_transitions')->insert([
                 'demande_id' => $dossier->getKey(), 'ancien_etat' => $dossier->etat_dossier,
                 'nouvel_etat' => 'attribue_definitif', 'acteur_type' => 'admin',
                 'acteur_id' => Auth::guard('admin')->id(),
-                'motif' => 'Régularisation administrative d’un étudiant déjà logé.',
-                'details' => json_encode(['admission_directe' => true, 'assignation_id' => $assignment->getKey(),
+                'motif' => $nouveauResident
+                    ? 'Admission directe d’un nouveau résident.'
+                    : 'Régularisation administrative d’un étudiant déjà logé.',
+                'details' => json_encode(['admission_directe' => true, 'nouveau_resident' => (bool) $nouveauResident, 'activation_compte' => $activationCompte, 'assignation_id' => $assignment->getKey(),
                     'auteur_nom' => Auth::guard('admin')->user()?->name], JSON_UNESCAPED_UNICODE),
                 'created_at' => now(),
             ]);
             $room->actualiserOccupation();
+
+            if ($nouveauResident !== null) {
+                $diffusion = app(\App\Services\AdmissionResultDiffusion::class);
+                $deliveryId = $diffusion->prepareDirect($dossier, $student, $motDePasseTemporaire);
+                if ($notifierImmediatement) {
+                    DB::afterCommit(fn () => app()->terminating(fn () => rescue(
+                        fn () => $diffusion->sendPending(1, $deliveryId),
+                    )));
+                }
+            }
+
             return 'attribue_definitif';
         }, 3);
     }

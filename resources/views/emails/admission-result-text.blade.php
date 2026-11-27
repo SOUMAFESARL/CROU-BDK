@@ -6,7 +6,9 @@ Accès à votre espace étudiant
 Identifiant : {!! $access['identifier'] !!}
 @endif
 Connexion : {!! $access['loginUrl'] !!}
-@if($access['activation'])
+@if(!empty($access['temporaryPassword']))
+Mot de passe temporaire : {!! $access['temporaryPassword'] !!}
+@elseif($access['activation'])
 Définir mon mot de passe : {!! $access['passwordUrl'] !!}
 Ce lien est à usage unique et reste valable {{ $access['expire'] }} minutes.
 @endif

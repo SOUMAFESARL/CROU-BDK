@@ -8,16 +8,16 @@ import { AdminLayout } from '@/components/layout/admin-layout';
 import { ICON } from '@/components/layout/app-sidebar';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { ChampsManquants } from '@/components/ui/champs-manquants';
 import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ChampsManquants } from '@/components/ui/champs-manquants';
+import { champsManquants } from '@/lib/champs-manquants';
 import { Field } from '@/components/ui/field';
 import { FileDrop } from '@/components/ui/file-drop';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
 import { Stepper } from '@/components/ui/stepper';
-import { champsManquants } from '@/lib/champs-manquants';
 import { envoyer } from '@/lib/inertia-form';
 import { avecFormatTelephone, PROPS_TELEPHONE, telephoneObligatoire } from '@/lib/telephone';
 import { cn } from '@/lib/utils';
@@ -28,15 +28,17 @@ type Props = {
     campagnes: { id: string; label: string }[];
     campagneActuelle: string | null;
     genres: Option[];
+    filieres: Option[];
+    niveauxEtude: Option[];
     cites: Option[];
     batiments: (Option & { cite_id: string })[];
-    chambres: { id: string; numero: string; cite_id: string; batiment_id: string; libres: number; disponible: boolean }[];
+    chambres: { id: string; numero: string; cite_id: string; batiment_id: string; libres: number; disponible: boolean; lits: number[] }[];
     aujourdhui: string;
     import: { message: string; lignes: string[] } | null;
     urls: { admissions: string | null; store: string | null; template: string | null; import: string | null };
 };
 
-const COLONNES_OBLIGATOIRES = ['nom_prenoms', 'civilite', 'matricule', 'telephone', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree'];
+const COLONNES_OBLIGATOIRES = ['nom_prenoms', 'civilite', 'matricule', 'telephone', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree', 'email', 'filiere', 'niveau_etude_actuel'];
 
 const schema = (aujourdhui: string) =>
     z.object({
@@ -44,6 +46,10 @@ const schema = (aujourdhui: string) =>
         genre_id: z.string().min(1, 'Choisissez une civilité.'),
         matricule: z.string().trim().min(1, 'Le matricule est obligatoire.').max(100, '100 caractères au maximum.'),
         telephone1: telephoneObligatoire('Le téléphone est obligatoire.'),
+        email1: z.string().trim().min(1, 'Indiquez une adresse e-mail.').email('Indiquez une adresse e-mail valide.').max(255),
+        nouveau_resident: z.boolean(),
+        filiere_code: z.string().min(1, 'Choisissez une filière.'),
+        niveau_etude_actuel_code: z.string().min(1, 'Choisissez un niveau d’études actuel.'),
         cite_id: z.string().min(1, 'Choisissez une cité.'),
         batiment_id: z.string().min(1, 'Choisissez un bâtiment.'),
         chambre_id: z.string().min(1, 'Choisissez une chambre.'),
@@ -60,7 +66,7 @@ type Valeurs = z.output<ReturnType<typeof schema>>;
 
 const ETAPES = ['Identité', 'Logement'];
 const CHAMPS: (keyof Saisie)[][] = [
-    ['name', 'genre_id', 'matricule', 'telephone1'],
+    ['name', 'genre_id', 'matricule', 'telephone1', 'email1', 'filiere_code', 'niveau_etude_actuel_code', 'nouveau_resident'],
     ['cite_id', 'batiment_id', 'chambre_id', 'numero_lit', 'campagne_id', 'date_entree'],
 ];
 
@@ -73,7 +79,7 @@ export default function AdmissionDirecte(props: Props) {
         <AdminLayout title="Admission directe">
             <PageHeader
                 title="Admission directe d’un étudiant"
-                description="Enregistrez un étudiant déjà installé en cité : son dossier résident et son affectation sont confirmés immédiatement, sans demande d’admission."
+                description="Enregistrez un nouveau résident ou régularisez un étudiant déjà installé. Son dossier et son affectation sont confirmés immédiatement."
                 actions={
                     urls.admissions && (
                         <Link
@@ -107,7 +113,7 @@ export default function AdmissionDirecte(props: Props) {
     );
 }
 
-function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, chambres, aujourdhui, urls, url, bloque }: Props & { url: string; bloque: boolean }) {
+function Formulaire({ campagnes, campagneActuelle, genres, filieres, niveauxEtude, cites, batiments, chambres, aujourdhui, urls, url, bloque }: Props & { url: string; bloque: boolean }) {
     const [etape, setEtape] = useState(0);
     const {
         register,
@@ -115,6 +121,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
         handleSubmit,
         setValue,
         setError,
+        clearErrors,
         formState: { errors, isSubmitting },
     } = useForm<Saisie, unknown, Valeurs>({
         resolver: zodResolver(schema(aujourdhui)),
@@ -124,6 +131,10 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
             genre_id: '',
             matricule: '',
             telephone1: '',
+            email1: '',
+            nouveau_resident: false,
+            filiere_code: '',
+            niveau_etude_actuel_code: '',
             cite_id: '',
             batiment_id: '',
             chambre_id: '',
@@ -132,7 +143,13 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
             date_entree: aujourdhui,
         },
     });
-    const [citeId, batimentId] = useWatch({ control, name: ['cite_id', 'batiment_id'] });
+    const [citeId, batimentId, chambreId] = useWatch({ control, name: ['cite_id', 'batiment_id', 'chambre_id'] });
+    const lits = chambres.find((chambre) => chambre.id === chambreId)?.lits ?? [];
+
+    const resetLit = () => {
+        setValue('numero_lit', '');
+        clearErrors('numero_lit');
+    };
 
     // Navigation libre entre les étapes ; l'enregistrement exige les champs obligatoires (`manquants`).
     const allerA = (cible: number) => setEtape(cible);
@@ -141,6 +158,9 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
         genre_id: 'Civilité',
         matricule: 'Matricule',
         telephone1: 'Téléphone',
+        email1: 'E-mail',
+        filiere_code: 'Filière',
+        niveau_etude_actuel_code: 'Niveau d’études actuel',
         cite_id: 'Cité',
         batiment_id: 'Bâtiment',
         chambre_id: 'Chambre',
@@ -165,7 +185,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
             },
         });
 
-    const combobox = (nom: 'genre_id' | 'cite_id' | 'batiment_id' | 'chambre_id' | 'campagne_id', options: { value: string; label: string; description?: string }[], placeholder: string, extra: { disabled?: boolean; onChange?: () => void; recherche?: string } = {}) => (
+    const combobox = (nom: 'genre_id' | 'cite_id' | 'batiment_id' | 'chambre_id' | 'campagne_id' | 'filiere_code', options: { value: string; label: string; description?: string }[], placeholder: string, extra: { disabled?: boolean; onChange?: () => void; recherche?: string } = {}) => (
         <Controller
             control={control}
             name={nom}
@@ -221,13 +241,42 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
                             <Field id="ad-telephone1" label="Téléphone" required error={errors.telephone1?.message}>
                                 <Input id="ad-telephone1" {...PROPS_TELEPHONE} invalid={!!errors.telephone1} {...avecFormatTelephone(register('telephone1'))} />
                             </Field>
+                            <Field id="ad-email1" label="Adresse e-mail" required error={errors.email1?.message}>
+                                <Input id="ad-email1" type="email" autoComplete="email" invalid={!!errors.email1} {...register('email1')} />
+                            </Field>
+                            <Field id="ad-filiere_code" label="Filière" required error={errors.filiere_code?.message}>
+                                {combobox('filiere_code', filieres.map((filiere) => ({ value: filiere.id, label: filiere.name })), 'Sélectionnez une filière')}
+                            </Field>
+                            <Field id="ad-niveau_etude_actuel_code" label="Niveau d’études actuel" required error={errors.niveau_etude_actuel_code?.message}>
+                                <select
+                                    id="ad-niveau_etude_actuel_code"
+                                    {...register('niveau_etude_actuel_code')}
+                                    aria-required="true"
+                                    aria-invalid={!!errors.niveau_etude_actuel_code}
+                                    className="h-11 w-full min-w-0 rounded-brand border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary focus:ring-2 focus:ring-soft focus:outline-none aria-invalid:border-red-500"
+                                >
+                                    <option value="">Sélectionnez un niveau</option>
+                                    {niveauxEtude.map((niveau) => (
+                                        <option key={niveau.id} value={niveau.id}>{niveau.name}</option>
+                                    ))}
+                                </select>
+                            </Field>
                         </div>
+                        <label htmlFor="ad-nouveau_resident" className="flex min-h-11 items-center gap-2 text-sm font-medium text-gray-800">
+                            <input
+                                id="ad-nouveau_resident"
+                                type="checkbox"
+                                className="size-4 accent-primary"
+                                {...register('nouveau_resident')}
+                            />
+                            Nouveau résident
+                        </label>
                     </Section>
                 )}
 
                 {etape === 1 && (
                     <>
-                        <Section icone={BedDouble} titre="Logement occupé" description="Toutes les chambres du bâtiment sélectionné sont listées ; seules celles ayant encore une place libre peuvent être choisies.">
+                        <Section icone={BedDouble} titre="Logement" description="Toutes les chambres du bâtiment sélectionné sont listées ; seules celles ayant encore une place libre peuvent être choisies.">
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <Field id="ad-cite_id" label="Cité" required error={errors.cite_id?.message}>
                                     {combobox('cite_id', cites.map((cite) => ({ value: cite.id, label: cite.name })), 'Sélectionnez une cité', {
@@ -235,6 +284,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
                                         onChange: () => {
                                             setValue('batiment_id', '');
                                             setValue('chambre_id', '');
+                                            resetLit();
                                         },
                                     })}
                                 </Field>
@@ -243,7 +293,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
                                         'batiment_id',
                                         batiments.filter((batiment) => batiment.cite_id === citeId).map((batiment) => ({ value: batiment.id, label: batiment.name })),
                                         citeId ? 'Sélectionnez un bâtiment' : 'Sélectionnez d’abord une cité',
-                                        { disabled: !citeId, recherche: 'Rechercher un bâtiment…', onChange: () => setValue('chambre_id', '') },
+                                        { disabled: !citeId, recherche: 'Rechercher un bâtiment…', onChange: () => { setValue('chambre_id', ''); resetLit(); } },
                                     )}
                                 </Field>
                                 <Field id="ad-chambre_id" label="Chambre" required error={errors.chambre_id?.message}>
@@ -260,11 +310,22 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
                                                 disabled: !chambre.disponible,
                                             })),
                                         batimentId ? 'Sélectionnez une chambre' : 'Sélectionnez d’abord un bâtiment',
-                                        { disabled: !batimentId, recherche: 'Rechercher une chambre…' },
+                                        { disabled: !batimentId, recherche: 'Rechercher une chambre…', onChange: resetLit },
                                     )}
                                 </Field>
-                                <Field id="ad-numero_lit" label="Numéro du lit" error={errors.numero_lit?.message} hint="Facultatif : laissé vide, le premier lit libre est attribué.">
-                                    <Input id="ad-numero_lit" type="number" min={1} placeholder="Premier lit disponible" invalid={!!errors.numero_lit} {...register('numero_lit')} />
+                                <Field id="ad-numero_lit" label="Numéro du lit" error={errors.numero_lit?.message}>
+                                    <select
+                                        id="ad-numero_lit"
+                                        {...register('numero_lit', { onChange: () => clearErrors('numero_lit') })}
+                                        disabled={lits.length === 0}
+                                        aria-invalid={!!errors.numero_lit}
+                                        className="h-11 w-full rounded-brand border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary focus:ring-2 focus:ring-soft focus:outline-none disabled:bg-surface disabled:text-muted aria-invalid:border-red-500"
+                                    >
+                                        <option value="">
+                                            {lits.length ? 'Premier lit disponible' : chambreId ? 'Aucun lit libre' : 'Choisissez une chambre'}
+                                        </option>
+                                        {lits.map((lit) => <option key={lit} value={String(lit)}>Lit {lit}</option>)}
+                                    </select>
                                 </Field>
                             </div>
                         </Section>
@@ -288,7 +349,7 @@ function Formulaire({ campagnes, campagneActuelle, genres, cites, batiments, cha
             </div>
 
             <div className="flex flex-col gap-3 border-t bg-surface/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <span className="text-xs text-muted">Le dossier passe directement à l’état « attribué définitif ».</span>
+                <span className="text-xs text-muted">La chambre et le lit sont confirmés. Les frais prévus sont enregistrés comme réglés.</span>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row">
                     {etape === 0 ? (
                         <>
@@ -374,7 +435,7 @@ function Import({ url, template }: { url: string; template: string | null }) {
                         ))}
                     </div>
                     <p className="mt-1.5 text-xs text-muted">
-                        Seul <code>numero_lit</code> est facultatif.
+                        Les colonnes <code>numero_lit</code> et <code>nouveau_resident</code> sont facultatives. Pour un nouveau résident, choisissez « Oui ».
                     </p>
                     <p className="mt-1.5 text-xs text-muted">
                         Le modèle contient une ligne d’exemple (nom commençant par « EXEMPLE ») : remplacez-la ; si elle reste, elle est ignorée.

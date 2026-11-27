@@ -21,7 +21,7 @@ class AssignationChambreObserver
     public function created(AssignationChambre $assignation)
     {
         // Générer automatiquement le loyer quand une assignation est confirmée
-        if ($assignation->statut === 'confirmee') {
+        if ($assignation->statut === 'confirmee' && $assignation->conditionsAdmissionDirecte === null) {
             $this->loyerService->genererLoyerPourAssignation($assignation);
         }
     }

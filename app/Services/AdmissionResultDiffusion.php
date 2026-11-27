@@ -11,6 +11,7 @@ use App\Models\DemandeEtudiant;
 use App\Models\Etudiant;
 use App\Repositories\Interfaces\ConfigAppRepositoryInterface;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -154,8 +155,42 @@ class AdmissionResultDiffusion
         }
     }
 
+    public function prepareDirect(DemandeEtudiant $dossier, Etudiant $student, ?string $temporaryPassword): int
+    {
+        $config = $this->config->getConfig();
+        if (!self::channels($config)['email']) {
+            return 0;
+        }
+
+        $settings = $config?->admission_sms_templates ?? [];
+        $resultat = AdmissionSmsTemplates::DEFINITIVE;
+        $campagne = Campagne::findOrFail($dossier->campagne_id);
+        $values = [
+            '{{Nom_etudiant}}' => trim((string) $student->name),
+            '{{libelle_campagne}}' => trim((string) $campagne->libelle),
+            '{{annee_campagne}}' => trim((string) $campagne->annee_campagne),
+            '{{lien_plateforme}}' => AdmissionSmsTemplates::platformUrl($config),
+            '{{Email_etudiant}}' => trim((string) $student->email1),
+        ];
+        $formatted = AdmissionSmsTemplates::formatted($settings)[$resultat] ?? null;
+        $identity = ['demande_id' => $dossier->getKey(), 'resultat' => $resultat, 'channel' => 'email'];
+        DB::table(self::TABLE)->insertOrIgnore($identity + [
+            'campagne_id' => $dossier->campagne_id,
+            'destination' => $student->email1,
+            'temporary_password' => $temporaryPassword === null ? null : Crypt::encryptString($temporaryPassword),
+            'subject' => AdmissionEmailTemplates::subjects($settings)[$resultat],
+            'body' => AdmissionSmsTemplates::fill(AdmissionSmsTemplates::resolve($settings)[$resultat], $values),
+            'body_html' => $formatted === null ? null : AdmissionSmsTemplates::fill($formatted, $values, true),
+            'status' => 'pending',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return (int) DB::table(self::TABLE)->where($identity)->value('id');
+    }
+
     /** @return int Nombre de notifications traitées (transmises ou en échec). */
-    public function sendPending(int $limit = 30): int
+    public function sendPending(int $limit = 30, ?int $deliveryId = null, array $dossierIds = []): int
     {
         if (!Schema::hasTable(self::TABLE)) {
             return 0;
@@ -165,7 +200,12 @@ class AdmissionResultDiffusion
         DB::table(self::TABLE)->where('status', 'sending')->where('updated_at', '<', now()->subMinutes(10))
             ->update(['status' => 'uncertain', 'updated_at' => now()]);
 
-        $pending = DB::table(self::TABLE)->where('status', 'pending');
+        $pending = DB::table(self::TABLE)->where('status', 'pending')
+            ->when($deliveryId !== null, fn ($query) => $query->where('id', $deliveryId))
+            ->when($dossierIds !== [], fn ($query) => $query
+                ->whereIn('demande_id', $dossierIds)
+                ->where('channel', 'email')
+                ->where('resultat', AdmissionSmsTemplates::DEFINITIVE));
         if (!(clone $pending)->exists()) {
             return 0;
         }
@@ -217,6 +257,7 @@ class AdmissionResultDiffusion
             $entry->update([
                 'status' => $sent ? 'sent' : 'failed',
                 'sent_at' => $sent ? now() : null,
+                ...($sent && !empty($delivery->temporary_password) ? ['temporary_password' => null] : []),
                 'updated_at' => now(),
             ]);
             $processed++;
@@ -241,8 +282,10 @@ class AdmissionResultDiffusion
         $etudiant = DemandeEtudiant::with('etudiant')->find($delivery->demande_id)?->etudiant;
         // Identifiants envoyés par e-mail : seulement à l'adresse de connexion de l'étudiant.
         $destinataire = $delivery->channel === 'sms' || strcasecmp(trim((string) $etudiant?->email1), $delivery->destination) === 0;
-        $motDePasse = null;
-        if ($etudiant && $destinataire) {
+        $motDePasse = $etudiant && $destinataire
+            ? $this->motDePasseAdmissionDirecte($delivery, $etudiant)
+            : null;
+        if ($motDePasse === null && $etudiant && $destinataire) {
             $id = (string) $etudiant->getKey();
             if ($this->identifiants->aEnvoyer($etudiant)) {
                 $motDePasse = $this->motsDePasse[$id] ??= $this->identifiants->generer();
@@ -261,6 +304,18 @@ class AdmissionResultDiffusion
         return [$etudiant, $motDePasse];
     }
 
+    private function motDePasseAdmissionDirecte(object $delivery, Etudiant $student): ?string
+    {
+        if ($delivery->channel !== 'email' || empty($delivery->temporary_password)
+            || strcasecmp(trim((string) $student->email1), $delivery->destination) !== 0) {
+            return null;
+        }
+
+        $candidate = Crypt::decryptString($delivery->temporary_password);
+
+        return Hash::check($candidate, (string) $student->getRawOriginal('password')) ? $candidate : null;
+    }
+
     private function email(object $delivery): AdmissionResultMail
     {
         $demande = DemandeEtudiant::with('etudiant')->find($delivery->demande_id);
@@ -276,6 +331,7 @@ class AdmissionResultDiffusion
             $forgotUrl = route('etudiant.password.request');
             $access = [
                 'identifier' => $identifier,
+                'temporaryPassword' => $identifier ? $this->motDePasseAdmissionDirecte($delivery, $student) : null,
                 'loginUrl' => route('etudiant.login'),
                 'forgotUrl' => $forgotUrl,
                 'activation' => $activation,

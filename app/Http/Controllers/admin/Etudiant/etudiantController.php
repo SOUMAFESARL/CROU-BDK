@@ -29,6 +29,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
 use ZipArchive;
 use App\Http\Services\AttributionRules;
+use App\Http\Services\LitService;
 
 class etudiantController extends Controller
 {
@@ -49,14 +50,14 @@ class etudiantController extends Controller
     }
 
     /** Admission administrative d'un étudiant déjà logé, sans demande préalable. */
-    public function admissionDirecte()
+    public function admissionDirecte(LitService $lits)
     {
         $campagnes = Campagne::active()->orderByDesc('annee_debut')->get();
         $campagneActuelle = $campagnes->firstWhere('annee_campagne', getAnneeUniversitaire())
             ?? $campagnes->first();
 
         $chambres = Chambre::withDefaultRelations()
-            ->withCount(['assignations as places_occupees' => fn ($query) => $query->mobilisantPlace()])
+            ->with(['assignations' => fn ($query) => $query->mobilisantPlace()->with('lit')])
             ->whereNotNull('numero_chambre')
             ->orderBy('numero_chambre')
             ->get();
@@ -81,14 +82,23 @@ class etudiantController extends Controller
                 ->map(fn ($cite) => ['id' => (string) $cite->id_cite, 'name' => $cite->name])->values(),
             'batiments' => Batiment::query()->where('is_valid', 1)->orderBy('name')->get()
                 ->map(fn ($batiment) => ['id' => (string) $batiment->id_batiment, 'name' => $batiment->name, 'cite_id' => (string) $batiment->cite_id])->values(),
-            'chambres' => $chambres->map(fn (Chambre $chambre) => [
-                'id' => (string) $chambre->id_chambre,
-                'numero' => $chambre->numero_chambre,
-                'cite_id' => (string) $chambre->cite_id,
-                'batiment_id' => (string) $chambre->batiment_id,
-                'libres' => max(0, (int) $chambre->capacite_max - (int) $chambre->places_occupees),
-                'disponible' => $chambre->peutAccueillir(),
-            ])->values(),
+            'filieres' => Filiere::query()->orderBy('name')->get(['id_filiere', 'name'])
+                ->map(fn (Filiere $filiere) => ['id' => (string) $filiere->getKey(), 'name' => $filiere->name])->values(),
+            'niveauxEtude' => NiveauEtude::query()->ordonnes()->get(['id_niveau_etude', 'name'])
+                ->map(fn (NiveauEtude $niveau) => ['id' => (string) $niveau->getKey(), 'name' => $niveau->name])->values(),
+            'chambres' => $chambres->map(function (Chambre $chambre) use ($lits) {
+                $disponibles = $lits->disponibles($chambre, $chambre->assignations);
+
+                return [
+                    'id' => (string) $chambre->id_chambre,
+                    'numero' => $chambre->numero_chambre,
+                    'cite_id' => (string) $chambre->cite_id,
+                    'batiment_id' => (string) $chambre->batiment_id,
+                    'libres' => count($disponibles),
+                    'disponible' => $disponibles !== [],
+                    'lits' => $disponibles,
+                ];
+            })->values(),
             'aujourdhui' => today()->toDateString(),
             'import' => $avertissement ? ['message' => \Illuminate\Support\Str::before((string) $avertissement, ' Certaines lignes'), 'lignes' => $lignesRefusees] : null,
             'urls' => [
@@ -116,13 +126,14 @@ class etudiantController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'genre_id' => ['required', 'integer', Rule::exists('genre', 'id')],
+            'nouveau_resident' => ['sometimes', 'boolean'],
             'matricule' => ['required', 'string', 'max:100', Rule::unique('etudiants', 'matricule')->ignore($existing?->getKey(), 'id_etudiant')],
             'numero_etudiant' => ['nullable', 'string', 'max:100', Rule::unique('etudiants', 'numero_etudiant')->ignore($existing?->getKey(), 'id_etudiant')],
             'date_naissance' => ['nullable', 'date', 'before:today'],
             'lieu_naissance' => ['nullable', 'string', 'max:255'],
             'telephone1' => ['required', Telephone::regle(), Rule::unique('etudiants', 'telephone1')->ignore($existing?->getKey(), 'id_etudiant')],
             'telephone2' => ['nullable', Telephone::regle()],
-            'email1' => ['nullable', 'email', 'max:255', Rule::unique('etudiants', 'email1')->ignore($existing?->getKey(), 'id_etudiant')],
+            'email1' => ['required', 'email', 'max:255', Rule::unique('etudiants', 'email1')->ignore($existing?->getKey(), 'id_etudiant')],
             'email2' => ['nullable', 'email', 'max:255'],
             'nationalite' => ['nullable', 'string', 'max:100'],
             'adresse' => ['nullable', 'string', 'max:255'],
@@ -158,13 +169,15 @@ class etudiantController extends Controller
             'type_hebergement_souhaite' => ['nullable', 'string', 'max:100'],
             'annee_academique_precedent' => ['nullable', 'string', 'max:50'],
             'niveau_etude_precedent_code' => ['nullable', 'string', 'max:100'],
-            'niveau_etude_actuel_code' => ['nullable', 'string', 'max:100'],
-            'filiere_code' => ['nullable', 'string', 'max:100'],
+            'niveau_etude_actuel_code' => ['required', 'string', 'max:100', Rule::exists('niveau_etude', 'id_niveau_etude')],
+            'filiere_code' => ['required', 'string', 'max:100', Rule::exists('filiere', 'id_filiere')],
             'credit_valider' => ['nullable', 'numeric', 'min:0', 'max:'.\App\Models\DemandeEtudiant::CREDITS_PAR_AN],
             'periode' => ['nullable', 'string', 'max:100'],
         ], [
             'matricule.unique' => 'Un étudiant possède déjà ce matricule.',
             'telephone1.unique' => 'Un étudiant possède déjà ce numéro de téléphone.',
+            'filiere_code.required' => 'Choisissez une filière.',
+            'niveau_etude_actuel_code.required' => 'Choisissez un niveau d’études actuel.',
             'email1.unique' => 'Un étudiant possède déjà cette adresse e-mail.',
             'date_entree.before_or_equal' => "La date d'entrée ne peut pas être future.",
         ]);
@@ -190,6 +203,10 @@ class etudiantController extends Controller
                 $existing = Etudiant::whereKey($existing->getKey())->lockForUpdate()->firstOrFail();
                 app(\App\Http\Services\ReadmissionService::class)->ensureCanApply($existing, $campagne);
             }
+            if ($existing && filled($data['email1'] ?? null)) {
+                $existing->update(['email1' => $data['email1']]);
+            }
+
             $etudiant = $existing ?? Etudiant::create([
                 'name' => $data['name'],
                 'genre_id' => $data['genre_id'],
@@ -254,13 +271,13 @@ class etudiantController extends Controller
             ]);
 
             return app(\App\Http\Services\DossierWorkflow::class)->admissionDirecte(
-                $dossier, $chambre, $campagne, $data['numero_lit'] ?? null);
+                $dossier, $chambre, $campagne, $data['numero_lit'] ?? null, (bool) ($data['nouveau_resident'] ?? false));
 
         });
 
         return redirect()
             ->route('admin.hebergement.residents_contrat.admission')
-            ->with('success', 'Étudiant déjà logé enregistré : dossier validé et chambre confirmée.');
+            ->with('success', 'Résident enregistré. Le dossier est validé et l’affectation est confirmée.');
     }
 
     /**
@@ -279,7 +296,7 @@ class etudiantController extends Controller
     }
 
     /** En-têtes du modèle d'import, en français (les anciens en-têtes `name`/`telephone1` restent acceptés à l'import). */
-    private const IMPORT_HEADERS = ['nom_prenoms', 'civilite', 'matricule', 'telephone', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree', 'numero_lit'];
+    private const IMPORT_HEADERS = ['nom_prenoms', 'civilite', 'matricule', 'telephone', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree', 'numero_lit', 'email', 'filiere', 'niveau_etude_actuel', 'nouveau_resident'];
 
     /** Une ligne dont le nom commence par ce préfixe est un exemple : l'import l'ignore. */
     private const IMPORT_EXAMPLE_PREFIX = 'EXEMPLE';
@@ -310,6 +327,10 @@ class etudiantController extends Controller
             'chambre' => $room[2] ?? '101',
             'date_entree' => today()->format('d/m/Y'),
             'numero_lit' => '1',
+            'email' => 'etudiant@example.com',
+            'filiere' => Filiere::query()->orderBy('name')->value('name') ?? '',
+            'niveau_etude_actuel' => NiveauEtude::query()->ordonnes()->value('name') ?? '',
+            'nouveau_resident' => 'Oui',
         ];
     }
 
@@ -335,6 +356,9 @@ class etudiantController extends Controller
             'Genres' => Genre::query()->orderBy('name')->pluck('name')->filter()->unique()->values()->all(),
             'Campagnes' => $campagnes->filter()->unique()->values()->all(),
             'Cites' => $cites->pluck('name')->filter()->unique()->values()->all(),
+            'Filieres' => Filiere::query()->orderBy('name')->pluck('name')->filter()->unique()->values()->all(),
+            'NiveauxEtude' => NiveauEtude::query()->ordonnes()->pluck('name')->filter()->unique()->values()->all(),
+            'NouveauResident' => ['Oui', 'Non'],
         ];
 
         // Listes dépendantes : cité → bâtiments (CITE_n), puis « cité|bâtiment » → chambres (BAT_n),
@@ -404,12 +428,17 @@ class etudiantController extends Controller
         $sheetRows .= '</row>';
         $cols = '<cols><col min="1" max="1" width="32" customWidth="1"/><col min="2" max="2" width="14" customWidth="1"/>'
             . '<col min="3" max="4" width="16" style="1" customWidth="1"/><col min="5" max="8" width="20" customWidth="1"/>'
-            . '<col min="9" max="9" width="14" style="2" customWidth="1"/><col min="10" max="10" width="12" customWidth="1"/></cols>';
+            . '<col min="9" max="9" width="14" style="2" customWidth="1"/><col min="10" max="10" width="12" customWidth="1"/>'
+            . '<col min="11" max="11" width="32" style="1" customWidth="1"/><col min="12" max="13" width="28" customWidth="1"/>'
+            . '<col min="14" max="14" width="22" customWidth="1"/></cols>';
         $validations = [
             'B' => '=Genres',
             'E' => '=Cites',
             'F' => '=INDIRECT("CITE_"&MATCH($E2,Listes!$K$2:$K$1000,0))',
             'G' => '=Campagnes',
+            'L' => '=Filieres',
+            'M' => '=NiveauxEtude',
+            'N' => '=NouveauResident',
             'H' => '=INDIRECT("BAT_"&MATCH($E2&"|"&$F2,Listes!$O$2:$O$1000,0))',
         ];
         // Listes déroulantes à titre de suggestion uniquement : showErrorMessage="0" laisse saisir ou coller
@@ -478,14 +507,17 @@ class etudiantController extends Controller
         }
 
         $colonnes = array_keys($this->normalizeImportRow(array_fill_keys(array_keys($rows[0]), '')));
-        $manquantes = array_values(array_diff(['name', 'genre', 'matricule', 'telephone1', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree'], $colonnes));
+        $manquantes = array_values(array_diff(['name', 'genre', 'matricule', 'telephone1', 'cite', 'batiment', 'campagne', 'chambre', 'date_entree', 'email1', 'filiere_code', 'niveau_etude_actuel_code'], $colonnes));
         if ($manquantes) {
-            $libelles = array_combine(['name', 'genre', 'telephone1'], ['nom_prenoms', 'civilite', 'telephone']);
+            $libelles = [
+                'name' => 'nom_prenoms', 'genre' => 'civilite', 'telephone1' => 'telephone',
+                'email1' => 'email', 'filiere_code' => 'filiere', 'niveau_etude_actuel_code' => 'niveau_etude_actuel',
+            ];
             return back()->withErrors(['fichier' => 'Colonnes manquantes : ' . implode(', ', array_map(fn ($colonne) => $libelles[$colonne] ?? $colonne, $manquantes))
                 . '. Téléchargez le modèle et conservez ses en-têtes.']);
         }
 
-        $successCount = 0;
+        $dossiersEnregistres = [];
         $errors = [];
 
         foreach ($rows as $index => $row) {
@@ -516,7 +548,7 @@ class etudiantController extends Controller
                 'lieu_naissance' => ['nullable', 'string', 'max:255'],
                 'telephone1' => ['required', Telephone::regle(), Rule::unique('etudiants', 'telephone1')->ignore($existing?->getKey(), 'id_etudiant')],
                 'telephone2' => ['nullable', Telephone::regle()],
-                'email1' => ['nullable', 'email', 'max:255', Rule::unique('etudiants', 'email1')->ignore($existing?->getKey(), 'id_etudiant')],
+                'email1' => ['required', 'email', 'max:255', Rule::unique('etudiants', 'email1')->ignore($existing?->getKey(), 'id_etudiant')],
                 'email2' => ['nullable', 'email', 'max:255'],
                 'nationalite' => ['nullable', 'string', 'max:100'],
                 'adresse' => ['nullable', 'string', 'max:255'],
@@ -552,8 +584,9 @@ class etudiantController extends Controller
                 'type_hebergement_souhaite' => ['nullable', 'string', 'max:100'],
                 'annee_academique_precedent' => ['nullable', 'string', 'max:50'],
                 'niveau_etude_precedent_code' => ['nullable', 'string', 'max:100'],
-                'niveau_etude_actuel_code' => ['nullable', 'string', 'max:100'],
-                'filiere_code' => ['nullable', 'string', 'max:100'],
+                'niveau_etude_actuel_code' => ['required', Rule::exists('niveau_etude', 'id_niveau_etude')],
+                'filiere_code' => ['required', Rule::exists('filiere', 'id_filiere')],
+                'nouveau_resident' => ['nullable', 'boolean'],
                 'credit_valider' => ['nullable', 'numeric', 'min:0', 'max:'.\App\Models\DemandeEtudiant::CREDITS_PAR_AN],
                 'periode' => ['nullable', 'string', 'max:100'],
             ], [
@@ -566,6 +599,7 @@ class etudiantController extends Controller
                 'name' => 'nom_prenoms', 'genre_id' => 'civilite', 'telephone1' => 'telephone',
                 'cite_id' => 'cite', 'batiment_id' => 'batiment', 'campagne_id' => 'campagne',
                 'chambre_id' => 'chambre', 'date_entree' => 'date_entree', 'numero_lit' => 'numero_lit',
+                'email1' => 'email', 'filiere_code' => 'filiere', 'niveau_etude_actuel_code' => 'niveau_etude_actuel',
             ]);
 
             if ($validator->fails()) {
@@ -575,14 +609,21 @@ class etudiantController extends Controller
 
             try {
                 $data['numero_lit'] = isset($data['numero_lit']) ? (int) $data['numero_lit'] : null;
-                $this->registerImportedAdmission($data);
-                $successCount++;
+                $dossiersEnregistres[] = $this->registerImportedAdmission($data);
             } catch (\Throwable $exception) {
                 $errors[] = 'Ligne ' . $line . ' : ' . \App\Support\UserFacingErrors::caught($exception);
             }
         }
 
-        $message = $successCount . ' étudiant(s) déjà logé(s) importé(s). Les dossiers et les affectations sont validés automatiquement.';
+        $successCount = count($dossiersEnregistres);
+        if ($successCount > 0) {
+            DB::afterCommit(fn () => app()->terminating(fn () => rescue(
+                fn () => app(\App\Services\AdmissionResultDiffusion::class)
+                    ->sendPending(dossierIds: $dossiersEnregistres),
+            )));
+        }
+
+        $message = $successCount . ' résident(s) importé(s). Les dossiers et les affectations sont validés automatiquement.';
         if (!$errors) {
             return redirect()->route('admin.hebergement.residents_contrat.admission')->with('success', $message);
         }
@@ -592,9 +633,9 @@ class etudiantController extends Controller
         return back()->with('warning', $message);
     }
 
-    private function registerImportedAdmission(array $data): void
+    private function registerImportedAdmission(array $data): string
     {
-        DB::transaction(function () use ($data) {
+        return DB::transaction(function () use ($data) {
             $chambre = app(AttributionRules::class)->verrouillerChambre($data['chambre_id']);
             $placesOccupees = AssignationChambre::mobilisantPlace()->where('chambre_id', $chambre->id_chambre)->count();
 
@@ -618,6 +659,7 @@ class etudiantController extends Controller
                         . "« " . str_replace('_', ' ', (string) $dossierEnCours) . " » pour la campagne {$campagne->annee_campagne}. Traitez-le depuis la liste des admissions."]);
                 }
                 app(\App\Http\Services\ReadmissionService::class)->ensureCanApply($existing, $campagne);
+                $existing->update(['email1' => $data['email1']]);
             }
             $etudiant = $existing ?? Etudiant::create([
                 'name' => $data['name'],
@@ -682,9 +724,11 @@ class etudiantController extends Controller
                 'commentaires' => $data['commentaires'] ?? null,
             ]);
 
-            return app(\App\Http\Services\DossierWorkflow::class)->admissionDirecte(
-                $dossier, $chambre, $campagne, $data['numero_lit'] ?? null);
+            app(\App\Http\Services\DossierWorkflow::class)->admissionDirecte(
+                $dossier, $chambre, $campagne, $data['numero_lit'] ?? null,
+                (bool) ($data['nouveau_resident'] ?? false), notifierImmediatement: false);
 
+            return (string) $dossier->getKey();
         });
     }
 
@@ -697,6 +741,9 @@ class etudiantController extends Controller
             'numéro lit' => 'numero_lit', 'numero lit' => 'numero_lit', 'numéro_lit' => 'numero_lit', 'lit' => 'numero_lit',
             'date_entrée' => 'date_entree',
             'email' => 'email1', 'e-mail' => 'email1', 'annee_academique' => 'campagne',
+            'filiere' => 'filiere_code', 'filière' => 'filiere_code',
+            'niveau_etude_actuel' => 'niveau_etude_actuel_code', 'niveau d’études actuel' => 'niveau_etude_actuel_code',
+            'nouveau résident' => 'nouveau_resident', 'nouveau_résident' => 'nouveau_resident',
             'année académique' => 'campagne', 'campagne_id' => 'campagne', 'chambre' => 'chambre', 'chambre_id' => 'chambre',
             'cité' => 'cite', 'cite' => 'cite', 'cite_id' => 'cite',
             'bâtiment' => 'batiment', 'batiment' => 'batiment', 'batiment_id' => 'batiment',
@@ -749,9 +796,20 @@ class etudiantController extends Controller
         $data['regions_id'] = $this->lookupNamedId(Region::class, $data['region'] ?? null);
         $data['ville_id'] = $this->lookupNamedId(Ville::class, $data['ville'] ?? null);
         $data['departement_code'] = $this->lookupCode(Departement::class, $data['departement_code'] ?? null, 'code_departement');
-        $data['niveau_etude_precedent_code'] = $this->lookupCode(NiveauEtude::class, $data['niveau_etude_precedent_code'] ?? null, 'code_niveau');
-        $data['niveau_etude_actuel_code'] = $this->lookupCode(NiveauEtude::class, $data['niveau_etude_actuel_code'] ?? null, 'code_niveau');
-        $data['filiere_code'] = $this->lookupCode(Filiere::class, $data['filiere_code'] ?? null, 'code_filiere');
+        $data['niveau_etude_precedent_code'] = $this->lookupCode(NiveauEtude::class, $data['niveau_etude_precedent_code'] ?? null, 'id_niveau_etude');
+        $data['niveau_etude_actuel_code'] = $this->lookupCode(NiveauEtude::class, $data['niveau_etude_actuel_code'] ?? null, 'id_niveau_etude');
+        $filiere = $data['filiere_code'] ?? null;
+        $data['filiere_code'] = $this->lookupCode(Filiere::class, $filiere, 'id_filiere');
+        if ($data['filiere_code'] === null && filled($filiere)) {
+            $data['filiere_code'] = Filiere::where('code_filiere', $filiere)->value('id_filiere');
+        }
+        $data['nouveau_resident'] = match (mb_strtolower(trim((string) ($data['nouveau_resident'] ?? '')))) {
+            'oui', 'yes', '1', 'true' => true,
+            '', 'non', 'no', '0', 'false' => false,
+            default => throw ValidationException::withMessages([
+                'nouveau_resident' => 'La colonne nouveau_resident doit contenir Oui ou Non.',
+            ]),
+        };
         foreach (['allergies', 'maladies_chroniques', 'autiste', 'pmr_confirme', 'boursier'] as $booleanField) {
             if (array_key_exists($booleanField, $data)) {
                 $data[$booleanField] = in_array(mb_strtolower(trim((string) $data[$booleanField])), ['oui', 'yes', '1', 'true'], true) ? 1 : 0;

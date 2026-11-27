@@ -41,8 +41,11 @@ class LoyerService
             
             // 2. Vérifier les réductions (bourse, social)
             $reductions = $this->calculerReductions($etudiant);
-            $moisFacturation = now()->month;
-            $anneeFacturation = now()->year;
+            $dateFacturation = $assignation->conditionsAdmissionDirecte !== null
+                ? ($assignation->date_assignation ?? now())
+                : now();
+            $moisFacturation = $dateFacturation->month;
+            $anneeFacturation = $dateFacturation->year;
             // Échéance du calendrier des loyers de la campagne, sinon le 10 du mois.
             $calendrier = app(\App\Services\CalendrierLoyer::class);
             $dateLimitPaiement = $calendrier->echeance($calendrier->de($assignation->campagne), $moisFacturation, $anneeFacturation);
@@ -59,8 +62,11 @@ class LoyerService
             $montantEcheance = $nombreEcheances > 0 ? $montantTotal / $nombreEcheances : $montantTotal;
             
             // 6. Calculer la caution (conditions financières du volet de la demande : admission ou réadmission)
-            $conditions = $this->conditionsFinancieres($assignation);
-            $caution = $this->calculerCaution($montantTotal, $conditions['caution_mois']);
+            $direct = $assignation->conditionsAdmissionDirecte;
+            $conditions = $direct ?? $this->conditionsFinancieres($assignation);
+            $caution = $direct !== null
+                ? round(max(0, $montantTotal) * $conditions['caution_mois'], 2)
+                : $this->calculerCaution($montantTotal, $conditions['caution_mois']);
             
             // 7. Créer le loyer
             $loyer = Loyer::create([
@@ -73,7 +79,9 @@ class LoyerService
                 'montant_total' => $montantTotal + $caution,
                 'caution' => $caution,
                 'frais_inscription' => $this->getFraisInscription($chambre, $conditions['avance_mois']),
-                'annee_universitaire' => $this->getAnneeUniversitaire(),
+                'annee_universitaire' => $direct !== null
+                    ? $assignation->campagne->annee_campagne
+                    : $this->getAnneeUniversitaire(),
                 'periode' => $periode,
                 'nombre_echeances' => $nombreEcheances,
                 'montant_echeance' => $montantEcheance,
@@ -88,8 +96,7 @@ class LoyerService
                 'reduction_sociale' => $reductions['sociale'],
                 'supplement_prestation' => $supplements,
                 'solde_restant' => $montantTotal + $caution,
-                // Aucune pénalité de retard ne s'applique aux loyers.
-                'penalite_journaliere' => 0,
+                'penalite_journaliere' => $this->getPenaliteJournaliere($montantEcheance),
                 'jours_retard_autorises' => 5,
                 'renouvellement_auto' => true,
                 'created_by' => getInfoAdmin()->users->id_user ?? 'system',

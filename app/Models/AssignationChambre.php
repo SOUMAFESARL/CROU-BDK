@@ -44,6 +44,8 @@ class AssignationChambre extends Model
         return $this->belongsTo(Etudiant::class, 'etudiant_id', 'id_etudiant');
     }
 
+    public ?array $conditionsAdmissionDirecte = null;
+
     protected static function boot()
     {
         parent::boot();

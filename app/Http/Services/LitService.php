@@ -4,6 +4,7 @@ namespace App\Http\Services;
 
 use App\Models\Chambre;
 use App\Models\Lit;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -60,12 +61,12 @@ class LitService
     }
 
     /** Lecture seule, également utilisable avant la première attribution d'une chambre. */
-    public function disponibles(Chambre $room): array
+    public function disponibles(Chambre $room, ?Collection $active = null): array
     {
         if (!$room->estActivePourAttribution() || $room->etat !== 'disponible') {
             return [];
         }
-        $active = $room->assignations()->mobilisantPlace()->with('lit')->get();
+        $active ??= $room->assignations()->mobilisantPlace()->with('lit')->get();
         $used = $active->pluck('lit.numero')->filter()->all();
         $numbers = (int) $room->capacite_max > 0 ? range(1, (int) $room->capacite_max) : [];
         $free = array_values(array_diff($numbers, $used));
